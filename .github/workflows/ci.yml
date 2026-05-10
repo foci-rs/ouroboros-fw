@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Rust stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: thumbv7em-none-eabi
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure cargo for private foci-rs deps
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.CARGO_PRIVATE_DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          mkdir -p ~/.cargo
+          printf '[net]\ngit-fetch-with-cli = true\n' >> ~/.cargo/config.toml
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy (embedded)
+        run: cargo clippy --target thumbv7em-none-eabi -- -D warnings
+      - name: cargo build (embedded, release)
+        run: cargo build --target thumbv7em-none-eabi --release

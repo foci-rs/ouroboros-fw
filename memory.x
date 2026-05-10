@@ -1,0 +1,7 @@
+/* STM32H723ZG with Katapult 32KB bootloader (production default) */
+MEMORY
+{
+  FLASH  : ORIGIN = 0x08008000, LENGTH = 992K
+  RAM    : ORIGIN = 0x24000000, LENGTH = 320K
+  CCMRAM : ORIGIN = 0x20000000, LENGTH = 128K
+}
