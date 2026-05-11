@@ -16,13 +16,13 @@ use crate::app_types::TmcSpiDevice;
 use crate::board_config::TMC_CONFIG;
 use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TmcChannelState};
 
-pub(crate) struct OuroborosBackend<'a> {
-    pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice>,
+pub(crate) struct OuroborosBackend<'a, 'spi> {
+    pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     pub(crate) enable_pin: &'a mut Output<'static>,
     pub(crate) tmc_state: &'static TmcChannelState,
 }
 
-impl<'a> foci_firmware::commission::CommissioningBackend for OuroborosBackend<'a> {
+impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBackend<'a, 'spi> {
     type Error = foci_tmc4671::spi::SpiError<
         embedded_hal_bus::spi::DeviceError<embassy_stm32::spi::Error, core::convert::Infallible>,
     >;

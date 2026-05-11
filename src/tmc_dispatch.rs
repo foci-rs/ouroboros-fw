@@ -24,7 +24,7 @@ use crate::state::trace::trace_buf;
 /// Returns `Ok(())` on success, `Err(())` if the caller should enter shutdown.
 pub(crate) async fn handle_tmc_request(
     req: TmcRequest,
-    tmc: &mut Tmc4671Spi<TmcSpiDevice>,
+    tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
 ) -> Result<(), ()> {
     let channel = req.channel;
     if channel != 0 {

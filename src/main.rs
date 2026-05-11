@@ -24,6 +24,7 @@ mod platform_impl;
 mod state;
 mod stepper_pins;
 mod tmc_dispatch;
+mod tmc_mux;
 mod transport;
 mod trigger_domain;
 mod usb_task;
@@ -35,14 +36,13 @@ mod app {
     use embassy_stm32::spi::Spi;
     use embassy_stm32::wdg::IndependentWatchdog;
     use embassy_stm32::{bind_interrupts, peripherals};
-    use embedded_hal_bus::spi::ExclusiveDevice;
     use foci_klipper::state::State;
     use foci_tmc4671::spi::Tmc4671Spi;
     use rtic_monotonics::fugit::ExtU64;
     use rtic_monotonics::stm32::prelude::*;
     use rtic_sync::channel::Receiver;
 
-    use crate::app_types::{CycleDelay, TmcSpiDevice};
+    use crate::app_types::TmcSpiDevice;
     use crate::helpers::lifecycle::*;
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
@@ -99,10 +99,10 @@ mod app {
         )
     }
 
-    fn ouroboros_backend<'a>(
-        tmc: &'a mut Tmc4671Spi<TmcSpiDevice>,
+    fn ouroboros_backend<'a, 'spi>(
+        tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
         enable_pin: &'a mut Output<'static>,
-    ) -> OuroborosBackend<'a> {
+    ) -> OuroborosBackend<'a, 'spi> {
         OuroborosBackend {
             tmc,
             enable_pin,
@@ -132,7 +132,7 @@ mod app {
 
     #[local]
     struct Local {
-        tmc: Tmc4671Spi<TmcSpiDevice>,
+        tmc_mux: crate::tmc_mux::TmcSpiMux,
         tmc_enable: Output<'static>,
         tmc_rx: Receiver<'static, TmcRequest, TMC_CHANNEL_SIZE>,
         wdg: IndependentWatchdog<'static, peripherals::IWDG1>,
@@ -186,11 +186,9 @@ mod app {
             Irqs, spi_config,
         );
 
-        // PD0: channel-0 TMC4671 chip select (active low).
-        let spi_cs = Output::new(p.PD0, Level::High, Speed::VeryHigh);
-        let spi_dev = ExclusiveDevice::new(spi2, spi_cs, CycleDelay)
-            .expect("ExclusiveDevice::new is infallible");
-        let tmc = Tmc4671Spi::new(spi_dev);
+        let spi_cs0 = Output::new(p.PD0, Level::High, Speed::VeryHigh);
+        let spi_cs1 = Output::new(p.PD2, Level::High, Speed::VeryHigh);
+        let tmc_mux = crate::tmc_mux::TmcSpiMux::new(spi2, spi_cs0, spi_cs1);
 
         // TMC register request channel
         let (tmc_tx, tmc_rx) = ctx.local.tmc_channel.split();
@@ -272,7 +270,7 @@ mod app {
                 app_state: State::new(),
             },
             Local {
-                tmc,
+                tmc_mux,
                 tmc_enable,
                 tmc_rx,
                 wdg,
@@ -303,9 +301,23 @@ mod app {
     /// rather than only on USB receive — Klipper sends queue_step commands
     /// ahead of time and expects the MCU to process them at the scheduled
     /// clock values, even when no USB traffic is arriving.
-    #[task(priority = 1, shared = [app_state], local = [tmc, tmc_enable, tmc_rx])]
+    #[task(priority = 1, shared = [app_state], local = [tmc_mux, tmc_enable, tmc_rx])]
     async fn tmc_control(mut ctx: tmc_control::Context) {
-        let tmc = ctx.local.tmc;
+        let Some(device) = ctx.local.tmc_mux.device(0) else {
+            defmt::error!("Ouroboros TMC channel 0 is not available");
+            ctx.shared.app_state.lock(|state| {
+                if crate::firmware_ctx::enter_shutdown(state) {
+                    ::ankyra::klipper_shutdown_from!(
+                        &mut crate::_ankyra_config::Sender,
+                        "Invalid TMC channel",
+                        read_tim5(),
+                    );
+                }
+            });
+            return;
+        };
+        let mut tmc = Tmc4671Spi::new(device);
+        let tmc = &mut tmc;
         let enable_pin = ctx.local.tmc_enable;
         let rx = ctx.local.tmc_rx;
 

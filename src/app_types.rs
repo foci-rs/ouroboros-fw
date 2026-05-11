@@ -5,10 +5,8 @@
 //! focused on the RTIC wiring. The `Pins` wire enumeration moved to
 //! `crate::ankyra::enumerations` during the ankyra migration (Task 8a).
 
-use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async as AsyncMode;
 use embassy_stm32::spi::Spi;
-use embedded_hal_bus::spi::ExclusiveDevice;
 
 /// SPI bus type for TMC4671 communication.
 pub type TmcSpiBus = Spi<'static, AsyncMode, embassy_stm32::spi::mode::Master>;
@@ -27,5 +25,5 @@ impl embedded_hal_async::delay::DelayNs for CycleDelay {
     }
 }
 
-/// TMC4671 SPI device with exclusive bus access and software CS.
-pub type TmcSpiDevice = ExclusiveDevice<TmcSpiBus, Output<'static>, CycleDelay>;
+/// Selected TMC4671 SPI device borrowed from the Ouroboros mux.
+pub type TmcSpiDevice<'a> = crate::tmc_mux::SelectedTmcDevice<'a>;

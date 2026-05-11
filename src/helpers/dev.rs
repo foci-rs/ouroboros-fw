@@ -19,7 +19,7 @@ use crate::board_config::TMC_CONFIG;
 /// With 50 pole pairs, one mechanical revolution = 50 electrical
 /// cycles. Each electrical cycle sweeps PHI_E_EXT from 0 to 65535.
 /// Uses whatever voltage/mode settings were configured by tmc_init.
-pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice>, revolutions: u8) {
+pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolutions: u8) {
     let total_steps = revolutions as u32 * 50 * 256; // 256 microsteps per e-cycle
     defmt::info!(
         "Spinning {} revolutions ({} steps)",
@@ -47,7 +47,7 @@ pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice>, revolutions
 ///
 /// Register values verified against TMC4671-LA datasheet rev 2.08.
 pub(crate) async fn tmc_enter_openloop(
-    tmc: &mut Tmc4671Spi<TmcSpiDevice>,
+    tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     enable_pin: &mut Output<'static>,
 ) {
     // --- ADC calibration (inlined from former tmc_adc_calibrate) ---
