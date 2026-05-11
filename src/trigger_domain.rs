@@ -7,21 +7,23 @@
 //! the subsystem `state/*` modules makes the coordination surface
 //! inspectable independently of RTIC's macro expansion.
 
-use crate::state::stepper::{ISR_STEPPER, STEP_QUEUE};
+use crate::state::stepper::{isr_stepper, step_queue};
 use foci_firmware::state::trsync::HOMING_TRIGGERED;
 
 // ---- TriggerDomain: unified trsync/endstop/stepper-stop resource ----
 
 /// Physical stepper indices that drive real motors via TIM5 CC1.
-/// The current compile-only scaffold drives channel 0 physically.
-pub(crate) const PHYSICAL_STEPPER_INDICES: &[usize] = &[0];
+/// Ouroboros production-v1 has two physical stepper channels.
+pub(crate) const PHYSICAL_STEPPER_INDICES: &[usize] = &[0, 1];
 
-fn tmc_state() -> &'static foci_firmware::state::tmc::TmcChannelState {
-    foci_firmware::state::tmc::tmc_channel0()
+fn tmc_state(channel: u8) -> Option<&'static foci_firmware::state::tmc::TmcChannelState> {
+    foci_firmware::state::tmc::tmc_channel(channel)
 }
 
-fn stepper_state() -> &'static foci_firmware::state::stepper::StepperChannelState {
-    foci_firmware::state::stepper::stepper_channel0()
+fn stepper_state(
+    channel: u8,
+) -> Option<&'static foci_firmware::state::stepper::StepperChannelState> {
+    foci_firmware::state::stepper::stepper_channel(channel)
 }
 
 /// Unified resource owning all trsync, endstop, and stepper-stop state.
@@ -63,8 +65,8 @@ impl TriggerDomain {
     pub(crate) fn set_timer_active(&mut self, stepper_idx: usize, active: bool) {
         self.stepper_stop[stepper_idx].timer_active = active;
         // Mirror to P1-readable atomic for physical steppers
-        if stepper_idx == 0 {
-            stepper_state()
+        if let Some(state) = stepper_state(stepper_idx as u8) {
+            state
                 .timer_active_mirror
                 .store(active, core::sync::atomic::Ordering::Relaxed);
         }
@@ -166,8 +168,7 @@ pub(crate) static mut TRIGGER_DOMAIN: core::mem::MaybeUninit<TriggerDomain> =
 /// Equivalent to P3 ceiling since P3 is the highest application priority.
 /// Callable from P2 command handlers and P3 ISR.
 ///
-/// Uses `addr_of_mut!` to avoid the `static_mut_refs` lint (matching the
-/// `STEP_QUEUE` access pattern in the existing codebase).
+/// Uses `addr_of_mut!` to avoid the `static_mut_refs` lint.
 #[inline]
 pub(crate) fn with_trigger_domain<F, R>(f: F) -> R
 where
@@ -198,27 +199,52 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize) {
     if !PHYSICAL_STEPPER_INDICES.contains(&stepper_idx) {
         return;
     }
+    let channel = stepper_idx as u8;
+    let Some(tmc_state) = tmc_state(channel) else {
+        return;
+    };
+    let Some(channel_stepper_state) = stepper_state(channel) else {
+        return;
+    };
     let tim5 = embassy_stm32::pac::TIM5;
-    // 1. Disable CC1 interrupt — quiesce P3 step timer
-    tim5.dier().modify(|w| w.set_ccie(0, false));
-    tim5.sr().modify(|w| w.set_ccif(0, false));
-    // 2. Clear step interval
-    stepper_state().interval.store(0, Relaxed);
-    tmc_state().pid_error_sums_clear.store(true, Relaxed);
+    let other_active = PHYSICAL_STEPPER_INDICES
+        .iter()
+        .copied()
+        .filter(|&idx| idx != stepper_idx)
+        .any(|idx| {
+            stepper_state(idx as u8)
+                .map(|state| state.timer_active_mirror.load(Relaxed))
+                .unwrap_or(false)
+        });
+    // 1. Disable CC1 only when this stop leaves no other channel active.
+    if !other_active {
+        tim5.dier().modify(|w| w.set_ccie(0, false));
+        tim5.sr().modify(|w| w.set_ccif(0, false));
+    }
+    // 2. Clear channel-local TMC/stepper atomics.
+    tmc_state.motor_armed.store(false, Relaxed);
+    channel_stepper_state.interval.store(0, Relaxed);
+    channel_stepper_state
+        .timer_active_mirror
+        .store(false, Relaxed);
+    tmc_state.pid_error_sums_clear.store(true, Relaxed);
     // 3. Reset ISR stepper engine state (clear stale partial segment)
-    // SAFETY: ISR_STEPPER is exclusively touched by the P3 step-timer IRQ,
-    // which is quiesced by the CC1IE disable above. Sole accessor here.
+    // SAFETY: ISR stepper state is exclusively touched by the P3 step-timer
+    // IRQ. If another channel is still active, the stopped channel is first
+    // gated by `motor_armed=false`, so the ISR will skip this channel.
     unsafe {
-        (*core::ptr::addr_of_mut!(ISR_STEPPER)).reset();
+        if let Some(stepper) = isr_stepper(channel) {
+            stepper.reset();
+        }
     }
     // 4. Drain queue.
     //
-    // SAFETY: STEP_QUEUE is a `heapless::spsc::Queue` — single-producer
+    // SAFETY: The step queue is a `heapless::spsc::Queue` — single-producer
     // (P2 `queue_step_move`), single-consumer (P3 step-timer IRQ). The P3
-    // consumer is quiesced by the CC1IE disable above; here we act as the
-    // consumer and call `dequeue()`. The SPSC implementation supports
-    // concurrent producer/consumer access without a lock, so a P2 enqueue
-    // that races this drain is well-defined.
+    // consumer is gated from this channel by `motor_armed=false`; here we act
+    // as the channel's consumer and call `dequeue()`. The SPSC implementation
+    // supports concurrent producer/consumer access without a lock, so a P2
+    // enqueue that races this drain is well-defined.
     //
     // Caller invariants for entries that survive the drain (i.e. P2
     // enqueues completing after the loop exits):
@@ -230,14 +256,14 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize) {
     //   gets processed at the next motor enable (against the freshly-zeroed
     //   channel position applied by `apply_stepper_post_action_state`) or is
     //   drained again by the next `stepper_stop_from_p1`.
-    unsafe { while (*core::ptr::addr_of_mut!(STEP_QUEUE)).dequeue().is_some() {} }
-    // 5. Reset direction GPIO (PD3) to known low state.
-    let gpio_d = embassy_stm32::pac::GPIOD;
-    gpio_d
-        .odr()
-        .modify(|w| w.set_odr(3, embassy_stm32::pac::gpio::vals::Odr::LOW));
-    stepper_state().direction.store(true, Relaxed); // Forward = default
-    // 6. Reset STEP GPIO (PD4) to LOW.
+    while unsafe {
+        step_queue(channel)
+            .map(|queue| queue.dequeue().is_some())
+            .unwrap_or(false)
+    } {}
+    // 5. Reset direction state to the default forward value.
+    channel_stepper_state.direction.store(true, Relaxed);
+    // 6. Reset STEP/DIR GPIOs to LOW.
     //
     // Full-mode scheduling relies on the ISR toggling from a known
     // starting state: the first event of each segment must drive STEP
@@ -245,7 +271,5 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize) {
     // segment ended mid-pulse (shutdown or stop between step and unstep
     // events) the pin could still be HIGH, which would flip the parity
     // for the next segment and lose the first motor step.
-    gpio_d
-        .odr()
-        .modify(|w| w.set_odr(4, embassy_stm32::pac::gpio::vals::Odr::LOW));
+    let _ = crate::stepper_pins::reset_idle(channel);
 }

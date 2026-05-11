@@ -22,6 +22,7 @@ mod helpers;
 mod interrupts;
 mod platform_impl;
 mod state;
+mod stepper_pins;
 mod tmc_dispatch;
 mod transport;
 mod trigger_domain;
@@ -45,7 +46,6 @@ mod app {
     use crate::helpers::lifecycle::*;
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
-    use crate::state::stepper::*;
     use crate::state::tmc::*;
     use crate::state::trace::*;
     use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
@@ -468,7 +468,7 @@ mod app {
                     tmc_state()
                         .commission_in_flight
                         .store(false, core::sync::atomic::Ordering::Relaxed);
-                    stepper_stop_from_p1();
+                    stepper_stop_from_p1(0);
                     shutdown_handled = true;
                 }
                 Mono::delay(1.millis()).await;
@@ -507,7 +507,7 @@ mod app {
                 tmc_state().flux_filter_hz.store(0, R);
                 tmc_state().torque_filter_hz.store(0, R);
                 // Reset hardware stepper state.
-                stepper_stop_from_p1();
+                stepper_stop_from_p1(0);
                 stepper_state()
                     .position
                     .store(0, core::sync::atomic::Ordering::Relaxed);
@@ -598,7 +598,7 @@ mod app {
                                 &mut motor_enabled,
                                 &mut stored_gains,
                             );
-                            apply_stepper_post_action(actions.stepper, &mut state);
+                            apply_stepper_post_action(actions.stepper, &mut state, 0);
                         }
                         emit_terminal_reply(reply);
                     }
@@ -679,13 +679,14 @@ mod app {
                                 apply_stepper_post_action(
                                     foci_firmware::commission_dispatch::StepperPostAction::ArmZeroPosition,
                                     &mut state,
+                                    0,
                                 );
                             }
 
                             defmt::info!("Motor enabled (calibrated, step/dir armed)");
                         } else {
                             // Disable: stop stepping first, then kill motor electrically.
-                            stepper_stop_from_p1();
+                            stepper_stop_from_p1(0);
                             {
                                 let mut backend = ouroboros_backend(tmc, enable_pin);
                                 let mut state = dispatch_state(
@@ -1038,7 +1039,7 @@ mod app {
             // the fault to Klipper so the host knows the MCU is down.
             if TMC_DISABLE_SIGNAL.try_take().is_some() {
                 // Stop hardware stepper immediately
-                stepper_stop_from_p1();
+                stepper_stop_from_p1(0);
                 FAULT_ACTIVE.store(false, core::sync::atomic::Ordering::Relaxed);
 
                 motor_enabled = false;
@@ -1251,6 +1252,225 @@ mod app {
         }
     }
 
+    #[inline]
+    fn step_clock_is_due(clock: u32, now: u32) -> bool {
+        (clock as i32).wrapping_sub(now as i32) <= 0
+    }
+
+    fn program_next_step_compare(
+        next_event_clocks: &[Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        let tim5 = embassy_stm32::pac::TIM5;
+        if let Some(due) = foci_firmware::stepper_runtime::earliest_due(next_event_clocks) {
+            arm_step_timer(due.clock);
+        } else {
+            tim5.dier().modify(|w| w.set_ccie(0, false));
+        }
+    }
+
+    fn clear_step_channel(
+        channel: u8,
+        next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        use core::sync::atomic::Ordering::Relaxed;
+
+        let idx = channel as usize;
+        if idx < next_event_clocks.len() {
+            next_event_clocks[idx] = None;
+        }
+        if let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) {
+            stepper_state.interval.store(0, Relaxed);
+            stepper_state.timer_active_mirror.store(false, Relaxed);
+        }
+        if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
+            tmc_state.pid_error_sums_clear.store(true, Relaxed);
+        }
+        with_trigger_domain(|td| {
+            td.set_timer_active(idx, false);
+        });
+    }
+
+    fn fail_step_channel_deadline(
+        channel: u8,
+        next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
+            tmc_state
+                .motor_armed
+                .store(false, core::sync::atomic::Ordering::Relaxed);
+        }
+        clear_step_channel(channel, next_event_clocks);
+        // SAFETY: ISR stepper state is only accessed from the P3 TIM5 ISR
+        // for this channel. P3 tasks cannot preempt each other on Cortex-M.
+        unsafe {
+            if let Some(stepper) = crate::state::stepper::isr_stepper(channel) {
+                stepper.reset();
+            }
+        }
+        let _ = crate::stepper_pins::reset_idle(channel);
+        TMC_DISABLE_SIGNAL.signal(());
+    }
+
+    fn channel_stepper_ready(channel: u8) -> bool {
+        use core::sync::atomic::Ordering::Relaxed;
+
+        let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
+            return false;
+        };
+        let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
+            return false;
+        };
+        tmc_state.motor_armed.load(Relaxed) && stepper_state.timer_active_mirror.load(Relaxed)
+    }
+
+    fn load_next_step_move(
+        channel: u8,
+        next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        use core::sync::atomic::Ordering::Relaxed;
+
+        let idx = channel as usize;
+        if !channel_stepper_ready(channel) {
+            next_event_clocks[idx] = None;
+            return;
+        }
+        let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
+            clear_step_channel(channel, next_event_clocks);
+            return;
+        };
+        let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
+            clear_step_channel(channel, next_event_clocks);
+            return;
+        };
+
+        // SAFETY: ISR stepper state is only accessed from this P3 ISR for
+        // this channel. P3 tasks cannot preempt each other on Cortex-M.
+        let Some(stepper) = (unsafe { crate::state::stepper::isr_stepper(channel) }) else {
+            clear_step_channel(channel, next_event_clocks);
+            return;
+        };
+        if stepper.has_active_segment() {
+            if next_event_clocks[idx].is_none() {
+                next_event_clocks[idx] = Some(stepper.next_step_clock());
+            }
+            return;
+        }
+
+        // SAFETY: P3 is the sole consumer of this channel's queue. P3 ISRs
+        // cannot preempt each other on Cortex-M.
+        let next_move =
+            unsafe { crate::state::stepper::step_queue(channel).and_then(|queue| queue.dequeue()) };
+        let Some(move_) = next_move else {
+            clear_step_channel(channel, next_event_clocks);
+            return;
+        };
+
+        let dir_changed = stepper.load_move(move_);
+        stepper_state
+            .interval
+            .store(stepper.current_interval(), Relaxed);
+        if crate::stepper_pins::set_dir(channel, stepper.dir_state()).is_err() {
+            fail_step_channel_deadline(channel, next_event_clocks);
+            return;
+        }
+        stepper_state.direction.store(stepper.dir_state(), Relaxed);
+        if dir_changed {
+            tmc_state.feedforward_reset.store(true, Relaxed);
+        }
+
+        let tim5 = embassy_stm32::pac::TIM5;
+        let now = tim5.cnt().read();
+        let scheduled = stepper.next_step_clock();
+        match stepper.check_deadline(scheduled, now, CLOCK_FREQ) {
+            Ok(compare) => {
+                let immediate = compare != scheduled;
+                if immediate {
+                    stepper.rebase_next_step_clock(compare);
+                    next_event_clocks[idx] = Some(now);
+                } else {
+                    next_event_clocks[idx] = Some(compare);
+                }
+            }
+            Err(_) => fail_step_channel_deadline(channel, next_event_clocks),
+        }
+    }
+
+    fn process_due_step_event(
+        channel: u8,
+        next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        use core::sync::atomic::Ordering::Relaxed;
+        use foci_klipper::stepper::{StepEventResult, StepPhase};
+
+        let idx = channel as usize;
+        if !channel_stepper_ready(channel) {
+            next_event_clocks[idx] = None;
+            return;
+        }
+        let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
+            clear_step_channel(channel, next_event_clocks);
+            return;
+        };
+
+        // SAFETY: ISR stepper state is only accessed from this P3 ISR for
+        // this channel. P3 tasks cannot preempt each other on Cortex-M.
+        let Some(stepper) = (unsafe { crate::state::stepper::isr_stepper(channel) }) else {
+            clear_step_channel(channel, next_event_clocks);
+            return;
+        };
+        if !stepper.has_active_segment() {
+            next_event_clocks[idx] = None;
+            load_next_step_move(channel, next_event_clocks);
+            return;
+        }
+
+        if crate::stepper_pins::toggle_step(channel).is_err() {
+            fail_step_channel_deadline(channel, next_event_clocks);
+            return;
+        }
+
+        match stepper.step_event() {
+            StepEventResult::ScheduleNext { clock, phase } => {
+                let is_step = matches!(phase, StepPhase::Step);
+                if is_step {
+                    let dir = if stepper.dir_state() { 1i32 } else { -1i32 };
+                    stepper_state.position.fetch_add(dir, Relaxed);
+                }
+                stepper_state
+                    .interval
+                    .store(stepper.current_interval(), Relaxed);
+                let now = embassy_stm32::pac::TIM5.cnt().read();
+                match stepper.check_deadline(clock, now, CLOCK_FREQ) {
+                    Ok(compare) => {
+                        let immediate = compare != clock;
+                        if immediate && !is_step {
+                            stepper.rebase_next_step_clock(compare);
+                        }
+                        next_event_clocks[idx] = Some(if immediate { now } else { compare });
+                    }
+                    Err(_) => fail_step_channel_deadline(channel, next_event_clocks),
+                }
+            }
+            StepEventResult::NeedMove => {
+                next_event_clocks[idx] = None;
+                load_next_step_move(channel, next_event_clocks);
+            }
+        }
+    }
+
+    fn refresh_step_channels(
+        next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
+            let channel = idx as u8;
+            if !channel_stepper_ready(channel) {
+                next_event_clocks[idx] = None;
+            } else if next_event_clocks[idx].is_none() {
+                load_next_step_move(channel, next_event_clocks);
+            }
+        }
+    }
+
     /// P2 software task: clear TriggerDomain timer_active after P1 stop.
     ///
     /// Spawned by `stepper_stop_from_p1()`. P1 performs the physical
@@ -1258,9 +1478,9 @@ mod app {
     /// updates the authoritative flag so `reset_step_clock` and
     /// `arm_check` see the correct state.
     #[task(priority = 2)]
-    async fn stop_check(_ctx: stop_check::Context) {
+    async fn stop_check(_ctx: stop_check::Context, channel: u8) {
         with_trigger_domain(|td| {
-            td.set_timer_active(0, false);
+            td.set_timer_active(channel as usize, false);
         });
     }
 
@@ -1269,21 +1489,28 @@ mod app {
     /// Spawned by P1 after calibration/enable completion. P1 must never
     /// enter TriggerDomain — this task crosses the boundary at P2.
     #[task(priority = 2)]
-    async fn arm_check(_ctx: arm_check::Context) {
+    async fn arm_check(_ctx: arm_check::Context, channel: u8) {
         with_trigger_domain(|td| {
-            if !tmc_state()
+            let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
+                return;
+            };
+            if !tmc_state
                 .motor_armed
                 .load(core::sync::atomic::Ordering::Relaxed)
-                || td.timer_active(0)
+                || td.timer_active(channel as usize)
             {
                 return;
             }
 
             // SAFETY: P2 is the sole producer while the timer is inactive.
-            let queue_has_moves = unsafe { !(*core::ptr::addr_of_mut!(STEP_QUEUE)).is_empty() };
+            let queue_has_moves = unsafe {
+                crate::state::stepper::step_queue(channel)
+                    .map(|queue| !queue.is_empty())
+                    .unwrap_or(false)
+            };
             if queue_has_moves {
-                arm_step_timer(read_tim5().wrapping_add(1));
-                td.set_timer_active(0, true);
+                arm_step_timer_if_earlier(read_tim5().wrapping_add(1));
+                td.set_timer_active(channel as usize, true);
             }
         });
     }
@@ -1292,10 +1519,16 @@ mod app {
     ///
     /// Dequeues moves from SPSC consumer, toggles STEP GPIO, schedules
     /// next compare. Same priority as USB OTG and fault EXTI (P3).
-    #[task(binds = TIM5, priority = 3)]
-    fn step_timer_irq(_ctx: step_timer_irq::Context) {
+    #[task(
+        binds = TIM5,
+        priority = 3,
+        local = [
+            next_event_clocks: [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT] =
+                [None; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+        ],
+    )]
+    fn step_timer_irq(ctx: step_timer_irq::Context) {
         use core::sync::atomic::Ordering::Relaxed;
-        use foci_klipper::stepper::StepEventResult;
 
         let tim5 = embassy_stm32::pac::TIM5;
 
@@ -1433,172 +1666,38 @@ mod app {
             }
         }
 
-        // --- CC1: step timer (existing logic) ---
+        // --- CC1: step timer ---
         // Skip CC1 if the flag is not set, or if CC2 trigger processing
-        // disabled CC1 (stepper stop) — prevents one extra step after trigger.
+        // disabled CC1 because no channel remains active.
         if !tim5.sr().read().ccif(0) || !tim5.dier().read().ccie(0) {
             return;
         }
-        // Clear CC1 interrupt flag
         tim5.sr().modify(|w| w.set_ccif(0, false));
 
-        // Check gates
+        let next_event_clocks = ctx.local.next_event_clocks;
         if FAULT_ACTIVE.load(Relaxed) {
+            *next_event_clocks = [None; crate::state::stepper::STEPPER_CHANNEL_COUNT];
+            tim5.dier().modify(|w| w.set_ccie(0, false));
             return;
         }
-        if !tmc_state().motor_armed.load(Relaxed) {
-            return;
-        }
 
-        // SAFETY: ISR_STEPPER is only accessed from this P3 ISR.
-        // P3 tasks cannot preempt each other on Cortex-M.
-        let stepper = unsafe { &mut *core::ptr::addr_of_mut!(ISR_STEPPER) };
-
-        let gpio_d = embassy_stm32::pac::GPIOD;
-
+        let mut budget = foci_firmware::stepper_runtime::StepIrqBudget::new();
         loop {
-            if !stepper.has_active_segment() {
-                // Need a new move from the queue
-                // SAFETY: P3 is the sole consumer of the queue.
-                // P3 ISRs cannot preempt each other on Cortex-M.
-                match unsafe { (*core::ptr::addr_of_mut!(STEP_QUEUE)).dequeue() } {
-                    Some(m) => {
-                        let dir_changed = stepper.load_move(m);
-                        stepper_state()
-                            .interval
-                            .store(stepper.current_interval(), Relaxed);
-                        let dir_val = if stepper.dir_state() {
-                            embassy_stm32::pac::gpio::vals::Odr::HIGH
-                        } else {
-                            embassy_stm32::pac::gpio::vals::Odr::LOW
-                        };
-                        gpio_d.odr().modify(|w| w.set_odr(3, dir_val));
-                        stepper_state()
-                            .direction
-                            .store(stepper.dir_state(), Relaxed);
-                        if dir_changed {
-                            tmc_state().feedforward_reset.store(true, Relaxed);
-                        }
-                    }
-                    None => {
-                        // Queue empty: disarm timer, go idle
-                        tim5.dier().modify(|w| w.set_ccie(0, false));
-                        stepper_state().interval.store(0, Relaxed);
-                        tmc_state().pid_error_sums_clear.store(true, Relaxed);
-                        with_trigger_domain(|td| {
-                            td.set_timer_active(0, false);
-                        });
-                        return;
-                    }
-                }
-
-                // Check deadline for the first step of this segment
-                let now = tim5.cnt().read();
-                let scheduled = stepper.next_step_clock();
-                match stepper.check_deadline(scheduled, now, CLOCK_FREQ) {
-                    Ok(compare) => {
-                        let immediate = compare != scheduled;
-                        if immediate {
-                            stepper.rebase_next_step_clock(compare);
-                        }
-                        tim5.ccr(0).write_value(compare);
-                        if !immediate {
-                            return;
-                        }
-                    }
-                    Err(_) => {
-                        tim5.dier().modify(|w| w.set_ccie(0, false));
-                        with_trigger_domain(|td| {
-                            td.set_timer_active(0, false);
-                        });
-                        TMC_DISABLE_SIGNAL.signal(());
-                        defmt::error!("Stepper too far in past");
-                        return;
-                    }
-                }
-            } else {
-                // Active segment: execute one timer event (step or unstep).
-                //
-                // Full-mode scheduling (STEPPER_STEP_BOTH_EDGE=0): each motor
-                // step is a pair of events. Event 1 drives STEP HIGH (step
-                // phase, TMC4671 sees a rising edge and advances its counter);
-                // event 2 drives STEP LOW (unstep phase, no-op for the
-                // TMC4671). stepper_state().position only advances on the step phase
-                // so the firmware counter matches the TMC4671's view of
-                // position. Matches Klipper C `stepper_event_full`.
-                {
-                    use embassy_stm32::pac::gpio::vals::Idr;
-                    let is_high = gpio_d.idr().read().idr(4) == Idr::HIGH;
-                    gpio_d.bsrr().write(|w| {
-                        if is_high {
-                            w.set_br(4, true);
-                        } else {
-                            w.set_bs(4, true);
-                        }
-                    });
-                }
-
-                match stepper.step_event() {
-                    StepEventResult::ScheduleNext { clock, phase } => {
-                        // Rising edge (LOW → HIGH) → TMC4671 advances, so the
-                        // firmware counter advances too. Falling edge (HIGH →
-                        // LOW) is the second half of the pulse and does not
-                        // change the driver's position.
-                        use foci_klipper::stepper::StepPhase;
-                        let is_step = matches!(phase, StepPhase::Step);
-                        if is_step {
-                            let dir = if stepper.dir_state() { 1i32 } else { -1i32 };
-                            stepper_state().position.fetch_add(dir, Relaxed);
-                        }
-                        stepper_state()
-                            .interval
-                            .store(stepper.current_interval(), Relaxed);
-                        let now = tim5.cnt().read();
-                        match stepper.check_deadline(clock, now, CLOCK_FREQ) {
-                            Ok(compare) => {
-                                let immediate = compare != clock;
-                                // Only rebase the cadence anchor when the
-                                // scheduled event IS the next rising edge
-                                // (Unstep phase returns `next_step_clock`).
-                                // For Step phase `clock` is the pulse-close
-                                // time, only STEP_PULSE_TICKS past the
-                                // rising edge — it is almost always in the
-                                // past by the time we read TIM5 here, so
-                                // rebasing would drag every subsequent
-                                // rising edge forward by the pulse-close
-                                // latency and stretch the step interval.
-                                // Leaving the anchor untouched lets the
-                                // following Unstep event schedule the next
-                                // rising edge at `original_step_clock +
-                                // interval` as intended.
-                                if immediate && !is_step {
-                                    stepper.rebase_next_step_clock(compare);
-                                }
-                                tim5.ccr(0).write_value(compare);
-                                if !immediate {
-                                    return;
-                                }
-                                continue;
-                            }
-                            Err(_) => {
-                                tim5.dier().modify(|w| w.set_ccie(0, false));
-                                with_trigger_domain(|td| {
-                                    td.set_timer_active(0, false);
-                                });
-                                TMC_DISABLE_SIGNAL.signal(());
-                                defmt::error!("Stepper too far in past");
-                                return;
-                            }
-                        }
-                    }
-                    StepEventResult::NeedMove => {
-                        // Final unstep of the segment: the GPIO toggle above
-                        // already drove STEP LOW, leaving the pin in the
-                        // quiescent state before we dequeue the next move.
-                        continue;
-                    }
-                }
+            refresh_step_channels(next_event_clocks);
+            let Some(due) = foci_firmware::stepper_runtime::earliest_due(next_event_clocks) else {
+                program_next_step_compare(next_event_clocks);
+                return;
+            };
+            let now = tim5.cnt().read();
+            if !step_clock_is_due(due.clock, now) {
+                program_next_step_compare(next_event_clocks);
+                return;
             }
+            if !budget.take() {
+                program_next_step_compare(next_event_clocks);
+                return;
+            }
+            process_due_step_event(due.channel, next_event_clocks);
         }
     }
 

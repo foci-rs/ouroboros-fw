@@ -23,16 +23,45 @@ use foci_klipper::commands::CommandError;
 use foci_klipper::state::State;
 
 use crate::helpers::lifecycle::{KATAPULT_BYPASS, katapult_reset, read_tim5};
-use crate::helpers::stepper::arm_step_timer;
+use crate::helpers::stepper::arm_step_timer_if_earlier;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
-use crate::state::stepper::{ISR_STEPPER, P2_STEPPER, STEP_QUEUE};
+use crate::state::stepper::{isr_stepper, p2_stepper, step_queue};
 use crate::state::tmc::TMC_REQUEST_SENDER;
 use crate::trigger_domain::{
     PHYSICAL_STEPPER_INDICES, stop_physical_stepper_no_lock, with_trigger_domain,
 };
 
-fn tmc_state() -> &'static foci_firmware::state::tmc::TmcChannelState {
-    foci_firmware::state::tmc::tmc_channel0()
+fn emit_invalid_stepper_channel_and_shutdown(state: &mut State, channel: u8) {
+    ::ankyra::klipper_reply_from!(
+        &mut crate::_ankyra_config::Sender,
+        foci_firmware::ankyra::replies::FociDiagnostic,
+        fault: u8 = foci_firmware::diagnostic::FaultClass::InvalidChannel as u8,
+        operation: u8 = foci_firmware::diagnostic::operation::SET_NEXT_STEP_DIR,
+        oid: u8 = 255,
+        channel: u8 = channel,
+        data0: u32 = 0,
+        data1: u32 = 0,
+    );
+    if crate::firmware_ctx::enter_shutdown(state) {
+        ::ankyra::klipper_shutdown_from!(
+            &mut crate::_ankyra_config::Sender,
+            "Invalid stepper channel",
+            read_tim5(),
+        );
+    }
+}
+
+fn emit_queue_full_diagnostic(channel: u8, queue_len: usize) {
+    ::ankyra::klipper_reply_from!(
+        &mut crate::_ankyra_config::Sender,
+        foci_firmware::ankyra::replies::FociDiagnostic,
+        fault: u8 = foci_firmware::diagnostic::FaultClass::QueueFull as u8,
+        operation: u8 = foci_firmware::diagnostic::operation::QUEUE_STEP,
+        oid: u8 = 255,
+        channel: u8 = channel,
+        data0: u32 = queue_len as u32,
+        data1: u32 = crate::state::stepper::STEP_QUEUE_DEPTH as u32,
+    );
 }
 
 /// Full shutdown: Klipper-level transition, board-local trigger-domain
@@ -164,24 +193,40 @@ impl<'a> BoardChannels for FirmwareCtx<'a> {
 }
 
 impl<'a> StepperHost for FirmwareCtx<'a> {
-    fn set_next_step_dir(&mut self, forward: bool) {
-        // SAFETY: P2_STEPPER is only accessed from P2 command handlers.
+    fn set_next_step_dir(&mut self, channel: u8, forward: bool) {
+        let Some(_tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
+            emit_invalid_stepper_channel_and_shutdown(self.state, channel);
+            return;
+        };
+
+        // SAFETY: P2 stepper state is only accessed from P2 command handlers.
         unsafe {
-            (*core::ptr::addr_of_mut!(P2_STEPPER)).set_next_step_dir(forward);
+            let Some(stepper) = p2_stepper(channel) else {
+                emit_invalid_stepper_channel_and_shutdown(self.state, channel);
+                return;
+            };
+            stepper.set_next_step_dir(forward);
         }
     }
 
     fn queue_step_move(
         &mut self,
+        channel: u8,
         move_: foci_klipper::stepper::StepMove,
     ) -> Result<(), CommandError> {
+        let channel_idx = channel as usize;
+        let tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
+            .ok_or(CommandError::InvalidChannel(channel))?;
+
         use foci_klipper::commands::stepper::{QueueStepResult, queue_step_hw};
 
         with_trigger_domain(|td| {
-            let need_reset = td.stepper_stop[0].need_reset;
+            let need_reset = td.stepper_stop[channel_idx].need_reset;
 
             // SAFETY: P2 is the sole producer. Queue len read is safe from P2.
-            let queue_was_empty = unsafe { (*core::ptr::addr_of_mut!(STEP_QUEUE)).is_empty() };
+            let queue =
+                unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
+            let queue_was_empty = queue.is_empty();
 
             // `queue_step_hw` takes the move's step count — the
             // caller-provided `count` field on `StepMove`.
@@ -189,28 +234,28 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
                 Ok(QueueStepResult::Discarded) => Ok(()),
                 Err(e) => Err(e),
                 Ok(_result) => {
-                    // SAFETY: P2_STEPPER is only accessed from P2 command handlers.
-                    let prepared =
-                        unsafe { (*core::ptr::addr_of_mut!(P2_STEPPER)).prepare_move(move_) };
+                    // SAFETY: P2 stepper state is only accessed from P2 command handlers.
+                    let prepared = unsafe {
+                        p2_stepper(channel)
+                            .ok_or(CommandError::InvalidChannel(channel))?
+                            .prepare_move(move_)
+                    };
 
                     // SAFETY: P2 is the sole producer.
-                    let ok = unsafe {
-                        (*core::ptr::addr_of_mut!(STEP_QUEUE))
-                            .enqueue(prepared)
-                            .is_ok()
-                    };
+                    let ok = queue.enqueue(prepared).is_ok();
                     if !ok {
+                        emit_queue_full_diagnostic(channel, queue.len());
                         return Err(CommandError::QueueFull);
                     }
 
-                    if !td.timer_active(0)
-                        && tmc_state()
+                    if !td.timer_active(channel_idx)
+                        && tmc_state
                             .motor_armed
                             .load(core::sync::atomic::Ordering::Relaxed)
                     {
                         let now = read_tim5();
-                        arm_step_timer(now.wrapping_add(1));
-                        td.set_timer_active(0, true);
+                        arm_step_timer_if_earlier(now.wrapping_add(1));
+                        td.set_timer_active(channel_idx, true);
                     }
                     Ok(())
                 }
@@ -218,27 +263,42 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
         })
     }
 
-    fn reset_step_clock(&mut self, clock: u32) -> Result<(), CommandError> {
+    fn reset_step_clock(&mut self, channel: u8, clock: u32) -> Result<(), CommandError> {
+        let channel_idx = channel as usize;
+        let _tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
+            .ok_or(CommandError::InvalidChannel(channel))?;
+
         with_trigger_domain(|td| {
-            foci_klipper::commands::stepper::reset_step_clock_hw(td.stepper_stop[0].timer_active)?;
+            foci_klipper::commands::stepper::reset_step_clock_hw(
+                td.stepper_stop[channel_idx].timer_active,
+            )?;
 
             // Drain any stale items from a previous stop.
             // SAFETY: Timer is not active (checked above), P3 is quiesced.
-            unsafe { while (*core::ptr::addr_of_mut!(STEP_QUEUE)).dequeue().is_some() {} }
+            loop {
+                let dequeued = unsafe {
+                    step_queue(channel)
+                        .ok_or(CommandError::InvalidChannel(channel))?
+                        .dequeue()
+                };
+                if dequeued.is_none() {
+                    break;
+                }
+            }
 
             // SAFETY: reset_step_clock_hw accepted only because the timer is
-            // inactive, so P3 is not using ISR_STEPPER. P2_STEPPER is only
+            // inactive, so P3 is not using the ISR stepper. P2 stepper is only
             // accessed from P2 command handlers.
             unsafe {
                 foci_klipper::commands::stepper::reset_stepper_clocks(
-                    &mut *core::ptr::addr_of_mut!(P2_STEPPER),
-                    &mut *core::ptr::addr_of_mut!(ISR_STEPPER),
+                    p2_stepper(channel).ok_or(CommandError::InvalidChannel(channel))?,
+                    isr_stepper(channel).ok_or(CommandError::InvalidChannel(channel))?,
                     clock,
                 );
             }
 
-            if !td.stepper_stop[0].blocked_by_trigger {
-                td.stepper_stop[0].need_reset = false;
+            if !td.stepper_stop[channel_idx].blocked_by_trigger {
+                td.stepper_stop[channel_idx].need_reset = false;
             }
             Ok(())
         })
@@ -482,12 +542,23 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
     }
 
     fn link_stepper_stop(&mut self, stepper_idx: usize, trsync_oid: u8) -> Result<(), ()> {
+        let channel = self
+            .state
+            .stepper_channels
+            .get(stepper_idx)
+            .and_then(|channel| *channel)
+            .ok_or(())?;
+        let channel_idx = channel as usize;
+        if !PHYSICAL_STEPPER_INDICES.contains(&channel_idx) {
+            return Err(());
+        }
+
         with_trigger_domain(|td| {
             if !td.trsync_by_oid.contains_key(&trsync_oid) {
                 return Err(());
             }
             for signal in td.stop_signals.iter().flatten() {
-                if signal.stepper_idx == stepper_idx {
+                if signal.stepper_idx == channel_idx {
                     return Err(());
                 }
             }
@@ -495,7 +566,7 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
                 if slot.is_none() {
                     *slot = Some(foci_klipper::trigger::StopSignal {
                         trsync_oid,
-                        stepper_idx,
+                        stepper_idx: channel_idx,
                     });
                     return Ok(());
                 }
