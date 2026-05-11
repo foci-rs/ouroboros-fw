@@ -43,7 +43,7 @@ pub fn foci_tune(
     tau_residual_permille: u16,
     inner_warning_flags: u8,
 ) {
-    let channel = match ctx.state().foci_channel_for_oid(oid) {
+    let channel = match ctx.state().stepper_channel(oid) {
         Some(channel) => channel,
         None => {
             if ctx.enter_shutdown() {
