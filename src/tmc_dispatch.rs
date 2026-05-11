@@ -18,6 +18,19 @@ use crate::app_types::TmcSpiDevice;
 use crate::board_config::CURRENT_SCALE_MA_PER_LSB;
 use crate::state::trace::trace_buf;
 
+fn report_invalid_channel(channel: u8) {
+    ::ankyra::klipper_reply_from!(
+        &mut crate::_ankyra_config::Sender,
+        foci_firmware::ankyra::replies::FociDiagnostic,
+        fault: u8 = foci_firmware::diagnostic::FaultClass::InvalidChannel as u8,
+        operation: u8 = foci_firmware::diagnostic::operation::TMC_CONTROL,
+        oid: u8 = 255,
+        channel: u8 = channel,
+        data0: u32 = 0,
+        data1: u32 = 0,
+    );
+}
+
 /// Handle a TMC request that does not require main-loop state (motor_enabled, enable_pin).
 ///
 /// SetEnable, Init, and TestSpin are handled inline by the tmc_control main loop.
@@ -27,11 +40,11 @@ pub(crate) async fn handle_tmc_request(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
 ) -> Result<(), ()> {
     let channel = req.channel;
-    if channel != 0 {
-        defmt::error!("Ouroboros TMC channel {} is not wired yet", channel);
+    let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
+        defmt::error!("Invalid TMC channel {}", channel);
+        report_invalid_channel(channel);
         return Err(());
-    }
-    let tmc_state = foci_firmware::state::tmc::tmc_channel(channel).ok_or(())?;
+    };
 
     match req.kind {
         #[cfg(feature = "dev")]
@@ -151,7 +164,11 @@ pub(crate) async fn handle_tmc_request(
         // during commissioning. The Python FOCI_TRACE command runs
         // after commissioning completes, so this is not a functional gap.
         TmcRequestKind::TraceInfo { oid } => {
-            let info = unsafe { trace_buf(channel).ok_or(())? }.info(oid);
+            let Some(trace) = (unsafe { trace_buf(channel) }) else {
+                report_invalid_channel(channel);
+                return Err(());
+            };
+            let info = trace.info(oid);
             ::ankyra::klipper_reply_from!(
                 &mut crate::_ankyra_config::Sender,
                 foci_firmware::ankyra::replies::FociTraceInfoResult,
@@ -170,7 +187,10 @@ pub(crate) async fn handle_tmc_request(
             offset,
             generation,
         } => {
-            let buf = unsafe { trace_buf(channel).ok_or(())? };
+            let Some(buf) = (unsafe { trace_buf(channel) }) else {
+                report_invalid_channel(channel);
+                return Err(());
+            };
             match buf.fetch(oid, offset, generation) {
                 foci_firmware::trace::FetchResult::Ok(ring_idx) => {
                     let data = if buf.preset() == foci_firmware::trace::PRESET_FULL {

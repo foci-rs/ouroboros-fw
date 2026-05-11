@@ -18,7 +18,7 @@ use foci_firmware::context::{
     TmcHost, TrsyncHost,
 };
 use foci_firmware::state::trsync::ENDSTOP_PIN_IDS;
-use foci_firmware::tmc::TmcRequest;
+use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 use foci_klipper::commands::CommandError;
 use foci_klipper::state::State;
 
@@ -26,7 +26,7 @@ use crate::helpers::lifecycle::{KATAPULT_BYPASS, katapult_reset, read_tim5};
 use crate::helpers::stepper::arm_step_timer_if_earlier;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
 use crate::state::stepper::{isr_stepper, p2_stepper, step_queue};
-use crate::state::tmc::TMC_REQUEST_SENDER;
+use crate::state::tmc::{TMC_REQUEST_SENDER, release_commissioning, try_acquire_commissioning};
 use crate::trigger_domain::{
     PHYSICAL_STEPPER_INDICES, stop_physical_stepper_no_lock, with_trigger_domain,
 };
@@ -578,6 +578,22 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
 
 impl<'a> TmcHost for FirmwareCtx<'a> {
     fn enqueue_request(&self, req: TmcRequest) -> Result<(), QueueFull> {
+        let explicit_commissioning = matches!(
+            req.kind,
+            TmcRequestKind::Calibrate { .. }
+                | TmcRequestKind::Commission { .. }
+                | TmcRequestKind::Tune { .. }
+                | TmcRequestKind::SelfTest { .. }
+        );
+        let reserves_commissioning =
+            explicit_commissioning || matches!(req.kind, TmcRequestKind::SetEnable(true));
+        if reserves_commissioning && !try_acquire_commissioning() {
+            if explicit_commissioning {
+                reject_commissioning_request(req);
+                return Ok(());
+            }
+            return Err(QueueFull);
+        }
         let sent = critical_section::with(|cs| {
             if let Some(sender) = TMC_REQUEST_SENDER.borrow(cs).borrow_mut().as_mut() {
                 sender.try_send(req).is_ok()
@@ -585,6 +601,50 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
                 false
             }
         });
+        if !sent && reserves_commissioning {
+            release_commissioning();
+        }
         if sent { Ok(()) } else { Err(QueueFull) }
+    }
+}
+
+fn reject_commissioning_request(req: TmcRequest) {
+    use core::sync::atomic::Ordering::Relaxed;
+
+    if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(req.channel) {
+        tmc_state.commission_in_flight.store(false, Relaxed);
+    }
+    match req.kind {
+        TmcRequestKind::Calibrate { oid } => {
+            ::ankyra::klipper_reply_from!(
+                &mut crate::_ankyra_config::Sender,
+                foci_firmware::ankyra::replies::FociCalibrateResult,
+                oid: u8 = oid,
+                status: u8 = foci_firmware::calibration::CalibrationError::InternalError.status_code(),
+                adc_i0: u16 = 0,
+                adc_i1: u16 = 0,
+                encoder_count: u32 = 0,
+            );
+        }
+        TmcRequestKind::Commission { oid, .. } | TmcRequestKind::Tune { oid, .. } => {
+            ::ankyra::klipper_reply_from!(
+                &mut crate::_ankyra_config::Sender,
+                foci_firmware::ankyra::replies::FociCommissionPhase,
+                oid: u8 = oid,
+                phase: u8 = 0,
+                status: u8 =
+                    foci_firmware::autotune::CommissionError::AlreadyRunning.status_code(),
+            );
+        }
+        TmcRequestKind::SelfTest { oid } => {
+            ::ankyra::klipper_reply_from!(
+                &mut crate::_ankyra_config::Sender,
+                foci_firmware::ankyra::replies::FociSelftestDone,
+                oid: u8 = oid,
+                status: u8 =
+                    foci_firmware::autotune::CommissionError::AlreadyRunning.status_code(),
+            );
+        }
+        _ => {}
     }
 }

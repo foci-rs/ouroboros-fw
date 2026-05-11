@@ -18,6 +18,7 @@ use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TmcChannelState};
 
 pub(crate) struct OuroborosBackend<'a, 'spi> {
     pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
+    /// Channel-selected TMC4671 ENABLE output.
     pub(crate) enable_pin: &'a mut Output<'static>,
     pub(crate) tmc_state: &'static TmcChannelState,
 }

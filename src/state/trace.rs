@@ -35,13 +35,3 @@ pub(crate) unsafe fn trace_buf(
     };
     Some(unsafe { &mut *ptr })
 }
-
-/// Get the channel-0 trace buffer.
-///
-/// # Safety
-///
-/// Must only be called from tmc_control (P1) after init has completed.
-#[inline]
-pub(crate) unsafe fn trace_buf0() -> &'static mut foci_firmware::trace::TraceBuffer {
-    unsafe { trace_buf(0).unwrap_unchecked() }
-}

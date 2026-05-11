@@ -3,6 +3,7 @@
 //! `foci_firmware::state::tmc`.
 
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use critical_section::Mutex;
 use foci_firmware::tmc::TmcRequest;
@@ -16,3 +17,17 @@ pub(crate) const TMC_CHANNEL_SIZE: usize = 8;
 pub(crate) static TMC_REQUEST_SENDER: Mutex<
     RefCell<Option<Sender<'static, TmcRequest, TMC_CHANNEL_SIZE>>>,
 > = Mutex::new(RefCell::new(None));
+
+static BOARD_COMMISSIONING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Try to reserve the board-global commissioning engine slot.
+pub(crate) fn try_acquire_commissioning() -> bool {
+    BOARD_COMMISSIONING_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+/// Release the board-global commissioning engine slot.
+pub(crate) fn release_commissioning() {
+    BOARD_COMMISSIONING_ACTIVE.store(false, Ordering::Release);
+}

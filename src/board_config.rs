@@ -7,8 +7,7 @@ pub(crate) const TMC_CHANNEL_COUNT: u8 = 2;
 
 /// Current scaling for Ouroboros: milliamps per ADC least significant bit.
 ///
-/// Current public xbst setup docs use 1.272. Confirm the production-v1
-/// current-sense IC and final scale before hardware energizing.
+/// Maker-confirmed production-v1 current scale.
 pub(crate) const CURRENT_SCALE_MA_PER_LSB: f32 = 1.272;
 
 /// Return the motor channel represented by a virtual STEP pin.

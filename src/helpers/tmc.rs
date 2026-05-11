@@ -5,7 +5,7 @@
 
 use foci_firmware::tmc::TmcRequest;
 
-use crate::state::tmc::TMC_REQUEST_SENDER;
+use crate::state::tmc::{TMC_REQUEST_SENDER, release_commissioning, try_acquire_commissioning};
 
 /// Parameters for `foci_tune` grouped into a struct to satisfy
 /// clippy's `too_many_arguments` lint. The `#[klipper_command]`
@@ -74,6 +74,17 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         );
         return;
     }
+    if !try_acquire_commissioning() {
+        tmc_state.commission_in_flight.store(false, Relaxed);
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCommissionPhase,
+            oid: u8 = oid,
+            phase: u8 = 0,
+            status: u8 = foci_firmware::autotune::CommissionError::AlreadyRunning.status_code(),
+        );
+        return;
+    }
     if !tmc_send(foci_firmware::tmc::tmc_tune(
         channel,
         oid,
@@ -88,6 +99,7 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         tau_residual_permille,
         inner_warning_flags,
     )) {
+        release_commissioning();
         tmc_state.commission_in_flight.store(false, Relaxed);
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
