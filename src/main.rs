@@ -1222,12 +1222,32 @@ mod app {
                                 },
                             ..
                         } => {
-                            channel_state.stored_gains = Some(foci_firmware::pid::InnerLoopGains {
+                            let gains = foci_firmware::pid::InnerLoopGains {
                                 flux_p,
                                 flux_i,
                                 torque_p,
                                 torque_i,
-                            });
+                            };
+                            channel_state.stored_gains = Some(gains);
+                            let (flux_reg, torque_reg) =
+                                foci_firmware::tmc_ops::pack_inner_gain_registers(gains);
+                            let flux_ok = tmc
+                                .write_register(
+                                    foci_tmc4671::registers::PID_FLUX_P_FLUX_I,
+                                    flux_reg,
+                                )
+                                .await
+                                .is_ok();
+                            let torque_ok = tmc
+                                .write_register(
+                                    foci_tmc4671::registers::PID_TORQUE_P_TORQUE_I,
+                                    torque_reg,
+                                )
+                                .await
+                                .is_ok();
+                            if !flux_ok || !torque_ok {
+                                defmt::warn!("PID gains live write failed");
+                            }
                             defmt::info!(
                                 "PID gains received: flux P={} I={}, torque P={} I={}",
                                 flux_p,
