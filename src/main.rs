@@ -1308,10 +1308,14 @@ mod app {
                             );
                         }
                         TmcRequest {
-                            kind: TmcRequestKind::SetVelocityFeedforward { enable },
+                            kind: TmcRequestKind::SetVelocityFeedforward { enable, multiplier },
                             ..
                         } => {
-                            defmt::info!("Velocity feedforward: {} (via queue)", enable);
+                            defmt::info!(
+                                "Velocity feedforward: {} multiplier={} (via queue)",
+                                enable,
+                                multiplier
+                            );
                             // Feedforward flag is already set by the atomic in the
                             // command handler; this arm exists for exhaustiveness.
                         }
@@ -1716,10 +1720,14 @@ mod app {
                         let forward = stepper_state(channel)
                             .direction
                             .load(core::sync::atomic::Ordering::Relaxed);
-                        foci_firmware::tmc::compute_velocity_offset(
+                        let multiplier = tmc_state(channel)
+                            .velocity_feedforward_multiplier
+                            .load(core::sync::atomic::Ordering::Relaxed);
+                        foci_firmware::tmc::compute_velocity_offset_scaled(
                             channel_state.velocity_scale,
                             interval,
                             forward,
+                            multiplier,
                         )
                     };
 
