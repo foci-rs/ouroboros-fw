@@ -1258,6 +1258,27 @@ mod app {
                             tmc_state(channel)
                                 .velocity_i_value
                                 .store(velocity_i, core::sync::atomic::Ordering::Relaxed);
+                            let (velocity_reg, position_reg) =
+                                foci_firmware::tmc_ops::pack_outer_gain_registers(
+                                    position_p, position_i, velocity_p, velocity_i,
+                                );
+                            let velocity_ok = tmc
+                                .write_register(
+                                    foci_tmc4671::registers::PID_VELOCITY_P_VELOCITY_I,
+                                    velocity_reg,
+                                )
+                                .await
+                                .is_ok();
+                            let position_ok = tmc
+                                .write_register(
+                                    foci_tmc4671::registers::PID_POSITION_P_POSITION_I,
+                                    position_reg,
+                                )
+                                .await
+                                .is_ok();
+                            if !velocity_ok || !position_ok {
+                                defmt::warn!("Position gains live write failed");
+                            }
                             defmt::info!(
                                 "Position gains received: pos P={} I={}, vel P={} I={}",
                                 position_p,
