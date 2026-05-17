@@ -162,10 +162,10 @@ pub(crate) async fn handle_tmc_request(
                 report_invalid_channel(channel);
                 return Err(());
             };
-            let preset = if preset == foci_firmware::trace::PRESET_FULL {
-                foci_firmware::trace::PRESET_FULL
-            } else {
-                foci_firmware::trace::PRESET_FAST
+            let preset = match preset {
+                foci_firmware::trace::PRESET_FULL => foci_firmware::trace::PRESET_FULL,
+                foci_firmware::trace::PRESET_VELOCITY => foci_firmware::trace::PRESET_VELOCITY,
+                _ => foci_firmware::trace::PRESET_FAST,
             };
             if tmc
                 .write_register(foci_tmc4671::registers::STATUS_FLAGS, 0)
@@ -220,10 +220,12 @@ pub(crate) async fn handle_tmc_request(
             };
             match buf.fetch(oid, offset, generation) {
                 foci_firmware::trace::FetchResult::Ok(ring_idx) => {
-                    let data = if buf.preset() == foci_firmware::trace::PRESET_FULL {
-                        buf.sample_bytes_full(ring_idx)
-                    } else {
-                        buf.sample_bytes_fast(ring_idx)
+                    let data = match buf.preset() {
+                        foci_firmware::trace::PRESET_FULL => buf.sample_bytes_full(ring_idx),
+                        foci_firmware::trace::PRESET_VELOCITY => {
+                            buf.sample_bytes_velocity(ring_idx)
+                        }
+                        _ => buf.sample_bytes_fast(ring_idx),
                     };
                     ::ankyra::klipper_reply_from!(
                         &mut crate::_ankyra_config::Sender,
