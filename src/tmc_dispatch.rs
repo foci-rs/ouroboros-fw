@@ -5,8 +5,8 @@
 //! `Commission`, `Calibrate`, and `Tune` remain in the tmc_control main
 //! loop because they mutate `motor_enabled` / `enable_pin` / engine
 //! state. Everything else — SetCurrent / SetEncoder / SetEncoderDir /
-//! DumpRegisters / TraceInfo / TraceFetch, and the `#[cfg(feature =
-//! "dev")]` Read / Write pair — dispatches here.
+//! DumpRegisters / TraceStart / TraceStop / TraceInfo / TraceFetch, and the
+//! `#[cfg(feature = "dev")]` Read / Write pair — dispatches here.
 
 use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 use foci_tmc4671::spi::Tmc4671Spi;
@@ -157,6 +157,33 @@ pub(crate) async fn handle_tmc_request(
             defmt::warn!("handle_tmc_request: SetPositionGains handled by main loop");
         }
         TmcRequestKind::SetVelocityFeedforward { .. } => {}
+        TmcRequestKind::TraceStart { oid, preset } => {
+            let Some(buf) = (unsafe { trace_buf(channel) }) else {
+                report_invalid_channel(channel);
+                return Err(());
+            };
+            let preset = if preset == foci_firmware::trace::PRESET_FULL {
+                foci_firmware::trace::PRESET_FULL
+            } else {
+                foci_firmware::trace::PRESET_FAST
+            };
+            if tmc
+                .write_register(foci_tmc4671::registers::STATUS_FLAGS, 0)
+                .await
+                .is_err()
+            {
+                defmt::warn!("trace start: STATUS_FLAGS clear failed");
+            }
+            buf.start(oid, preset);
+            buf.set_phase(0);
+        }
+        TmcRequestKind::TraceStop { .. } => {
+            let Some(buf) = (unsafe { trace_buf(channel) }) else {
+                report_invalid_channel(channel);
+                return Err(());
+            };
+            buf.stop();
+        }
         // During active commissioning, trace requests queue until the
         // engine reaches a terminal state (Continue/PhaseChanged both
         // `continue` before rx.recv()). By that point stop() has run,
