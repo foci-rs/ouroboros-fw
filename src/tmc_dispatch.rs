@@ -165,6 +165,7 @@ pub(crate) async fn handle_tmc_request(
             let preset = match preset {
                 foci_firmware::trace::PRESET_FULL => foci_firmware::trace::PRESET_FULL,
                 foci_firmware::trace::PRESET_VELOCITY => foci_firmware::trace::PRESET_VELOCITY,
+                foci_firmware::trace::PRESET_HOLD => foci_firmware::trace::PRESET_HOLD,
                 _ => foci_firmware::trace::PRESET_FAST,
             };
             if tmc
@@ -225,6 +226,7 @@ pub(crate) async fn handle_tmc_request(
                         foci_firmware::trace::PRESET_VELOCITY => {
                             buf.sample_bytes_velocity(ring_idx)
                         }
+                        foci_firmware::trace::PRESET_HOLD => buf.sample_bytes_hold(ring_idx),
                         _ => buf.sample_bytes_fast(ring_idx),
                     };
                     ::ankyra::klipper_reply_from!(
