@@ -2024,7 +2024,6 @@ mod app {
             Ok(compare) => {
                 let immediate = compare != scheduled;
                 if immediate {
-                    stepper.rebase_next_step_clock(compare);
                     next_event_clocks[idx] = Some(now);
                 } else {
                     next_event_clocks[idx] = Some(compare);
@@ -2082,9 +2081,6 @@ mod app {
                 match stepper.check_deadline(clock, now, CLOCK_FREQ) {
                     Ok(compare) => {
                         let immediate = compare != clock;
-                        if immediate && !is_step {
-                            stepper.rebase_next_step_clock(compare);
-                        }
                         next_event_clocks[idx] = Some(if immediate { now } else { compare });
                     }
                     Err(_) => fail_step_channel_deadline(channel, next_event_clocks),
@@ -2180,7 +2176,7 @@ mod app {
                 let now = read_tim5();
                 let due_indices = td.scheduler.find_due(now);
                 // Collect (kind, wake_clock) pairs before mutating scheduler
-                let mut due_events: heapless::Vec<(SchedulerEventKind, u32), 12> =
+                let mut due_events: heapless::Vec<(SchedulerEventKind, u32), 13> =
                     heapless::Vec::new();
                 for &slot_idx in &due_indices {
                     if let Some(event) = td.scheduler.get(slot_idx) {
@@ -2191,6 +2187,7 @@ mod app {
 
                 for &(kind, wake_clock) in &due_events {
                     match kind {
+                        SchedulerEventKind::Stepper(_) => {}
                         SchedulerEventKind::EndstopSample(endstop_idx) => {
                             use foci_klipper::endstop::{EndstopPhase, EndstopSampleResult};
                             let pin_id = ENDSTOP_PIN_IDS[endstop_idx].load(Relaxed);
