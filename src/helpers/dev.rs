@@ -76,7 +76,9 @@ pub(crate) async fn tmc_enter_openloop(
     let _ = tmc
         .write_register(DSADC_MDEC_B_MDEC_A, TMC_CONFIG.dsadc_mdec_register())
         .await;
-    let _ = tmc.write_register(ADC_I_SELECT, (1 << 28) | (1 << 8)).await;
+    let _ = tmc
+        .write_register(ADC_I_SELECT, TMC_CONFIG.adc_i_select)
+        .await;
 
     // 4. Motor type: 2-phase stepper (type 2), 50 pole pairs
     let _ = tmc

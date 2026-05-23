@@ -8,7 +8,9 @@
 pub(crate) fn emit_terminal_reply(payload: foci_firmware::commission_dispatch::ReplyPayload) {
     use foci_firmware::commission_dispatch::ReplyPayload;
     match payload {
-        ReplyPayload::CommissionPhase { oid, phase, status } => {
+        ReplyPayload::CommissionPhase {
+            oid, phase, status, ..
+        } => {
             ::ankyra::klipper_reply_from!(
                 &mut crate::_ankyra_config::Sender,
                 foci_firmware::ankyra::replies::FociCommissionPhase,
@@ -103,6 +105,7 @@ pub(crate) fn emit_terminal_reply(payload: foci_firmware::commission_dispatch::R
             oid,
             results,
             done_status,
+            ..
         } => {
             for (stage, value) in results.iter() {
                 ::ankyra::klipper_reply_from!(

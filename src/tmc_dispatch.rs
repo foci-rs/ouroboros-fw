@@ -87,6 +87,9 @@ pub(crate) async fn handle_tmc_request(
         TmcRequestKind::SetEncoderDir { invert } => {
             foci_firmware::tmc_ops::apply_set_encoder_dir(tmc, tmc_state, invert).await?;
         }
+        TmcRequestKind::SetVoltageLimit { voltage_limit } => {
+            foci_firmware::tmc_ops::apply_set_voltage_limit(tmc, tmc_state, voltage_limit).await?;
+        }
         TmcRequestKind::SelfTest { .. } => {
             defmt::warn!("handle_tmc_request: SelfTest handled by main loop");
         }
@@ -157,6 +160,7 @@ pub(crate) async fn handle_tmc_request(
             defmt::warn!("handle_tmc_request: SetPositionGains handled by main loop");
         }
         TmcRequestKind::SetVelocityFeedforward { .. } => {}
+        TmcRequestKind::SetAccelFeedforward { .. } => {}
         TmcRequestKind::TraceStart { oid, preset } => {
             let Some(buf) = (unsafe { trace_buf(channel) }) else {
                 report_invalid_channel(channel);

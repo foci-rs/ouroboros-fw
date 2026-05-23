@@ -1320,6 +1320,22 @@ mod app {
                             // command handler; this arm exists for exhaustiveness.
                         }
                         TmcRequest {
+                            kind:
+                                TmcRequestKind::SetAccelFeedforward {
+                                    enable,
+                                    gain_permille,
+                                },
+                            ..
+                        } => {
+                            defmt::info!(
+                                "Acceleration feedforward: {} gain_permille={} (via queue)",
+                                enable,
+                                gain_permille
+                            );
+                            // OpenFFBoard is the active trace/tuning target for
+                            // this diagnostic path; keep Ouroboros exhaustive.
+                        }
+                        TmcRequest {
                             kind: TmcRequestKind::Commission { oid, profile },
                             ..
                         } => {
@@ -1468,7 +1484,9 @@ mod app {
                                     velocity_limit: tmc_state(channel)
                                         .velocity_limit_cfg
                                         .load(Relaxed),
-                                    voltage_limit: 16000,
+                                    voltage_limit: tmc_state(channel)
+                                        .voltage_limit_cfg
+                                        .load(Relaxed),
                                     velocity_filter_hz: tmc_state(channel)
                                         .velocity_filter_hz
                                         .load(Relaxed),
