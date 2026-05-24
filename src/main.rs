@@ -1323,14 +1323,17 @@ mod app {
                             kind:
                                 TmcRequestKind::SetAccelFeedforward {
                                     enable,
-                                    gain_permille,
+                                    accel_gain_permille,
+                                    decel_gain_permille,
                                 },
                             ..
                         } => {
                             defmt::info!(
-                                "Acceleration feedforward: {} gain_permille={} (via queue)",
+                                "Acceleration feedforward: {} accel_gain_permille={} \
+                                decel_gain_permille={} (via queue)",
                                 enable,
-                                gain_permille
+                                accel_gain_permille,
+                                decel_gain_permille
                             );
                             // OpenFFBoard is the active trace/tuning target for
                             // this diagnostic path; keep Ouroboros exhaustive.
