@@ -1339,6 +1339,24 @@ mod app {
                             // this diagnostic path; keep Ouroboros exhaustive.
                         }
                         TmcRequest {
+                            kind:
+                                TmcRequestKind::SetPositionLead {
+                                    enable,
+                                    gain_permille,
+                                    max_counts,
+                                },
+                            ..
+                        } => {
+                            defmt::info!(
+                                "Position lead: {} gain_permille={} max_counts={} (via queue)",
+                                enable,
+                                gain_permille,
+                                max_counts
+                            );
+                            // OpenFFBoard owns this diagnostic implementation;
+                            // keep Ouroboros exhaustive for shared enum growth.
+                        }
+                        TmcRequest {
                             kind: TmcRequestKind::Commission { oid, profile },
                             ..
                         } => {

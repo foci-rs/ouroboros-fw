@@ -161,6 +161,7 @@ pub(crate) async fn handle_tmc_request(
         }
         TmcRequestKind::SetVelocityFeedforward { .. } => {}
         TmcRequestKind::SetAccelFeedforward { .. } => {}
+        TmcRequestKind::SetPositionLead { .. } => {}
         TmcRequestKind::TraceStart { oid, preset } => {
             let Some(buf) = (unsafe { trace_buf(channel) }) else {
                 report_invalid_channel(channel);
