@@ -1326,16 +1326,18 @@ mod app {
                                     lead_time_us,
                                     gain_permille,
                                     max_offset,
+                                    rate_hz,
                                 },
                             ..
                         } => {
                             defmt::info!(
                                 "Velocity transient feedforward: {} lead_time_us={} \
-                                gain_permille={} max_offset={} (via queue)",
+                                gain_permille={} max_offset={} rate_hz={} (via queue)",
                                 enable,
                                 lead_time_us,
                                 gain_permille,
-                                max_offset
+                                max_offset,
+                                rate_hz
                             );
                             // OpenFFBoard is the active trace/tuning target for this
                             // diagnostic; this arm exists for exhaustiveness.
