@@ -1321,6 +1321,27 @@ mod app {
                         }
                         TmcRequest {
                             kind:
+                                TmcRequestKind::SetVelocityTransientFeedforward {
+                                    enable,
+                                    lead_time_us,
+                                    gain_permille,
+                                    max_offset,
+                                },
+                            ..
+                        } => {
+                            defmt::info!(
+                                "Velocity transient feedforward: {} lead_time_us={} \
+                                gain_permille={} max_offset={} (via queue)",
+                                enable,
+                                lead_time_us,
+                                gain_permille,
+                                max_offset
+                            );
+                            // OpenFFBoard is the active trace/tuning target for this
+                            // diagnostic; this arm exists for exhaustiveness.
+                        }
+                        TmcRequest {
+                            kind:
                                 TmcRequestKind::SetAccelFeedforward {
                                     enable,
                                     accel_gain_permille,
