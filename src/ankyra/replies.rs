@@ -45,6 +45,8 @@ pub(crate) fn emit_terminal_reply(payload: foci_firmware::commission_dispatch::R
                 foci_firmware::ankyra::replies::FociCommissionResult,
                 oid: u8 = oid,
                 status: u8 = status,
+                r_int: u32 = inner.r_int,
+                l_int: u32 = inner.l_int,
                 r_mohm: u32 = inner.r_mohm,
                 l_uh: u32 = inner.l_uh,
                 flux_p: u16 = inner.flux_p,

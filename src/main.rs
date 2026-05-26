@@ -1380,6 +1380,27 @@ mod app {
                             // keep Ouroboros exhaustive for shared enum growth.
                         }
                         TmcRequest {
+                            kind:
+                                TmcRequestKind::SetPhaseAdvance {
+                                    enable,
+                                    gain_ppm,
+                                    max_counts,
+                                    deadband,
+                                },
+                            ..
+                        } => {
+                            defmt::info!(
+                                "Phase advance: {} gain_ppm={} max_counts={} deadband={} \
+                                (via queue)",
+                                enable,
+                                gain_ppm,
+                                max_counts,
+                                deadband
+                            );
+                            // OpenFFBoard owns this diagnostic implementation;
+                            // keep Ouroboros exhaustive for shared enum growth.
+                        }
+                        TmcRequest {
                             kind: TmcRequestKind::Commission { oid, profile },
                             ..
                         } => {

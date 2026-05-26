@@ -48,7 +48,8 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     tmc_clock_hz: 25_000_000,
     bbm_h: 10,
     bbm_l: 10,
-    dsadc_mdec: 331,
+    dsadc_mdec_a: 331,
+    dsadc_mdec_b: 331,
     // Preserve the pre-bringup routing until Ouroboros current sense is verified.
     adc_i_select: 0x1000_0100,
     excitation_voltage: 512,
