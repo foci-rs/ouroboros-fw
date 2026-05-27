@@ -43,6 +43,30 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
         self.tmc.write_register(reg, val).await
     }
 
+    fn synthesize_verify_error(&self, expected: u32, actual: u32) -> Self::Error {
+        foci_tmc4671::spi::SpiError::VerifyFailed { expected, actual }
+    }
+
+    async fn write_register_verified(
+        &mut self,
+        reg: foci_tmc4671::registers::Register,
+        val: u32,
+    ) -> Result<(), Self::Error> {
+        self.tmc.write_register_verified(reg, val).await
+    }
+
+    async fn read_register_verified(
+        &mut self,
+        reg: foci_tmc4671::registers::Register,
+        expected: u32,
+    ) -> Result<u32, Self::Error> {
+        self.tmc.read_register_verified(reg, expected).await
+    }
+
+    fn store_motor_sentinel(&self, value: u32) {
+        self.tmc_state.motor_sentinel.store(value, Relaxed);
+    }
+
     fn set_enable_pin(&mut self, state: bool) {
         if state {
             self.enable_pin.set_high();
@@ -103,6 +127,10 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
 
     fn step_width(&self) -> u32 {
         self.tmc_state.step_width_value.load(Relaxed).max(0) as u32
+    }
+
+    fn encoder_quadrature_ppr(&self) -> u32 {
+        self.tmc_state.encoder_ppr.load(Relaxed).saturating_mul(4)
     }
 
     fn operational_velocity_limit(&self) -> u32 {
