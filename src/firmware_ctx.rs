@@ -390,8 +390,9 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
             });
             td.trsync[idx].arm(report_clock, report_ticks, expire_reason);
             if report_ticks > 0 {
-                td.scheduler
-                    .schedule(foci_klipper::scheduler::SchedulerEvent {
+                let _ = td
+                    .scheduler
+                    .try_schedule(foci_klipper::scheduler::SchedulerEvent {
                         wake_clock: report_clock,
                         kind: foci_klipper::scheduler::SchedulerEventKind::TrSyncReport(idx),
                     });
@@ -414,8 +415,9 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
                         foci_klipper::scheduler::SchedulerEventKind::TrSyncExpire(i) if *i == idx
                     )
                 });
-                td.scheduler
-                    .schedule(foci_klipper::scheduler::SchedulerEvent {
+                let _ = td
+                    .scheduler
+                    .try_schedule(foci_klipper::scheduler::SchedulerEvent {
                         wake_clock: clock,
                         kind: foci_klipper::scheduler::SchedulerEventKind::TrSyncExpire(idx),
                     });
@@ -518,8 +520,9 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
                 pin_id,
             );
             if sample_count > 0 {
-                td.scheduler
-                    .schedule(foci_klipper::scheduler::SchedulerEvent {
+                let _ = td
+                    .scheduler
+                    .try_schedule(foci_klipper::scheduler::SchedulerEvent {
                         wake_clock: clock,
                         kind: foci_klipper::scheduler::SchedulerEventKind::EndstopSample(idx),
                     });

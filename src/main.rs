@@ -2257,15 +2257,12 @@ mod app {
             with_trigger_domain(|td| {
                 use foci_klipper::scheduler::SchedulerEventKind;
                 let now = read_tim5();
-                let due_indices = td.scheduler.find_due(now);
                 // Collect (kind, wake_clock) pairs before mutating scheduler
                 let mut due_events: heapless::Vec<(SchedulerEventKind, u32), 13> =
                     heapless::Vec::new();
-                for &slot_idx in &due_indices {
-                    if let Some(event) = td.scheduler.get(slot_idx) {
-                        let _ = due_events.push((event.kind, event.wake_clock));
-                    }
-                    td.scheduler.remove(slot_idx);
+                while let Some(slot) = td.scheduler.pop_due_slot(now) {
+                    let event = slot.event();
+                    let _ = due_events.push((event.kind, event.wake_clock));
                 }
 
                 for &(kind, wake_clock) in &due_events {
@@ -2303,7 +2300,7 @@ mod app {
                                             need_report = true;
                                         }
                                         EndstopSampleResult::Reschedule { next_clock } => {
-                                            td.scheduler.schedule(
+                                            let _ = td.scheduler.try_schedule(
                                                 foci_klipper::scheduler::SchedulerEvent {
                                                     wake_clock: next_clock,
                                                     kind: SchedulerEventKind::EndstopSample(
@@ -2320,7 +2317,7 @@ mod app {
                                     need_report = true;
                                 }
                                 EndstopSampleResult::Reschedule { next_clock } => {
-                                    td.scheduler.schedule(
+                                    let _ = td.scheduler.try_schedule(
                                         foci_klipper::scheduler::SchedulerEvent {
                                             wake_clock: next_clock,
                                             kind: SchedulerEventKind::EndstopSample(endstop_idx),
@@ -2365,7 +2362,7 @@ mod app {
                                         .report_clock()
                                         .wrapping_add(report_ticks);
                                     td.trsync[trsync_idx].set_report_clock(next_report);
-                                    td.scheduler.schedule(
+                                    let _ = td.scheduler.try_schedule(
                                         foci_klipper::scheduler::SchedulerEvent {
                                             wake_clock: next_report,
                                             kind: SchedulerEventKind::TrSyncReport(trsync_idx),
