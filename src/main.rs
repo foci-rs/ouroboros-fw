@@ -440,7 +440,8 @@ mod app {
                 });
                 return;
             };
-            let mut tmc = Tmc4671Spi::new(device);
+            let mut tmc = Tmc4671Spi::new(device)
+                .with_retry_policy(foci_tmc4671::spi::RetryPolicy::production());
 
             // Verify TMC4671 chip identity — shutdown if SPI fails or wrong chip.
             match tmc
