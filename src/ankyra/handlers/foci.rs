@@ -1,9 +1,9 @@
 //! Board-local FOCI handler: `foci_tune`.
 //!
-//! The six other FOCI handlers (`foci_selftest`, `foci_calibrate`,
-//! `foci_dump_registers`, `foci_trace_info`, `foci_trace_fetch`,
-//! `foci_commission`) were lifted to `foci_firmware::ankyra::handlers::foci`
-//! in Task 17 of the foci-firmware handler-lift plan. The glob re-export
+//! The other shared FOCI handlers (`foci_selftest`, `foci_calibrate`,
+//! `foci_dump_registers`, `foci_commission`) were lifted to
+//! `foci_firmware::ankyra::handlers::foci` in Task 17 of the foci-firmware
+//! handler-lift plan. The glob re-export
 //! below brings in the lifted handlers (and their macro-generated ankyra
 //! bookkeeping items) so that `crate::ankyra::handlers::foci::*` in
 //! `provider.rs` resolves all seven handlers correctly.

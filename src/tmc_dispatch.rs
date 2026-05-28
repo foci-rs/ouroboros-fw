@@ -5,8 +5,8 @@
 //! `Commission`, `Calibrate`, and `Tune` remain in the tmc_control main
 //! loop because they mutate `motor_enabled` / `enable_pin` / engine
 //! state. Everything else — SetCurrent / SetEncoder / SetEncoderDir /
-//! DumpRegisters / TraceStart / TraceStop / TraceInfo / TraceFetch, and the
-//! `#[cfg(feature = "dev")]` Read / Write pair — dispatches here.
+//! DumpRegisters, and the `#[cfg(feature = "dev")]` Read / Write pair —
+//! dispatches here.
 
 use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 use foci_tmc4671::spi::Tmc4671Spi;
@@ -16,7 +16,6 @@ use rtic_monotonics::fugit::ExtU64;
 use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
 use crate::board_config::CURRENT_SCALE_MA_PER_LSB;
-use crate::state::trace::trace_buf;
 
 fn report_invalid_channel(channel: u8) {
     ::ankyra::klipper_reply_from!(
@@ -170,109 +169,6 @@ pub(crate) async fn handle_tmc_request(
         TmcRequestKind::SetDecouplingFeedforward { .. } => {}
         TmcRequestKind::SetPositionLead { .. } => {}
         TmcRequestKind::SetPhaseAdvance { .. } => {}
-        TmcRequestKind::TraceStart { oid, preset } => {
-            let Some(buf) = (unsafe { trace_buf(channel) }) else {
-                report_invalid_channel(channel);
-                return Err(());
-            };
-            let preset = match preset {
-                foci_firmware::trace::PRESET_FULL => foci_firmware::trace::PRESET_FULL,
-                foci_firmware::trace::PRESET_VELOCITY => foci_firmware::trace::PRESET_VELOCITY,
-                foci_firmware::trace::PRESET_HOLD => foci_firmware::trace::PRESET_HOLD,
-                _ => foci_firmware::trace::PRESET_FAST,
-            };
-            if tmc
-                .write_register(foci_tmc4671::registers::STATUS_FLAGS, 0)
-                .await
-                .is_err()
-            {
-                defmt::warn!("trace start: STATUS_FLAGS clear failed");
-            }
-            buf.start(oid, preset);
-            buf.set_phase(0);
-        }
-        TmcRequestKind::TraceStop { .. } => {
-            let Some(buf) = (unsafe { trace_buf(channel) }) else {
-                report_invalid_channel(channel);
-                return Err(());
-            };
-            buf.stop();
-        }
-        // During active commissioning, trace requests queue until the
-        // engine reaches a terminal state (Continue/PhaseChanged both
-        // `continue` before rx.recv()). By that point stop() has run,
-        // so FetchResult::Busy is protocol-correct but not observable
-        // during commissioning. The Python FOCI_TRACE command runs
-        // after commissioning completes, so this is not a functional gap.
-        TmcRequestKind::TraceInfo { oid } => {
-            let Some(trace) = (unsafe { trace_buf(channel) }) else {
-                report_invalid_channel(channel);
-                return Err(());
-            };
-            let info = trace.info(oid);
-            ::ankyra::klipper_reply_from!(
-                &mut crate::_ankyra_config::Sender,
-                foci_firmware::ankyra::replies::FociTraceInfoResult,
-                oid: u8 = oid,
-                state: u8 = info.state,
-                generation: u8 = info.generation,
-                preset: u8 = info.preset,
-                count: u16 = info.count,
-                phase: u8 = info.phase_id,
-                sample_period_us: u16 = info.sample_period_us,
-                dropped: u16 = info.dropped,
-            );
-        }
-        TmcRequestKind::TraceFetch {
-            oid,
-            offset,
-            generation,
-        } => {
-            let Some(buf) = (unsafe { trace_buf(channel) }) else {
-                report_invalid_channel(channel);
-                return Err(());
-            };
-            match buf.fetch(oid, offset, generation) {
-                foci_firmware::trace::FetchResult::Ok(ring_idx) => {
-                    let data = match buf.preset() {
-                        foci_firmware::trace::PRESET_FULL => buf.sample_bytes_full(ring_idx),
-                        foci_firmware::trace::PRESET_VELOCITY => {
-                            buf.sample_bytes_velocity(ring_idx)
-                        }
-                        foci_firmware::trace::PRESET_HOLD => buf.sample_bytes_hold(ring_idx),
-                        _ => buf.sample_bytes_fast(ring_idx),
-                    };
-                    ::ankyra::klipper_reply_from!(
-                        &mut crate::_ankyra_config::Sender,
-                        foci_firmware::ankyra::replies::FociTraceData,
-                        oid: u8 = oid,
-                        offset: u16 = offset,
-                        status: u8 = 0,
-                        data: &[u8] = data,
-                    );
-                }
-                foci_firmware::trace::FetchResult::Busy => {
-                    ::ankyra::klipper_reply_from!(
-                        &mut crate::_ankyra_config::Sender,
-                        foci_firmware::ankyra::replies::FociTraceData,
-                        oid: u8 = oid,
-                        offset: u16 = offset,
-                        status: u8 = 1,
-                        data: &[u8] = &[],
-                    );
-                }
-                foci_firmware::trace::FetchResult::Invalid => {
-                    ::ankyra::klipper_reply_from!(
-                        &mut crate::_ankyra_config::Sender,
-                        foci_firmware::ankyra::replies::FociTraceData,
-                        oid: u8 = oid,
-                        offset: u16 = offset,
-                        status: u8 = 2,
-                        data: &[u8] = &[],
-                    );
-                }
-            }
-        }
         TmcRequestKind::Commission { .. } => {
             defmt::warn!("handle_tmc_request: Commission handled by main loop");
         }

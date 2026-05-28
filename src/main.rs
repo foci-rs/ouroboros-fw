@@ -49,7 +49,6 @@ mod app {
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
     use crate::state::tmc::*;
-    use crate::state::trace::*;
     use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
     use foci_firmware::state::lifecycle::*;
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
@@ -343,34 +342,6 @@ mod app {
         }
 
         crate::board_init::enable_dwt_cyccnt();
-
-        // Initialize trace buffers in CCM RAM
-        unsafe {
-            // Use addr_of_mut! to avoid creating a reference to the mutable static
-            let ptr =
-                core::ptr::addr_of_mut!(TRACE_BUFS).cast::<foci_firmware::trace::TraceBuffer>();
-            // Validate address is in CCM range
-            let addr = ptr as usize;
-            defmt::assert!(
-                (0x2000_0000..0x2002_0000).contains(&addr),
-                "TRACE_BUFS not in DTCM RAM: {:#010x}",
-                addr
-            );
-            defmt::info!(
-                "trace: buffers at {:#010x}, size {} bytes",
-                addr,
-                core::mem::size_of::<foci_firmware::trace::TraceBuffer>()
-                    * crate::board_config::TMC_CHANNEL_COUNT as usize
-            );
-            for channel in 0..crate::board_config::TMC_CHANNEL_COUNT as usize {
-                core::ptr::write(ptr.add(channel), {
-                    let mut buf = core::mem::zeroed::<foci_firmware::trace::TraceBuffer>();
-                    // reset() sets magic and all fields to valid initial state
-                    buf.reset();
-                    buf
-                });
-            }
-        }
 
         // Initialize TriggerDomain
         // SAFETY: init runs once before any task starts. No concurrent access.
@@ -840,12 +811,6 @@ mod app {
                     continue;
                 };
                 let mut tmc = Tmc4671Spi::new(device);
-                let trace = unsafe { trace_buf(channel).expect("validated TMC channel") };
-
-                // Capture deadline before engine.step() so SPI time consumed
-                // by the engine reduces the remaining trace budget.
-                let engine_tick_deadline =
-                    Mono::now() + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
 
                 // Sequential borrows: engine.step() consumes the backend
                 // first, then drive_commission_result re-borrows it for
@@ -904,34 +869,6 @@ mod app {
                 use foci_firmware::commission_dispatch::CommissionOutcome;
                 match outcome {
                     CommissionOutcome::Continue => {
-                        let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                            continue;
-                        };
-                        let mut tmc = Tmc4671Spi::new(device);
-                        // Trace capture during Continue tick — engine.step's
-                        // SPI eats into the 1ms trace budget.
-                        foci_firmware::trace::sample_tick(
-                            &mut tmc,
-                            trace,
-                            || {
-                                engine_tick_deadline
-                                    .checked_duration_since(Mono::now())
-                                    .map(|d| d.to_micros())
-                            },
-                            || Mono::now() > engine_tick_deadline,
-                            520,
-                        )
-                        .await;
-                        let _ = tmc;
                         if TMC_DISABLE_SIGNAL.try_take().is_some() {
                             quiesce_and_report_tmc_fault!();
                             continue 'control_loop;
@@ -950,19 +887,8 @@ mod app {
                     CommissionOutcome::PhaseChanged {
                         oid,
                         phase_id,
-                        engine_kind,
+                        engine_kind: _,
                     } => {
-                        use foci_firmware::commissioning::types::EngineKind;
-                        // Start fast trace on ClosedLoopEntry for Stage 1
-                        // commission only (not Calibrate, not Selftest, not
-                        // OuterTune).
-                        if phase_id == foci_firmware::autotune::PhaseId::ClosedLoopEntry
-                            && engine_kind == EngineKind::Commission
-                            && !trace.is_capturing()
-                        {
-                            trace.start(oid, foci_firmware::trace::PRESET_FAST);
-                        }
-                        trace.set_phase(phase_id.to_u8());
                         emit_phase_reply(oid, phase_id);
                         if TMC_DISABLE_SIGNAL.try_take().is_some() {
                             quiesce_and_report_tmc_fault!();
@@ -972,9 +898,6 @@ mod app {
                         continue 'control_loop;
                     }
                     CommissionOutcome::Terminal { reply, actions } => {
-                        if actions.stop_trace {
-                            trace.stop();
-                        }
                         {
                             let channel_state = &mut control[channel as usize];
                             let mut state = dispatch_state(
@@ -1497,10 +1420,6 @@ mod app {
                                     next_commission_trace_seq!(channel),
                                 ),
                             );
-                            // Trace start deferred to ClosedLoopEntry phase transition
-                            // (see PhaseChanged handler). Spec scopes Stage 1 trace to
-                            // ClosedLoopEntry only — starting here would add SPI reads
-                            // throughout inner diagnostics/electrical ID phases.
                         }
                         TmcRequest {
                             kind:
@@ -1612,23 +1531,6 @@ mod app {
                                 tau_residual_permille,
                                 inner_warning_flags,
                             };
-                            let Some(trace) = (unsafe { trace_buf(channel) }) else {
-                                release_commissioning();
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                emit_invalid_channel_diagnostic(channel);
-                                ctx.shared.app_state.lock(|state| {
-                                    if crate::firmware_ctx::enter_shutdown(state) {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "Invalid TMC channel",
-                                            read_tim5(),
-                                        );
-                                    }
-                                });
-                                continue;
-                            };
                             channel_state.commission_engine = Some(
                                 foci_firmware::commission::CommissioningEngine::new_outer_for_tmc_with_trace_seq(
                                     oid,
@@ -1638,8 +1540,6 @@ mod app {
                                     next_commission_trace_seq!(channel),
                                 ),
                             );
-                            trace.start(oid, foci_firmware::trace::PRESET_FULL);
-                            trace.set_phase(foci_firmware::autotune::PhaseId::MechanicalId.to_u8());
                         }
                         TmcRequest {
                             kind: TmcRequestKind::SelfTest { oid },
@@ -1731,11 +1631,6 @@ mod app {
                 // 1ms timeout — write position target via SPI
                 Either::Second(()) => {}
             }
-
-            // Capture tick start for deadline computation. Must be after
-            // select() resolves — placing it before would include the 1ms
-            // idle wait, making deadline checks ineffective.
-            let tick_start = Mono::now();
 
             // Check emergency disable (non-blocking). Triggered by EXTI
             // STATUS interrupt or enter_shutdown. Disables motor and reports
@@ -1860,23 +1755,6 @@ mod app {
                         .await;
                 }
                 channel_state.feedforward_was_active = ff_active;
-
-                // Trace capture: read registers and store sample.
-                // Deadline = tick start + 1ms. Budget check inside ensures
-                // trace SPI reads don't overrun the tick period.
-                let tick_deadline = tick_start + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
-                foci_firmware::trace::sample_tick(
-                    &mut tmc,
-                    unsafe { trace_buf(channel).expect("validated TMC channel") },
-                    || {
-                        tick_deadline
-                            .checked_duration_since(Mono::now())
-                            .map(|d| d.to_micros())
-                    },
-                    || Mono::now() > tick_deadline,
-                    520,
-                )
-                .await;
 
                 if tmc_state(channel)
                     .pid_error_sums_clear
