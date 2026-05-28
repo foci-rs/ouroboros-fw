@@ -51,3 +51,4 @@ heapless = { version = "0.9", features = ["defmt"] }
 
 [features]
 dev = ["foci-firmware/dev"]
+trace = ["foci-firmware/trace", "foci-usb-stm32/trace"]

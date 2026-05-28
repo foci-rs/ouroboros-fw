@@ -28,6 +28,8 @@ mod tmc_mux;
 mod transport;
 mod trigger_domain;
 mod usb_task;
+#[cfg(feature = "trace")]
+mod usb_trace;
 
 #[rtic::app(device = crate::pac, peripherals = true, dispatchers = [UART4, UART5, USART3])]
 mod app {
@@ -136,6 +138,7 @@ mod app {
         enable_pin: &'a mut Output<'static>,
     ) -> OuroborosBackend<'a, 'spi> {
         OuroborosBackend {
+            channel,
             tmc,
             enable_pin,
             tmc_state: tmc_state(channel),
@@ -263,6 +266,8 @@ mod app {
         defmt::info!("SYSCLK: 520 MHz, USB: 48 MHz");
 
         crate::board_init::init_tim5_clock();
+        #[cfg(feature = "trace")]
+        crate::usb_trace::note_trace_boot();
         crate::board_init::init_stepdir_gpio();
         defmt::info!("TIM5 enabled for Klipper clock @ 260 MHz, STEP/DIR GPIO configured");
 
@@ -553,6 +558,17 @@ mod app {
 
         let mut control =
             [const { ChannelControl::new() }; crate::board_config::TMC_CHANNEL_COUNT as usize];
+        let mut commission_trace_engine_seq =
+            [0u32; crate::board_config::TMC_CHANNEL_COUNT as usize];
+
+        macro_rules! next_commission_trace_seq {
+            ($channel:expr) => {{
+                let idx = $channel as usize;
+                let seq = commission_trace_engine_seq[idx];
+                commission_trace_engine_seq[idx] = commission_trace_engine_seq[idx].wrapping_add(1);
+                seq
+            }};
+        }
 
         // Counter for 1s STATUS_FLAGS poll (1000 * 1ms ticks).
         let mut status_poll_counter: u16 = 0;
@@ -1081,9 +1097,10 @@ mod app {
                                     }
                                     defmt::info!("Auto-calibrating on enable");
                                     channel_state.commission_engine = Some(
-                                        foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc(
+                                        foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc_with_trace_seq(
                                             0,
                                             tmc_state(channel),
+                                            next_commission_trace_seq!(channel),
                                         ),
                                     );
                                     // Don't set motor_enabled/tmc_state().motor_armed yet --
@@ -1206,9 +1223,10 @@ mod app {
                             // performs encoder alignment and closed-loop entry.
                             channel_state.calibrated = false;
                             channel_state.commission_engine = Some(
-                                foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc(
+                                foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
+                                    next_commission_trace_seq!(channel),
                                 ),
                             );
                         }
@@ -1472,10 +1490,11 @@ mod app {
                             }
                             channel_state.calibrated = false;
                             channel_state.commission_engine = Some(
-                                foci_firmware::commission::CommissioningEngine::new_commission_for_tmc(
+                                foci_firmware::commission::CommissioningEngine::new_commission_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
                                     foci_firmware::autotune::CommissionProfile::from_u8(profile),
+                                    next_commission_trace_seq!(channel),
                                 ),
                             );
                             // Trace start deferred to ClosedLoopEntry phase transition
@@ -1611,11 +1630,12 @@ mod app {
                                 continue;
                             };
                             channel_state.commission_engine = Some(
-                                foci_firmware::commission::CommissioningEngine::new_outer_for_tmc(
+                                foci_firmware::commission::CommissioningEngine::new_outer_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
                                     outer_params,
                                     entry_snapshot,
+                                    next_commission_trace_seq!(channel),
                                 ),
                             );
                             trace.start(oid, foci_firmware::trace::PRESET_FULL);
@@ -1659,9 +1679,10 @@ mod app {
                             // Engine tick drives selftest phases; SelftestDone
                             // handler sends the completion signal.
                             channel_state.commission_engine = Some(
-                                foci_firmware::commission::CommissioningEngine::new_selftest_for_tmc(
+                                foci_firmware::commission::CommissioningEngine::new_selftest_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
+                                    next_commission_trace_seq!(channel),
                                 ),
                             );
                         }

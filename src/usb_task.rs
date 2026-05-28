@@ -26,6 +26,11 @@ pub async fn pump(
 ) {
     USB_WAKE.wait().await;
 
+    #[cfg(feature = "trace")]
+    if foci_usb_stm32::is_configured() && !crate::usb_trace::is_configured() {
+        crate::usb_trace::note_usb_configured();
+    }
+
     // Process pending USB events. `poll` reads new bulk OUT data and
     // drains bulk IN. Loop while making progress — break if the
     // protocol cannot consume any bytes (incomplete frame).
@@ -61,4 +66,9 @@ pub async fn pump(
     }
     // Final poll to flush any remaining TX.
     foci_usb_stm32::poll();
+    #[cfg(feature = "trace")]
+    {
+        crate::usb_trace::drain_pending_events();
+        crate::usb_trace::drain_once();
+    }
 }
