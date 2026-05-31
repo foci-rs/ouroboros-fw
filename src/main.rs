@@ -23,6 +23,7 @@ mod interrupts;
 mod platform_impl;
 mod state;
 mod stepper_pins;
+mod tmc_control_glue;
 mod tmc_dispatch;
 mod tmc_mux;
 mod transport;
@@ -49,6 +50,7 @@ mod app {
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
     use crate::state::tmc::*;
+    use crate::tmc_control_glue::ActionDisposition;
     use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
     use foci_firmware::context::stepper::{
         StepperArmCheckBoard, StepperStopCheckBoard, StepperTimerStateBoard,
@@ -915,6 +917,22 @@ mod app {
                         continue;
                     };
                     let mut tmc = Tmc4671Spi::new(device);
+                    let actions = runtimes[channel as usize].classify_request(req.clone());
+                    let request_handled = matches!(
+                        crate::tmc_control_glue::apply_pre_request_actions(
+                            channel,
+                            actions,
+                            |reason| {
+                                ctx.shared.app_state.lock(|state| {
+                                    if crate::firmware_ctx::enter_shutdown(state) {
+                                        crate::tmc_control_glue::emit_shutdown(reason);
+                                    }
+                                });
+                            }
+                        ),
+                        ActionDisposition::RequestHandled
+                    );
+
                     let commissioning_blocked = match &req.kind {
                         TmcRequestKind::SetEnable(true) => {
                             !runtimes[channel as usize].is_calibrated()
@@ -931,6 +949,7 @@ mod app {
                     let runtime = &mut runtimes[channel as usize];
 
                     match req {
+                        _ if request_handled => {}
                         TmcRequest {
                             kind: TmcRequestKind::SetEnable(enabled),
                             ..
