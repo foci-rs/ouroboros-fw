@@ -13,6 +13,10 @@
 //! the handler bodies into `foci-firmware`; this file is what they
 //! bind against.
 
+use foci_firmware::context::stepper::{
+    self, StepperDrainStats, StepperEnqueueError, StepperQueueBoard, StepperResetBoard,
+    StepperTimerStateBoard,
+};
 use foci_firmware::context::trsync::{self, TriggerDispatchBoard, TriggerDomainState, TrsyncBoard};
 use foci_firmware::context::{
     BoardChannels, ClockSource, EndstopHost, QueueFull, ShutdownRecovery, StateAccess, StepperHost,
@@ -66,6 +70,119 @@ fn emit_queue_full_diagnostic(channel: u8, queue_len: usize) {
         data0: u32 = queue_len as u32,
         data1: u32 = crate::state::stepper::STEP_QUEUE_DEPTH as u32,
     );
+}
+
+pub(crate) struct OuroborosStepperBoard {
+    pub(crate) tmc_state: Option<&'static foci_firmware::state::tmc::TmcChannelState>,
+}
+
+impl StepperTimerStateBoard for OuroborosStepperBoard {
+    fn set_timer_active(
+        &mut self,
+        state: &mut TriggerDomainState,
+        stepper_idx: usize,
+        active: bool,
+    ) {
+        set_timer_active(state, stepper_idx, active);
+    }
+}
+
+impl StepperQueueBoard for OuroborosStepperBoard {
+    fn queue_stepper_index(&self, channel: u8) -> Result<usize, CommandError> {
+        if self.tmc_state.is_some() {
+            Ok(channel as usize)
+        } else {
+            Err(CommandError::InvalidChannel(channel))
+        }
+    }
+
+    fn queue_was_empty(&self, channel: u8) -> Result<bool, CommandError> {
+        // SAFETY: P2 is the sole producer. Queue len read is safe from P2.
+        let queue = unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
+        Ok(queue.is_empty())
+    }
+
+    fn prepare_and_enqueue(
+        &mut self,
+        channel: u8,
+        move_: foci_klipper::stepper::StepMove,
+    ) -> Result<usize, StepperEnqueueError> {
+        // SAFETY: P2 stepper state is only accessed from P2 command handlers.
+        let prepared = unsafe {
+            let Some(stepper) = p2_stepper(channel) else {
+                return Err(StepperEnqueueError { queue_len: 0 });
+            };
+            stepper.prepare_move(move_)
+        };
+
+        // SAFETY: P2 is the sole producer.
+        let queue = unsafe {
+            let Some(queue) = step_queue(channel) else {
+                return Err(StepperEnqueueError { queue_len: 0 });
+            };
+            queue
+        };
+        if queue.enqueue(prepared).is_err() {
+            return Err(StepperEnqueueError {
+                queue_len: queue.len(),
+            });
+        }
+        Ok(queue.len())
+    }
+
+    fn motor_armed(&self, _channel: u8) -> bool {
+        self.tmc_state
+            .map(|state| {
+                state
+                    .motor_armed
+                    .load(core::sync::atomic::Ordering::Relaxed)
+            })
+            .unwrap_or(false)
+    }
+
+    fn record_queue_full(&mut self, channel: u8, queue_len: usize) {
+        emit_queue_full_diagnostic(channel, queue_len);
+    }
+
+    fn arm_queue_step_timer(
+        &mut self,
+        state: &mut TriggerDomainState,
+        stepper_idx: usize,
+        _channel: u8,
+    ) {
+        arm_step_timer_if_earlier(read_tim5().wrapping_add(1));
+        self.set_timer_active(state, stepper_idx, true);
+    }
+}
+
+impl StepperResetBoard for OuroborosStepperBoard {
+    fn reset_stepper_index(&self, channel: u8) -> Result<usize, CommandError> {
+        if self.tmc_state.is_some() {
+            Ok(channel as usize)
+        } else {
+            Err(CommandError::InvalidChannel(channel))
+        }
+    }
+
+    fn drain_step_queue(&mut self, channel: u8) -> Result<StepperDrainStats, CommandError> {
+        // SAFETY: Timer is not active (checked by shared policy), P3 is quiesced.
+        let queue = unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
+        while queue.dequeue().is_some() {}
+        Ok(StepperDrainStats::ZERO)
+    }
+
+    fn reset_stepper_clocks(&mut self, channel: u8, clock: u32) -> Result<(), CommandError> {
+        // SAFETY: Shared policy accepted only because the timer is inactive, so
+        // P3 is not using the ISR stepper. P2 stepper is only accessed from P2.
+        unsafe {
+            foci_klipper::commands::stepper::reset_stepper_clocks(
+                p2_stepper(channel).ok_or(CommandError::InvalidChannel(channel))?,
+                isr_stepper(channel).ok_or(CommandError::InvalidChannel(channel))?,
+                clock,
+            );
+        }
+        Ok(())
+    }
 }
 
 struct OuroborosTrsyncBoard<'a> {
@@ -245,93 +362,26 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
         channel: u8,
         move_: foci_klipper::stepper::StepMove,
     ) -> Result<(), CommandError> {
-        let channel_idx = channel as usize;
         let tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
             .ok_or(CommandError::InvalidChannel(channel))?;
 
-        use foci_klipper::commands::stepper::{QueueStepResult, queue_step_hw};
-
         with_trigger_domain(|td| {
-            let need_reset = td.stepper_stop[channel_idx].need_reset;
-
-            // SAFETY: P2 is the sole producer. Queue len read is safe from P2.
-            let queue =
-                unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
-            let queue_was_empty = queue.is_empty();
-
-            // `queue_step_hw` takes the move's step count — the
-            // caller-provided `count` field on `StepMove`.
-            match queue_step_hw(need_reset, move_.count, queue_was_empty) {
-                Ok(QueueStepResult::Discarded) => Ok(()),
-                Err(e) => Err(e),
-                Ok(_result) => {
-                    // SAFETY: P2 stepper state is only accessed from P2 command handlers.
-                    let prepared = unsafe {
-                        p2_stepper(channel)
-                            .ok_or(CommandError::InvalidChannel(channel))?
-                            .prepare_move(move_)
-                    };
-
-                    // SAFETY: P2 is the sole producer.
-                    let ok = queue.enqueue(prepared).is_ok();
-                    if !ok {
-                        emit_queue_full_diagnostic(channel, queue.len());
-                        return Err(CommandError::QueueFull);
-                    }
-
-                    if !td.timer_active(channel_idx)
-                        && tmc_state
-                            .motor_armed
-                            .load(core::sync::atomic::Ordering::Relaxed)
-                    {
-                        let now = read_tim5();
-                        arm_step_timer_if_earlier(now.wrapping_add(1));
-                        td.set_timer_active(channel_idx, true);
-                    }
-                    Ok(())
-                }
-            }
+            let mut board = OuroborosStepperBoard {
+                tmc_state: Some(tmc_state),
+            };
+            stepper::queue_step_move(td.state_mut(), &mut board, channel, move_)
         })
     }
 
     fn reset_step_clock(&mut self, channel: u8, clock: u32) -> Result<(), CommandError> {
-        let channel_idx = channel as usize;
-        let _tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
+        let tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
             .ok_or(CommandError::InvalidChannel(channel))?;
 
         with_trigger_domain(|td| {
-            foci_klipper::commands::stepper::reset_step_clock_hw(
-                td.stepper_stop[channel_idx].timer_active,
-            )?;
-
-            // Drain any stale items from a previous stop.
-            // SAFETY: Timer is not active (checked above), P3 is quiesced.
-            loop {
-                let dequeued = unsafe {
-                    step_queue(channel)
-                        .ok_or(CommandError::InvalidChannel(channel))?
-                        .dequeue()
-                };
-                if dequeued.is_none() {
-                    break;
-                }
-            }
-
-            // SAFETY: reset_step_clock_hw accepted only because the timer is
-            // inactive, so P3 is not using the ISR stepper. P2 stepper is only
-            // accessed from P2 command handlers.
-            unsafe {
-                foci_klipper::commands::stepper::reset_stepper_clocks(
-                    p2_stepper(channel).ok_or(CommandError::InvalidChannel(channel))?,
-                    isr_stepper(channel).ok_or(CommandError::InvalidChannel(channel))?,
-                    clock,
-                );
-            }
-
-            if !td.stepper_stop[channel_idx].blocked_by_trigger {
-                td.stepper_stop[channel_idx].need_reset = false;
-            }
-            Ok(())
+            let mut board = OuroborosStepperBoard {
+                tmc_state: Some(tmc_state),
+            };
+            stepper::reset_step_clock(td.state_mut(), &mut board, channel, clock)
         })
     }
 }
