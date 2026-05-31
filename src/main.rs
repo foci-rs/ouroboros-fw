@@ -174,7 +174,6 @@ mod app {
                 .store(false, core::sync::atomic::Ordering::Relaxed);
         }
         lower_all_enable_pins(enable_pins);
-        release_commissioning();
     }
 
     fn channel_needs_safe_state(channel: u8, channel_state: &ChannelControl) -> bool {
@@ -912,7 +911,6 @@ mod app {
                             apply_stepper_post_action(actions.stepper, &mut state, channel);
                         }
                         emit_terminal_reply(reply);
-                        release_commissioning();
                     }
                 }
                 // For Terminal cases, fall through to normal channel-receive processing.
@@ -923,16 +921,6 @@ mod app {
                 // Channel message received
                 Either::First(Ok(req)) => {
                     if req.channel >= crate::board_config::TMC_CHANNEL_COUNT {
-                        if matches!(
-                            &req.kind,
-                            TmcRequestKind::Calibrate { .. }
-                                | TmcRequestKind::Commission { .. }
-                                | TmcRequestKind::Tune { .. }
-                                | TmcRequestKind::SelfTest { .. }
-                                | TmcRequestKind::SetEnable(true)
-                        ) {
-                            release_commissioning();
-                        }
                         emit_invalid_channel_diagnostic(req.channel);
                         ctx.shared.app_state.lock(|state| {
                             if crate::firmware_ctx::enter_shutdown(state) {
@@ -947,16 +935,6 @@ mod app {
                     }
                     let channel = req.channel;
                     let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                        if matches!(
-                            &req.kind,
-                            TmcRequestKind::Calibrate { .. }
-                                | TmcRequestKind::Commission { .. }
-                                | TmcRequestKind::Tune { .. }
-                                | TmcRequestKind::SelfTest { .. }
-                                | TmcRequestKind::SetEnable(true)
-                        ) {
-                            release_commissioning();
-                        }
                         ctx.shared.app_state.lock(|state| {
                             if crate::firmware_ctx::enter_shutdown(state) {
                                 ::ankyra::klipper_shutdown_from!(
@@ -998,7 +976,6 @@ mod app {
                                     // asynchronously; the CalibrateDone handler will
                                     // complete encoder alignment and closed-loop entry.
                                     if commissioning_blocked {
-                                        release_commissioning();
                                         defmt::warn!(
                                             "Auto-calibrate rejected: commissioning already active"
                                         );
@@ -1007,7 +984,6 @@ mod app {
                                     if !foci_firmware::tmc::auto_calibrate_on_enable_allowed(
                                         channel,
                                     ) {
-                                        release_commissioning();
                                         defmt::warn!("Auto-calibrate rejected: host gate closed");
                                         continue;
                                     }
@@ -1015,7 +991,6 @@ mod app {
                                         .commission_in_flight
                                         .swap(true, core::sync::atomic::Ordering::Relaxed)
                                     {
-                                        release_commissioning();
                                         defmt::warn!(
                                             "Auto-calibrate skipped: commission in flight"
                                         );
@@ -1037,7 +1012,6 @@ mod app {
                                 // Existing precondition: this arm runs only when
                                 // calibrated == true (the !calibrated branch above
                                 // continues to the auto-calibrate path).
-                                release_commissioning();
                                 if channel_state.motor_enabled {
                                     defmt::info!("Motor enable sync (already armed)");
                                     continue;
@@ -1113,7 +1087,6 @@ mod app {
                         } => {
                             if commissioning_blocked {
                                 defmt::warn!("foci_calibrate rejected: commission in flight");
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1130,7 +1103,6 @@ mod app {
                             }
                             if channel_state.motor_enabled {
                                 defmt::warn!("foci_calibrate rejected: motor already enabled");
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1364,7 +1336,6 @@ mod app {
                             ..
                         } => {
                             if commissioning_blocked {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1380,7 +1351,6 @@ mod app {
                                 continue;
                             }
                             if channel_state.motor_enabled {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1399,7 +1369,6 @@ mod app {
                                 .current_limit_reg
                                 .load(core::sync::atomic::Ordering::Relaxed);
                             if current_limit == 0 {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1445,7 +1414,6 @@ mod app {
                             // holding in closed-loop position mode (from Stage 1
                             // or a prior calibrate). Reject if not ready.
                             if commissioning_blocked {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1461,7 +1429,6 @@ mod app {
                                 continue;
                             }
                             if !channel_state.motor_enabled || !channel_state.calibrated {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1480,7 +1447,6 @@ mod app {
                                 .current_limit_reg
                                 .load(core::sync::atomic::Ordering::Relaxed);
                             if current_limit == 0 {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1549,7 +1515,6 @@ mod app {
                             ..
                         } => {
                             if commissioning_blocked {
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1565,7 +1530,6 @@ mod app {
                             }
                             if channel_state.motor_enabled {
                                 defmt::warn!("foci_selftest rejected: motor enabled");
-                                release_commissioning();
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
