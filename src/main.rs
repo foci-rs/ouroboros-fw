@@ -56,6 +56,7 @@ mod app {
     use foci_firmware::state::lifecycle::*;
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
     use foci_firmware::state::trsync::*;
+    use foci_firmware::tmc_control::{BoardAction, BoardActions, StepperAction, TmcControlRuntime};
 
     bind_interrupts!(struct Irqs {
         DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH0>;
@@ -86,29 +87,15 @@ mod app {
     const CHANNEL1_STATUS_FALLBACK: u8 = 1;
 
     type TmcEnablePins = [Output<'static>; crate::board_config::TMC_CHANNEL_COUNT as usize];
+    type TmcRuntimes = [TmcControlRuntime; crate::board_config::TMC_CHANNEL_COUNT as usize];
 
-    struct ChannelControl {
-        calibrated: bool,
-        motor_enabled: bool,
-        stored_gains: Option<foci_firmware::pid::InnerLoopGains>,
-        commission_engine: Option<foci_firmware::commission::CommissioningEngine>,
-        velocity_scale: u32,
-        feedforward_was_active: bool,
-        pid_error_clear_countdown_ms: u8,
-    }
+    const _: [(); 2] = [(); crate::board_config::TMC_CHANNEL_COUNT as usize];
 
-    impl ChannelControl {
-        const fn new() -> Self {
-            Self {
-                calibrated: false,
-                motor_enabled: false,
-                stored_gains: None,
-                commission_engine: None,
-                velocity_scale: 0,
-                feedforward_was_active: false,
-                pid_error_clear_countdown_ms: 0,
-            }
-        }
+    fn new_tmc_runtimes() -> TmcRuntimes {
+        [
+            TmcControlRuntime::new_for_channel(0),
+            TmcControlRuntime::new_for_channel(1),
+        ]
     }
 
     fn tmc_state(channel: u8) -> &'static foci_firmware::state::tmc::TmcChannelState {
@@ -117,21 +104,6 @@ mod app {
 
     fn stepper_state(channel: u8) -> &'static foci_firmware::state::stepper::StepperChannelState {
         foci_firmware::state::stepper::stepper_channel(channel).expect("validated TMC channel")
-    }
-
-    fn dispatch_state<'a>(
-        channel: u8,
-        calibrated: &'a mut bool,
-        motor_enabled: &'a mut bool,
-        stored_gains: &'a mut Option<foci_firmware::pid::InnerLoopGains>,
-    ) -> foci_firmware::commission_dispatch::DispatchState<'a> {
-        foci_firmware::commission_dispatch::DispatchState::new(
-            tmc_state(channel),
-            stepper_state(channel),
-            calibrated,
-            motor_enabled,
-            stored_gains,
-        )
     }
 
     fn ouroboros_backend<'a, 'spi>(
@@ -157,18 +129,27 @@ mod app {
         }
     }
 
-    fn quiesce_all_channels(
-        control: &mut [ChannelControl; crate::board_config::TMC_CHANNEL_COUNT as usize],
-        enable_pins: &mut TmcEnablePins,
-    ) {
+    fn apply_runtime_stepper_actions(channel: u8, actions: BoardActions) {
+        for action in actions {
+            match action {
+                BoardAction::Stepper(StepperAction::StopNow) => {
+                    stepper_stop_from_p1(channel);
+                }
+                BoardAction::Stepper(StepperAction::None)
+                | BoardAction::Stepper(StepperAction::ArmCheck { .. })
+                | BoardAction::Stepper(StepperAction::ApplyPostAction(_))
+                | BoardAction::Shutdown(_)
+                | BoardAction::SignalEmergencyDisable
+                | BoardAction::Reply(_)
+                | BoardAction::DelegatedDiagnostic(_) => {}
+            }
+        }
+    }
+
+    fn quiesce_all_channels(runtimes: &mut TmcRuntimes, enable_pins: &mut TmcEnablePins) {
         for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-            stepper_stop_from_p1(channel);
-            let channel_state = &mut control[channel as usize];
-            channel_state.commission_engine.take();
-            channel_state.calibrated = false;
-            channel_state.motor_enabled = false;
-            channel_state.feedforward_was_active = false;
-            channel_state.pid_error_clear_countdown_ms = 0;
+            let actions = runtimes[channel as usize].prepare_shutdown_quiesce();
+            apply_runtime_stepper_actions(channel, actions);
             tmc_state(channel)
                 .commission_in_flight
                 .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -176,9 +157,9 @@ mod app {
         lower_all_enable_pins(enable_pins);
     }
 
-    fn channel_needs_safe_state(channel: u8, channel_state: &ChannelControl) -> bool {
-        channel_state.motor_enabled
-            || channel_state.commission_engine.is_some()
+    fn channel_needs_safe_state(channel: u8, runtime: &TmcControlRuntime) -> bool {
+        runtime.is_motor_enabled()
+            || runtime.is_commission_active()
             || tmc_state(channel)
                 .motor_armed
                 .load(core::sync::atomic::Ordering::Relaxed)
@@ -187,22 +168,18 @@ mod app {
                 .load(core::sync::atomic::Ordering::Relaxed)
     }
 
-    fn commissioning_request_blocked(
-        control: &[ChannelControl; crate::board_config::TMC_CHANNEL_COUNT as usize],
-        _request_channel: u8,
-    ) -> bool {
+    fn commissioning_request_blocked(runtimes: &TmcRuntimes, _request_channel: u8) -> bool {
         for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-            let channel_state = &control[channel as usize];
-            if channel_state.commission_engine.is_some() {
+            if runtimes[channel as usize].is_commission_active() {
                 return true;
             }
         }
         false
     }
 
-    fn channel_may_be_energized(channel: u8, channel_state: &ChannelControl) -> bool {
-        channel_state.motor_enabled
-            || channel_state.commission_engine.is_some()
+    fn channel_may_be_energized(channel: u8, runtime: &TmcControlRuntime) -> bool {
+        runtime.is_motor_enabled()
+            || runtime.is_commission_active()
             || tmc_state(channel)
                 .motor_armed
                 .load(core::sync::atomic::Ordering::Relaxed)
@@ -529,8 +506,7 @@ mod app {
         exti.imr(0).modify(|w| w.set_line(2, true)); // Unmask
         defmt::info!("TMC4671 STATUS EXTI2 enabled");
 
-        let mut control =
-            [const { ChannelControl::new() }; crate::board_config::TMC_CHANNEL_COUNT as usize];
+        let mut runtimes = new_tmc_runtimes();
         let mut commission_trace_engine_seq =
             [0u32; crate::board_config::TMC_CHANNEL_COUNT as usize];
 
@@ -559,7 +535,7 @@ mod app {
 
             macro_rules! quiesce_and_report_tmc_fault {
                 () => {{
-                    quiesce_all_channels(&mut control, enable_pins);
+                    quiesce_all_channels(&mut runtimes, enable_pins);
                     let mut reported_shutdown = false;
                     for report_channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(report_channel) else {
@@ -628,7 +604,7 @@ mod app {
                     let channel = CHANNEL1_STATUS_FALLBACK;
                     let mut critical_fault = false;
                     if channel < crate::board_config::TMC_CHANNEL_COUNT
-                        && channel_may_be_energized(channel, &control[channel as usize])
+                        && channel_may_be_energized(channel, &runtimes[channel as usize])
                     {
                         let Some(device) = ctx.local.tmc_mux.device(channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -682,7 +658,7 @@ mod app {
             // no further commands arrive but the TMC4671 remains energized.
             if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
                 if !shutdown_handled {
-                    quiesce_all_channels(&mut control, enable_pins);
+                    quiesce_all_channels(&mut runtimes, enable_pins);
                     for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -697,15 +673,11 @@ mod app {
                             continue;
                         };
                         let mut tmc = Tmc4671Spi::new(device);
-                        let channel_state = &mut control[channel as usize];
+                        let runtime = &mut runtimes[channel as usize];
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        let mut state = dispatch_state(
-                            channel,
-                            &mut channel_state.calibrated,
-                            &mut channel_state.motor_enabled,
-                            &mut channel_state.stored_gains,
-                        );
+                        let mut state =
+                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
                         // disarm_motor clears tmc_state().motor_armed, motor_enabled, calibrated,
                         // and runs restore_safe_state_via_backend (best-effort SPI writes).
                         foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state).await;
@@ -725,16 +697,14 @@ mod app {
                 while rx.try_recv().is_ok() {}
                 let mut needs_disarm = [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
                 for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                    let channel_state = &mut control[channel as usize];
                     needs_disarm[channel as usize] =
-                        channel_needs_safe_state(channel, channel_state);
+                        channel_needs_safe_state(channel, &runtimes[channel as usize]);
                 }
                 // Stop steppers, clear local armed/enabled state, and lower both
                 // enable pins before any SPI awaits in the restore-safe-state pass.
-                quiesce_all_channels(&mut control, enable_pins);
+                quiesce_all_channels(&mut runtimes, enable_pins);
 
                 for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                    let channel_state = &mut control[channel as usize];
                     if needs_disarm[channel as usize] {
                         let Some(device) = ctx.local.tmc_mux.device(channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -751,16 +721,12 @@ mod app {
                         let mut tmc = Tmc4671Spi::new(device);
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        let mut state = dispatch_state(
-                            channel,
-                            &mut channel_state.calibrated,
-                            &mut channel_state.motor_enabled,
-                            &mut channel_state.stored_gains,
-                        );
+                        let runtime = &mut runtimes[channel as usize];
+                        let mut state =
+                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
                         foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state).await;
                     }
-                    channel_state.stored_gains = None;
-                    channel_state.velocity_scale = 0;
+                    runtimes[channel as usize].reset_runtime_state();
                     tmc_state(channel)
                         .commission_in_flight
                         .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -787,7 +753,7 @@ mod app {
             // Tick the commissioning engine if one is active.
             // Each step() does at most 1ms of work, then returns.
             for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                if control[channel as usize].commission_engine.is_none() {
+                if !runtimes[channel as usize].is_commission_active() {
                     continue;
                 }
 
@@ -817,17 +783,20 @@ mod app {
                 // Sequential borrows: engine.step() consumes the backend
                 // first, then drive_commission_result re-borrows it for
                 // post-processing. Two scoped constructions keep the
-                // borrows non-overlapping.
+                // borrows non-overlapping and preserve the emergency-disable
+                // check between them.
                 let result = {
-                    let channel_state = &mut control[channel as usize];
-                    let mut backend =
-                        ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                    channel_state
-                        .commission_engine
-                        .as_mut()
-                        .unwrap()
-                        .step(&mut backend)
-                        .await
+                    let runtime = &mut runtimes[channel as usize];
+                    let mut engine = runtime
+                        .take_commission_engine()
+                        .expect("commission engine active");
+                    let result = {
+                        let mut backend =
+                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                        engine.step(&mut backend).await
+                    };
+                    runtime.set_commission_engine(engine);
+                    result
                 };
                 if TMC_DISABLE_SIGNAL.try_take().is_some() {
                     let _ = tmc;
@@ -836,23 +805,26 @@ mod app {
                 }
 
                 let outcome = {
-                    let channel_state = &mut control[channel as usize];
-                    let mut backend =
-                        ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                    let mut state = dispatch_state(
-                        channel,
-                        &mut channel_state.calibrated,
-                        &mut channel_state.motor_enabled,
-                        &mut channel_state.stored_gains,
-                    );
-                    foci_firmware::commission_dispatch::drive_commission_result(
-                        result,
-                        &mut channel_state.commission_engine,
-                        &mut backend,
-                        &mut state,
-                        TMC_CONFIG.pwm_maxcnt,
-                    )
-                    .await
+                    let runtime = &mut runtimes[channel as usize];
+                    let mut engine_slot = runtime.take_commission_engine();
+                    let outcome = {
+                        let mut backend =
+                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                        let mut state =
+                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
+                        foci_firmware::commission_dispatch::drive_commission_result(
+                            result,
+                            &mut engine_slot,
+                            &mut backend,
+                            &mut state,
+                            TMC_CONFIG.pwm_maxcnt,
+                        )
+                        .await
+                    };
+                    if let Some(engine) = engine_slot {
+                        runtime.set_commission_engine(engine);
+                    }
+                    outcome
                 };
                 let _ = tmc;
                 if TMC_DISABLE_SIGNAL.try_take().is_some() {
@@ -901,13 +873,9 @@ mod app {
                     }
                     CommissionOutcome::Terminal { reply, actions } => {
                         {
-                            let channel_state = &mut control[channel as usize];
-                            let mut state = dispatch_state(
-                                channel,
-                                &mut channel_state.calibrated,
-                                &mut channel_state.motor_enabled,
-                                &mut channel_state.stored_gains,
-                            );
+                            let runtime = &mut runtimes[channel as usize];
+                            let mut state =
+                                runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
                             apply_stepper_post_action(actions.stepper, &mut state, channel);
                         }
                         emit_terminal_reply(reply);
@@ -949,18 +917,18 @@ mod app {
                     let mut tmc = Tmc4671Spi::new(device);
                     let commissioning_blocked = match &req.kind {
                         TmcRequestKind::SetEnable(true) => {
-                            !control[channel as usize].calibrated
-                                && commissioning_request_blocked(&control, channel)
+                            !runtimes[channel as usize].is_calibrated()
+                                && commissioning_request_blocked(&runtimes, channel)
                         }
                         TmcRequestKind::Calibrate { .. }
                         | TmcRequestKind::Commission { .. }
                         | TmcRequestKind::Tune { .. }
                         | TmcRequestKind::SelfTest { .. } => {
-                            commissioning_request_blocked(&control, channel)
+                            commissioning_request_blocked(&runtimes, channel)
                         }
                         _ => false,
                     };
-                    let channel_state = &mut control[channel as usize];
+                    let runtime = &mut runtimes[channel as usize];
 
                     match req {
                         TmcRequest {
@@ -968,7 +936,7 @@ mod app {
                             ..
                         } => {
                             if enabled {
-                                if !channel_state.calibrated {
+                                if !runtime.is_calibrated() {
                                     // Auto-calibrate: Klipper may send enable before
                                     // the Python module's foci_calibrate arrives due
                                     // to queue_digital_out timing. Launch the
@@ -997,7 +965,7 @@ mod app {
                                         continue;
                                     }
                                     defmt::info!("Auto-calibrating on enable");
-                                    channel_state.commission_engine = Some(
+                                    runtime.set_commission_engine(
                                         foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc_with_trace_seq(
                                             0,
                                             tmc_state(channel),
@@ -1012,7 +980,7 @@ mod app {
                                 // Existing precondition: this arm runs only when
                                 // calibrated == true (the !calibrated branch above
                                 // continues to the auto-calibrate path).
-                                if channel_state.motor_enabled {
+                                if runtime.is_motor_enabled() {
                                     defmt::info!("Motor enable sync (already armed)");
                                     continue;
                                 }
@@ -1022,12 +990,8 @@ mod app {
                                         &mut tmc,
                                         enable_pin(enable_pins, channel),
                                     );
-                                    let mut state = dispatch_state(
-                                        channel,
-                                        &mut channel_state.calibrated,
-                                        &mut channel_state.motor_enabled,
-                                        &mut channel_state.stored_gains,
-                                    );
+                                    let mut state = runtime
+                                        .dispatch_state(tmc_state(channel), stepper_state(channel));
                                     if let Err(error) =
                                         foci_firmware::tmc_ops::arm_motor_electrical(
                                             &mut backend,
@@ -1047,10 +1011,10 @@ mod app {
                                         continue;
                                     }
                                     apply_stepper_post_action(
-                                    foci_firmware::commission_dispatch::StepperPostAction::ArmZeroPosition,
-                                    &mut state,
-                                    channel,
-                                );
+                                        foci_firmware::commission_dispatch::StepperPostAction::ArmZeroPosition,
+                                        &mut state,
+                                        channel,
+                                    );
                                 }
 
                                 defmt::info!("Motor enabled (calibrated, step/dir armed)");
@@ -1063,12 +1027,8 @@ mod app {
                                         &mut tmc,
                                         enable_pin(enable_pins, channel),
                                     );
-                                    let mut state = dispatch_state(
-                                        channel,
-                                        &mut channel_state.calibrated,
-                                        &mut channel_state.motor_enabled,
-                                        &mut channel_state.stored_gains,
-                                    );
+                                    let mut state = runtime
+                                        .dispatch_state(tmc_state(channel), stepper_state(channel));
                                     foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state)
                                         .await;
                                 }
@@ -1101,7 +1061,7 @@ mod app {
                                 );
                                 continue;
                             }
-                            if channel_state.motor_enabled {
+                            if runtime.is_motor_enabled() {
                                 defmt::warn!("foci_calibrate rejected: motor already enabled");
                                 tmc_state(channel)
                                     .commission_in_flight
@@ -1119,8 +1079,8 @@ mod app {
                             }
                             // Engine tick will drive ADC cal; CalibrateDone handler
                             // performs encoder alignment and closed-loop entry.
-                            channel_state.calibrated = false;
-                            channel_state.commission_engine = Some(
+                            runtime.clear_calibrated();
+                            runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
@@ -1159,7 +1119,7 @@ mod app {
                                 torque_p,
                                 torque_i,
                             };
-                            channel_state.stored_gains = Some(gains);
+                            runtime.set_stored_gains(gains);
                             let (flux_reg, torque_reg) =
                                 foci_firmware::tmc_ops::pack_inner_gain_registers(gains);
                             let flux_ok = tmc
@@ -1350,7 +1310,7 @@ mod app {
                                 );
                                 continue;
                             }
-                            if channel_state.motor_enabled {
+                            if runtime.is_motor_enabled() {
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1383,8 +1343,8 @@ mod app {
                                 );
                                 continue;
                             }
-                            channel_state.calibrated = false;
-                            channel_state.commission_engine = Some(
+                            runtime.clear_calibrated();
+                            runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_commission_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
@@ -1428,7 +1388,7 @@ mod app {
                                 );
                                 continue;
                             }
-                            if !channel_state.motor_enabled || !channel_state.calibrated {
+                            if !runtime.is_motor_enabled() || !runtime.is_calibrated() {
                                 tmc_state(channel)
                                     .commission_in_flight
                                     .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -1500,7 +1460,7 @@ mod app {
                                 tau_residual_permille,
                                 inner_warning_flags,
                             };
-                            channel_state.commission_engine = Some(
+                            runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_outer_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
@@ -1528,7 +1488,7 @@ mod app {
                                 );
                                 continue;
                             }
-                            if channel_state.motor_enabled {
+                            if runtime.is_motor_enabled() {
                                 defmt::warn!("foci_selftest rejected: motor enabled");
                                 tmc_state(channel)
                                     .commission_in_flight
@@ -1545,7 +1505,7 @@ mod app {
                             }
                             // Engine tick drives selftest phases; SelftestDone
                             // handler sends the completion signal.
-                            channel_state.commission_engine = Some(
+                            runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_selftest_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
@@ -1569,7 +1529,7 @@ mod app {
                                 });
                             }
                             // Compute feedforward scale factor from step_width and PWM config
-                            channel_state.velocity_scale =
+                            runtime.set_velocity_scale(
                                 foci_firmware::tmc::compute_velocity_scale_factor(
                                     tmc_state(channel)
                                         .step_width_value
@@ -1577,7 +1537,8 @@ mod app {
                                         .unsigned_abs(),
                                     CLOCK_FREQ,
                                     TMC_CONFIG.pwm_freq_hz(),
-                                );
+                                ),
+                            );
                         }
                         other => {
                             if handle_tmc_request(other, &mut tmc).await.is_err() {
@@ -1635,7 +1596,7 @@ mod app {
                 };
                 let mut tmc = Tmc4671Spi::new(device);
                 let poll_channel1_critical = channel == CHANNEL1_STATUS_FALLBACK
-                    && channel_may_be_energized(channel, &control[channel as usize]);
+                    && channel_may_be_energized(channel, &runtimes[channel as usize]);
                 if poll_channel1_critical {
                     match tmc
                         .read_register(foci_tmc4671::registers::STATUS_FLAGS)
@@ -1665,7 +1626,7 @@ mod app {
                         }
                     }
                 }
-                let channel_state = &mut control[channel as usize];
+                let runtime = &mut runtimes[channel as usize];
 
                 // Hardware step/dir: position target is driven by TIM5 CC1 ISR
                 // toggling STEP GPIO → TMC4671 hardware step counter. No SPI
@@ -1679,12 +1640,12 @@ mod app {
                 // - tmc_state().velocity_feedforward enabled (host config)
                 // - commission_engine is None (not commissioning)
                 // - homing not active
-                let ff_active = channel_state.motor_enabled
-                    && channel_state.velocity_scale != 0
+                let ff_active = runtime.is_motor_enabled()
+                    && runtime.velocity_scale() != 0
                     && tmc_state(channel)
                         .velocity_feedforward
                         .load(core::sync::atomic::Ordering::Relaxed)
-                    && channel_state.commission_engine.is_none();
+                    && !runtime.is_commission_active();
 
                 if ff_active {
                     let homing_active = homing != 0;
@@ -1705,7 +1666,7 @@ mod app {
                             .velocity_feedforward_multiplier
                             .load(core::sync::atomic::Ordering::Relaxed);
                         foci_firmware::tmc::compute_velocity_offset_scaled(
-                            channel_state.velocity_scale,
+                            runtime.velocity_scale(),
                             interval,
                             forward,
                             multiplier,
@@ -1715,30 +1676,31 @@ mod app {
                     let _ = tmc
                         .write_register(foci_tmc4671::registers::PID_VELOCITY_OFFSET, offset as u32)
                         .await;
-                } else if channel_state.feedforward_was_active {
+                } else if runtime.feedforward_was_active() {
                     // Feedforward just deactivated — clear stale offset.
                     let _ = tmc
                         .write_register(foci_tmc4671::registers::PID_VELOCITY_OFFSET, 0)
                         .await;
                 }
-                channel_state.feedforward_was_active = ff_active;
+                runtime.set_feedforward_was_active(ff_active);
 
                 if tmc_state(channel)
                     .pid_error_sums_clear
                     .swap(false, core::sync::atomic::Ordering::Relaxed)
                 {
-                    channel_state.pid_error_clear_countdown_ms = HOLD_SETTLE_DELAY_MS;
+                    runtime.set_pid_error_clear_countdown_ms(HOLD_SETTLE_DELAY_MS);
                 }
                 let timer_active = stepper_state(channel)
                     .timer_active_mirror
                     .load(core::sync::atomic::Ordering::Relaxed);
-                if channel_state.motor_enabled
-                    && channel_state.commission_engine.is_none()
+                if runtime.is_motor_enabled()
+                    && !runtime.is_commission_active()
                     && !timer_active
-                    && channel_state.pid_error_clear_countdown_ms > 0
+                    && runtime.pid_error_clear_countdown_ms() > 0
                 {
-                    channel_state.pid_error_clear_countdown_ms -= 1;
-                    if channel_state.pid_error_clear_countdown_ms == 0 {
+                    let next = runtime.pid_error_clear_countdown_ms().saturating_sub(1);
+                    runtime.set_pid_error_clear_countdown_ms(next);
+                    if next == 0 {
                         if foci_firmware::tmc_ops::settle_hold_and_clear_pid_errors(
                             &mut tmc,
                             tmc_state(channel),
@@ -1768,7 +1730,7 @@ mod app {
                 {
                     use core::sync::atomic::Ordering::Relaxed;
                     match homing {
-                        1 if channel_state.motor_enabled => {
+                        1 if runtime.is_motor_enabled() => {
                             // SuppressPending: write position P with I=0.
                             let pos_p = tmc_state(channel).position_p_value.load(Relaxed);
                             let reg = (pos_p as u32) << 16; // P in upper half, I=0
@@ -1780,7 +1742,7 @@ mod app {
                                 .await;
                             defmt::info!("homing: channel {} position I suppressed", channel);
                         }
-                        3 if channel_state.motor_enabled => {
+                        3 if runtime.is_motor_enabled() => {
                             // RestorePending: restore position I and clear integrator.
                             let pos_p = tmc_state(channel).position_p_value.load(Relaxed);
                             let pos_i = tmc_state(channel).position_i_value.load(Relaxed);
@@ -1823,7 +1785,7 @@ mod app {
                         let _ = tmc;
                         quiesce_and_report_tmc_fault!();
                         continue 'control_loop;
-                    } else if channel_state.motor_enabled
+                    } else if runtime.is_motor_enabled()
                         && flags & (PID_LIMIT_MASK | PWM_LIMIT_MASK) != 0
                     {
                         defmt::warn!("TMC4671 channel {} STATUS: {:#010x}", channel, flags);
