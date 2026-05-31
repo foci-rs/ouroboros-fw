@@ -1001,43 +1001,83 @@ mod app {
                                     defmt::info!("Motor enable sync (already armed)");
                                     continue;
                                 }
-                                {
-                                    let mut backend = ouroboros_backend(
-                                        channel,
-                                        &mut tmc,
-                                        enable_pin(enable_pins, channel),
-                                    );
-                                    let mut state = runtime
-                                        .dispatch_state(tmc_state(channel), stepper_state(channel));
-                                    if let Err(error) =
-                                        foci_firmware::tmc_ops::arm_motor_electrical(
-                                            &mut backend,
-                                            &mut state,
-                                        )
-                                        .await
-                                    {
-                                        defmt::error!(
-                                            "Motor enable rejected by sentinel verify: {}",
-                                            error
-                                        );
-                                        foci_firmware::tmc_ops::disarm_motor(
-                                            &mut backend,
-                                            &mut state,
-                                        )
-                                        .await;
-                                        continue;
-                                    }
-                                    apply_stepper_post_action(
-                                        foci_firmware::commission_dispatch::StepperPostAction::ArmZeroPosition,
-                                        &mut state,
-                                        channel,
-                                    );
-                                }
 
-                                defmt::info!("Motor enabled (calibrated, step/dir armed)");
+                                let actions = runtime.prepare_enable_request(tmc_state(channel));
+                                for action in actions {
+                                    if let BoardAction::Stepper(StepperAction::ArmCheck {
+                                        post_action,
+                                    }) = action
+                                    {
+                                        if !runtime.restore_phase_advance_now(&mut tmc).await {
+                                            defmt::warn!(
+                                                "phase advance: failed to restore ABN offset before arm"
+                                            );
+                                            continue 'control_loop;
+                                        }
+                                        {
+                                            let mut backend = ouroboros_backend(
+                                                channel,
+                                                &mut tmc,
+                                                enable_pin(enable_pins, channel),
+                                            );
+                                            let mut state = runtime.dispatch_state(
+                                                tmc_state(channel),
+                                                stepper_state(channel),
+                                            );
+                                            if let Err(error) =
+                                                foci_firmware::tmc_ops::arm_motor_electrical(
+                                                    &mut backend,
+                                                    &mut state,
+                                                )
+                                                .await
+                                            {
+                                                defmt::error!(
+                                                    "Motor enable rejected by sentinel verify: {}",
+                                                    error
+                                                );
+                                                foci_firmware::tmc_ops::disarm_motor(
+                                                    &mut backend,
+                                                    &mut state,
+                                                )
+                                                .await;
+                                                continue 'control_loop;
+                                            }
+                                            apply_stepper_post_action(
+                                                post_action,
+                                                &mut state,
+                                                channel,
+                                            );
+                                        }
+
+                                        defmt::info!("Motor enabled (calibrated, step/dir armed)");
+                                    }
+                                }
                             } else {
                                 // Disable: stop stepping first, then kill motor electrically.
-                                stepper_stop_from_p1(channel);
+                                let stop_disposition =
+                                    crate::tmc_control_glue::apply_pre_request_actions(
+                                        channel,
+                                        runtime.prepare_disable_request(),
+                                        |reason| {
+                                            ctx.shared.app_state.lock(|state| {
+                                                if crate::firmware_ctx::enter_shutdown(state) {
+                                                    crate::tmc_control_glue::emit_shutdown(reason);
+                                                }
+                                            });
+                                        },
+                                    );
+                                debug_assert_eq!(
+                                    stop_disposition,
+                                    ActionDisposition::ContinueRequest
+                                );
+
+                                let phase_advance_restored =
+                                    runtime.restore_phase_advance_now(&mut tmc).await;
+                                if !phase_advance_restored {
+                                    defmt::warn!(
+                                        "phase advance: failed to restore ABN offset before disarm"
+                                    );
+                                }
                                 {
                                     let mut backend = ouroboros_backend(
                                         channel,
@@ -1054,6 +1094,10 @@ mod app {
                                 stepper_state(channel)
                                     .position
                                     .store(0, core::sync::atomic::Ordering::Relaxed);
+
+                                if !phase_advance_restored {
+                                    continue;
+                                }
 
                                 defmt::info!("TMC4671 motor disabled");
                             }
