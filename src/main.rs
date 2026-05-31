@@ -50,6 +50,9 @@ mod app {
     use crate::helpers::trsync::*;
     use crate::state::tmc::*;
     use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
+    use foci_firmware::context::stepper::{
+        StepperArmCheckBoard, StepperStopCheckBoard, StepperTimerStateBoard,
+    };
     use foci_firmware::state::lifecycle::*;
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
     use foci_firmware::state::trsync::*;
@@ -2112,8 +2115,24 @@ mod app {
     #[task(priority = 2)]
     async fn stop_check(_ctx: stop_check::Context, channel: u8) {
         with_trigger_domain(|td| {
-            td.set_timer_active(channel as usize, false);
+            let mut board = crate::firmware_ctx::OuroborosStepperBoard { tmc_state: None };
+            foci_firmware::context::stepper::stop_check(td.state_mut(), &mut board, channel);
         });
+    }
+
+    impl StepperStopCheckBoard for crate::firmware_ctx::OuroborosStepperBoard {
+        fn stop_check_index(&self, channel: u8) -> Option<usize> {
+            Some(channel as usize)
+        }
+
+        fn clear_step_timer(
+            &mut self,
+            state: &mut foci_firmware::context::trsync::TriggerDomainState,
+            stepper_idx: usize,
+            _channel: u8,
+        ) {
+            self.set_timer_active(state, stepper_idx, false);
+        }
     }
 
     /// P2 software task: arm TIM5 CC1 if motor is ready and queue has moves.
@@ -2123,28 +2142,44 @@ mod app {
     #[task(priority = 2)]
     async fn arm_check(_ctx: arm_check::Context, channel: u8) {
         with_trigger_domain(|td| {
-            let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
-                return;
-            };
-            if !tmc_state
-                .motor_armed
-                .load(core::sync::atomic::Ordering::Relaxed)
-                || td.timer_active(channel as usize)
-            {
-                return;
-            }
+            let mut board = crate::firmware_ctx::OuroborosStepperBoard { tmc_state: None };
+            foci_firmware::context::stepper::arm_check(td.state_mut(), &mut board, channel);
+        });
+    }
 
+    impl StepperArmCheckBoard for crate::firmware_ctx::OuroborosStepperBoard {
+        fn arm_check_index(&self, channel: u8) -> Option<usize> {
+            foci_firmware::state::tmc::tmc_channel(channel).map(|_| channel as usize)
+        }
+
+        fn motor_armed(&self, channel: u8) -> bool {
+            foci_firmware::state::tmc::tmc_channel(channel)
+                .map(|state| {
+                    state
+                        .motor_armed
+                        .load(core::sync::atomic::Ordering::Relaxed)
+                })
+                .unwrap_or(false)
+        }
+
+        fn queue_has_moves(&self, channel: u8) -> bool {
             // SAFETY: P2 is the sole producer while the timer is inactive.
-            let queue_has_moves = unsafe {
+            unsafe {
                 crate::state::stepper::step_queue(channel)
                     .map(|queue| !queue.is_empty())
                     .unwrap_or(false)
-            };
-            if queue_has_moves {
-                arm_step_timer_if_earlier(read_tim5().wrapping_add(1));
-                td.set_timer_active(channel as usize, true);
             }
-        });
+        }
+
+        fn arm_check_timer(
+            &mut self,
+            state: &mut foci_firmware::context::trsync::TriggerDomainState,
+            stepper_idx: usize,
+            _channel: u8,
+        ) {
+            arm_step_timer_if_earlier(read_tim5().wrapping_add(1));
+            self.set_timer_active(state, stepper_idx, true);
+        }
     }
 
     /// TIM5 CC1 step timer interrupt.

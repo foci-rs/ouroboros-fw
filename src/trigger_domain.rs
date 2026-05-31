@@ -60,11 +60,6 @@ impl TriggerDomain {
         set_timer_active(&mut self.state, stepper_idx, active);
     }
 
-    /// Read `timer_active` for a stepper.
-    pub(crate) fn timer_active(&self, stepper_idx: usize) -> bool {
-        timer_active(&self.state, stepper_idx)
-    }
-
     /// Attempt to trigger a trsync, dispatching stop signals to all
     /// linked steppers. Returns the trigger result.
     ///
@@ -141,10 +136,6 @@ pub(crate) fn set_timer_active(state: &mut TriggerDomainState, stepper_idx: usiz
             .timer_active_mirror
             .store(active, core::sync::atomic::Ordering::Relaxed);
     }
-}
-
-pub(crate) fn timer_active(state: &TriggerDomainState, stepper_idx: usize) -> bool {
-    state.stepper_stop[stepper_idx].timer_active
 }
 
 pub(crate) fn disarm_trigger_scheduler(state: &mut TriggerDomainState) {
