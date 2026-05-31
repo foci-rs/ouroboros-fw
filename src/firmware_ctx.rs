@@ -32,7 +32,7 @@ use crate::state::stepper::{isr_stepper, p2_stepper, step_queue};
 use crate::state::tmc::{TMC_REQUEST_SENDER, release_commissioning, try_acquire_commissioning};
 use crate::trigger_domain::{
     OuroborosDispatchBoard, PHYSICAL_STEPPER_INDICES, disarm_trigger_scheduler, reprogram_cc2,
-    set_timer_active, stop_physical_stepper_no_lock, with_trigger_domain,
+    set_timer_active, with_trigger_domain,
 };
 
 fn emit_invalid_stepper_channel_and_shutdown(state: &mut State, channel: u8) {
@@ -147,45 +147,9 @@ pub(crate) fn enter_shutdown(state: &mut State) -> bool {
 
     let entered = foci_firmware::helpers::lifecycle::enter_shutdown(state);
     if entered {
-        // Quiesce TriggerDomain: cancel timers, stop steppers
         with_trigger_domain(|td| {
-            td.scheduler.clear();
-            let tim5 = embassy_stm32::pac::TIM5;
-            tim5.dier().modify(|w| w.set_ccie(1, false));
-            // Stop physical steppers
-            for &idx in PHYSICAL_STEPPER_INDICES {
-                stop_physical_stepper_no_lock(idx);
-                td.set_timer_active(idx, false);
-            }
-            // Clear transient stepper state
-            for ss in td.stepper_stop.iter_mut() {
-                ss.need_reset = true;
-                ss.blocked_by_trigger = false;
-                ss.blocked_by_trsync = None;
-            }
-            // Clear transient trsync state (preserve OID maps).
-            // Trigger each trsync to clear can_trigger per spec,
-            // then cancel timers and pending reports.
-            for trsync_idx in 0..td.trsync.len() {
-                // Find OID for this index (if configured)
-                let oid = td
-                    .trsync_by_oid
-                    .iter()
-                    .find(|&(_, &idx)| idx == trsync_idx)
-                    .map(|(&oid, _)| oid)
-                    .unwrap_or(0);
-                let ts = &mut td.trsync[trsync_idx];
-                ts.trigger(oid, 0, 0); // Sets can_trigger=false
-                ts.cancel_timers();
-                ts.clear_pending_report();
-            }
-            // Clear stop signals and endstop homing
-            for sig in td.stop_signals.iter_mut() {
-                *sig = None;
-            }
-            for es in td.endstops.iter_mut() {
-                es.reset();
-            }
+            let mut board = OuroborosTrsyncBoard { state: &*state };
+            trsync::shutdown_quiesce(td.state_mut(), &mut board);
         });
         // Post-quiesce atomics — order preserved from pre-lift body
         REPORT_PENDING.store(false, Relaxed);
