@@ -7,6 +7,10 @@
 use core::sync::atomic::Ordering::Relaxed;
 
 use embassy_stm32::gpio::Output;
+use foci_firmware::commissioning::backend::{
+    CommissionBoardConfig, CommissionEncoderRead, CommissionMotorControl, CommissionRegisterIo,
+    CommissionTiming, CommissionTrace,
+};
 use foci_tmc4671::{registers::ABN_DECODER_COUNT, spi::Tmc4671Spi};
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;
@@ -25,7 +29,7 @@ pub(crate) struct OuroborosBackend<'a, 'spi> {
     pub(crate) tmc_state: &'static TmcChannelState,
 }
 
-impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBackend<'a, 'spi> {
+impl<'a, 'spi> CommissionRegisterIo for OuroborosBackend<'a, 'spi> {
     type Error = foci_tmc4671::spi::SpiError<
         embedded_hal_bus::spi::DeviceError<embassy_stm32::spi::Error, core::convert::Infallible>,
     >;
@@ -64,17 +68,11 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
     ) -> Result<u32, Self::Error> {
         self.tmc.read_register_verified(reg, expected).await
     }
+}
 
+impl<'a, 'spi> CommissionMotorControl for OuroborosBackend<'a, 'spi> {
     fn store_motor_sentinel(&self, value: u32) {
         self.tmc_state.motor_sentinel.store(value, Relaxed);
-    }
-
-    #[cfg(feature = "trace")]
-    fn record_commission_trace_event(
-        &mut self,
-        event: foci_firmware::trace_events::CommissionTraceEvent,
-    ) {
-        crate::usb_trace::request_commission_event(self.channel, event);
     }
 
     fn set_enable_pin(&mut self, state: bool) {
@@ -84,7 +82,19 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
             self.enable_pin.set_low();
         }
     }
+}
 
+impl<'a, 'spi> CommissionTrace for OuroborosBackend<'a, 'spi> {
+    #[cfg(feature = "trace")]
+    fn record_commission_trace_event(
+        &mut self,
+        event: foci_firmware::trace_events::CommissionTraceEvent,
+    ) {
+        crate::usb_trace::request_commission_event(self.channel, event);
+    }
+}
+
+impl<'a, 'spi> CommissionEncoderRead for OuroborosBackend<'a, 'spi> {
     async fn read_encoder_count(&mut self) -> u32 {
         self.tmc.read_register(ABN_DECODER_COUNT).await.unwrap_or(0)
     }
@@ -92,7 +102,9 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
     async fn try_read_encoder_count(&mut self) -> Result<u32, Self::Error> {
         self.tmc.read_register(ABN_DECODER_COUNT).await
     }
+}
 
+impl<'a, 'spi> CommissionTiming for OuroborosBackend<'a, 'spi> {
     fn elapsed_us(&self) -> u64 {
         // Microseconds since Mono start. Returned as u64 so deadline
         // comparisons in commission.rs never wrap across the 51-second
@@ -111,6 +123,12 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
         }
     }
 
+    async fn delay_us(&mut self, us: u32) {
+        Mono::delay((us as u64).micros()).await;
+    }
+}
+
+impl<'a, 'spi> CommissionBoardConfig for OuroborosBackend<'a, 'spi> {
     fn current_limit(&self) -> u32 {
         self.tmc_state.current_limit_reg.load(Relaxed)
     }
@@ -149,9 +167,5 @@ impl<'a, 'spi> foci_firmware::commission::CommissioningBackend for OuroborosBack
 
     fn operational_voltage_limit(&self) -> u32 {
         self.tmc_state.voltage_limit_cfg.load(Relaxed)
-    }
-
-    async fn delay_us(&mut self, us: u32) {
-        Mono::delay((us as u64).micros()).await;
     }
 }
