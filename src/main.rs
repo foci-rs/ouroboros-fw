@@ -79,7 +79,7 @@ mod app {
 
     use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 
-    use crate::board_config::TMC_CONFIG;
+    use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
     use crate::commissioning_backend::OuroborosBackend;
 
     const HOLD_SETTLE_DELAY_MS: u8 = 100;
@@ -509,6 +509,13 @@ mod app {
         defmt::info!("TMC4671 STATUS EXTI2 enabled");
 
         let mut runtimes = new_tmc_runtimes();
+        // Board constants bundled once and passed to runtime commissioning tick.
+        let tmc_control_config = foci_firmware::tmc_control::TmcControlConfig::new(
+            CLOCK_FREQ,
+            TMC_CONFIG.pwm_freq_hz(),
+            CURRENT_SCALE_MA_PER_LSB,
+            TMC_CONFIG,
+        );
         let mut commission_trace_engine_seq =
             [0u32; crate::board_config::TMC_CHANNEL_COUNT as usize];
 
@@ -783,22 +790,18 @@ mod app {
                 let mut tmc = Tmc4671Spi::new(device);
 
                 // Sequential borrows: engine.step() consumes the backend
-                // first, then drive_commission_result re-borrows it for
-                // post-processing. Two scoped constructions keep the
-                // borrows non-overlapping and preserve the emergency-disable
-                // check between them.
+                // first, then dispatch re-borrows it for post-processing.
+                // Two scoped constructions keep the borrows non-overlapping
+                // and preserve the emergency-disable check between them.
                 let result = {
                     let runtime = &mut runtimes[channel as usize];
-                    let mut engine = runtime
-                        .take_commission_engine()
-                        .expect("commission engine active");
-                    let result = {
-                        let mut backend =
-                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        engine.step(&mut backend).await
-                    };
-                    runtime.set_commission_engine(engine);
-                    result
+                    let mut backend =
+                        ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                    runtime.step_commissioning(&mut backend).await
+                };
+                let Some(result) = result else {
+                    let _ = tmc;
+                    continue;
                 };
                 if TMC_DISABLE_SIGNAL.try_take().is_some() {
                     let _ = tmc;
@@ -806,27 +809,19 @@ mod app {
                     continue 'control_loop;
                 }
 
-                let outcome = {
+                let action = {
                     let runtime = &mut runtimes[channel as usize];
-                    let mut engine_slot = runtime.take_commission_engine();
-                    let outcome = {
-                        let mut backend =
-                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        let mut state =
-                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
-                        foci_firmware::commission_dispatch::drive_commission_result(
+                    let mut backend =
+                        ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                    runtime
+                        .drive_commissioning_result(
                             result,
-                            &mut engine_slot,
                             &mut backend,
-                            &mut state,
-                            TMC_CONFIG.pwm_maxcnt,
+                            tmc_state(channel),
+                            stepper_state(channel),
+                            &tmc_control_config,
                         )
                         .await
-                    };
-                    if let Some(engine) = engine_slot {
-                        runtime.set_commission_engine(engine);
-                    }
-                    outcome
                 };
                 let _ = tmc;
                 if TMC_DISABLE_SIGNAL.try_take().is_some() {
@@ -842,9 +837,12 @@ mod app {
                     continue 'control_loop;
                 }
 
-                use foci_firmware::commission_dispatch::CommissionOutcome;
-                match outcome {
-                    CommissionOutcome::Continue => {
+                use foci_firmware::tmc_control::CommissionTickAction;
+                let Some(action) = action else {
+                    continue;
+                };
+                match action {
+                    CommissionTickAction::Continue => {
                         if TMC_DISABLE_SIGNAL.try_take().is_some() {
                             quiesce_and_report_tmc_fault!();
                             continue 'control_loop;
@@ -860,7 +858,7 @@ mod app {
                         Mono::delay(1.millis()).await;
                         continue 'control_loop;
                     }
-                    CommissionOutcome::PhaseChanged {
+                    CommissionTickAction::PhaseChanged {
                         oid,
                         phase_id,
                         engine_kind: _,
@@ -873,7 +871,7 @@ mod app {
                         Mono::delay(1.millis()).await;
                         continue 'control_loop;
                     }
-                    CommissionOutcome::Terminal { reply, actions } => {
+                    CommissionTickAction::Terminal { reply, actions } => {
                         {
                             let runtime = &mut runtimes[channel as usize];
                             let mut state =
