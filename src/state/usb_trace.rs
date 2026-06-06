@@ -4,7 +4,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 
-use foci_firmware::trace_stream::{FrameBuf, StatusSample};
+use foci_firmware::trace::stream::{FrameBuf, StatusSample};
 
 /// Motion/counter queue depth in frames.
 ///
