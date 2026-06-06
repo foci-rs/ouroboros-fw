@@ -4,21 +4,20 @@
 //! board-agnostic [`foci_firmware::commission::CommissioningEngine`] can
 //! perform register I/O, pin control, and timing.
 
-use core::sync::atomic::Ordering::Relaxed;
-
 use embassy_stm32::gpio::Output;
 use foci_firmware::commissioning::backend::{
-    CommissionBoardConfig, CommissionEncoderRead, CommissionMotorControl, CommissionRegisterIo,
-    CommissionTiming, CommissionTrace,
+    CommissionConfigAccess, CommissionEnablePinAccess, CommissionTimingAccess,
+    CommissionTmcSpiAccess, CommissionTmcStateAccess, CommissionTraceAccess,
 };
-use foci_tmc4671::{registers::ABN_DECODER_COUNT, spi::Tmc4671Spi};
+use foci_firmware::config::TmcConfig;
+use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TmcChannelState};
+use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;
 
 use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
 use crate::board_config::TMC_CONFIG;
-use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TmcChannelState};
 
 pub(crate) struct OuroborosBackend<'a, 'spi> {
     #[cfg_attr(not(feature = "trace"), allow(dead_code))]
@@ -29,53 +28,22 @@ pub(crate) struct OuroborosBackend<'a, 'spi> {
     pub(crate) tmc_state: &'static TmcChannelState,
 }
 
-impl<'a, 'spi> CommissionRegisterIo for OuroborosBackend<'a, 'spi> {
-    type Error = foci_tmc4671::spi::SpiError<
-        embedded_hal_bus::spi::DeviceError<embassy_stm32::spi::Error, core::convert::Infallible>,
-    >;
+impl<'a, 'spi> CommissionTmcSpiAccess for OuroborosBackend<'a, 'spi> {
+    type Spi = TmcSpiDevice<'spi>;
 
-    async fn read_register(
-        &mut self,
-        reg: foci_tmc4671::registers::Register,
-    ) -> Result<u32, Self::Error> {
-        self.tmc.read_register(reg).await
-    }
-
-    async fn write_register(
-        &mut self,
-        reg: foci_tmc4671::registers::Register,
-        val: u32,
-    ) -> Result<(), Self::Error> {
-        self.tmc.write_register(reg, val).await
-    }
-
-    fn synthesize_verify_error(&self, expected: u32, actual: u32) -> Self::Error {
-        foci_tmc4671::spi::SpiError::VerifyFailed { expected, actual }
-    }
-
-    async fn write_register_verified(
-        &mut self,
-        reg: foci_tmc4671::registers::Register,
-        val: u32,
-    ) -> Result<(), Self::Error> {
-        self.tmc.write_register_verified(reg, val).await
-    }
-
-    async fn read_register_verified(
-        &mut self,
-        reg: foci_tmc4671::registers::Register,
-        expected: u32,
-    ) -> Result<u32, Self::Error> {
-        self.tmc.read_register_verified(reg, expected).await
+    fn tmc_spi(&mut self) -> &mut Tmc4671Spi<Self::Spi> {
+        self.tmc
     }
 }
 
-impl<'a, 'spi> CommissionMotorControl for OuroborosBackend<'a, 'spi> {
-    fn store_motor_sentinel(&self, value: u32) {
-        self.tmc_state.motor_sentinel.store(value, Relaxed);
+impl<'a, 'spi> CommissionTmcStateAccess for OuroborosBackend<'a, 'spi> {
+    fn tmc_state(&self) -> &'static TmcChannelState {
+        self.tmc_state
     }
+}
 
-    fn set_enable_pin(&mut self, state: bool) {
+impl<'a, 'spi> CommissionEnablePinAccess for OuroborosBackend<'a, 'spi> {
+    fn set_commission_enable_pin(&mut self, state: bool) {
         if state {
             self.enable_pin.set_high();
         } else {
@@ -84,28 +52,14 @@ impl<'a, 'spi> CommissionMotorControl for OuroborosBackend<'a, 'spi> {
     }
 }
 
-impl<'a, 'spi> CommissionTrace for OuroborosBackend<'a, 'spi> {
-    #[cfg(feature = "trace")]
-    fn record_commission_trace_event(
-        &mut self,
-        event: foci_firmware::trace_events::CommissionTraceEvent,
-    ) {
-        crate::usb_trace::request_commission_event(self.channel, event);
+impl<'a, 'spi> CommissionConfigAccess for OuroborosBackend<'a, 'spi> {
+    fn commission_tmc_config(&self) -> &'static TmcConfig {
+        &TMC_CONFIG
     }
 }
 
-impl<'a, 'spi> CommissionEncoderRead for OuroborosBackend<'a, 'spi> {
-    async fn read_encoder_count(&mut self) -> u32 {
-        self.tmc.read_register(ABN_DECODER_COUNT).await.unwrap_or(0)
-    }
-
-    async fn try_read_encoder_count(&mut self) -> Result<u32, Self::Error> {
-        self.tmc.read_register(ABN_DECODER_COUNT).await
-    }
-}
-
-impl<'a, 'spi> CommissionTiming for OuroborosBackend<'a, 'spi> {
-    fn elapsed_us(&self) -> u64 {
+impl<'a, 'spi> CommissionTimingAccess for OuroborosBackend<'a, 'spi> {
+    fn commission_elapsed_us(&self) -> u64 {
         // Microseconds since Mono start. Returned as u64 so deadline
         // comparisons in commission.rs never wrap across the 51-second
         // TIM5 boundary that previously broke the engine.
@@ -114,7 +68,7 @@ impl<'a, 'spi> CommissionTiming for OuroborosBackend<'a, 'spi> {
         Mono::now().duration_since_epoch().to_micros()
     }
 
-    fn is_shutdown_requested(&self) -> bool {
+    fn commission_is_shutdown_requested(&self) -> bool {
         if TMC_DISABLE_SIGNAL.try_take().is_some() {
             TMC_DISABLE_SIGNAL.signal(());
             true
@@ -123,49 +77,17 @@ impl<'a, 'spi> CommissionTiming for OuroborosBackend<'a, 'spi> {
         }
     }
 
-    async fn delay_us(&mut self, us: u32) {
+    async fn commission_delay_us(&mut self, us: u32) {
         Mono::delay((us as u64).micros()).await;
     }
 }
 
-impl<'a, 'spi> CommissionBoardConfig for OuroborosBackend<'a, 'spi> {
-    fn current_limit(&self) -> u32 {
-        self.tmc_state.current_limit_reg.load(Relaxed)
-    }
-
-    fn pwm_maxcnt(&self) -> u16 {
-        TMC_CONFIG.pwm_maxcnt
-    }
-
-    fn bbm_register(&self) -> u32 {
-        TMC_CONFIG.bbm_register()
-    }
-
-    fn dsadc_mdec_register(&self) -> u32 {
-        TMC_CONFIG.dsadc_mdec_register()
-    }
-
-    fn excitation_voltage(&self) -> u16 {
-        TMC_CONFIG.excitation_voltage
-    }
-
-    fn tmc_config(&self) -> &foci_firmware::config::TmcConfig {
-        &TMC_CONFIG
-    }
-
-    fn step_width(&self) -> u32 {
-        self.tmc_state.step_width_value.load(Relaxed).max(0) as u32
-    }
-
-    fn encoder_quadrature_ppr(&self) -> u32 {
-        self.tmc_state.encoder_ppr.load(Relaxed).saturating_mul(4)
-    }
-
-    fn operational_velocity_limit(&self) -> u32 {
-        self.tmc_state.velocity_limit_cfg.load(Relaxed)
-    }
-
-    fn operational_voltage_limit(&self) -> u32 {
-        self.tmc_state.voltage_limit_cfg.load(Relaxed)
+impl<'a, 'spi> CommissionTraceAccess for OuroborosBackend<'a, 'spi> {
+    #[cfg(feature = "trace")]
+    fn record_commission_trace_event_impl(
+        &mut self,
+        event: foci_firmware::trace_events::CommissionTraceEvent,
+    ) {
+        crate::usb_trace::request_commission_event(self.channel, event);
     }
 }
