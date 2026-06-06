@@ -240,6 +240,17 @@ fn header(
     )
 }
 
+fn motion_flags() -> u8 {
+    if TRACE_COUNTERS
+        .motion_drop_gap
+        .swap(false, Ordering::Relaxed)
+    {
+        foci_firmware::trace_stream::FLAG_DROP_GAP_BEFORE_THIS_FRAME
+    } else {
+        0
+    }
+}
+
 fn enqueue_frame(frame: FrameBuf) {
     enqueue_motion(frame);
 }
@@ -251,6 +262,9 @@ fn enqueue_motion(frame: FrameBuf) {
         let queue = motion_queue();
         if queue.enqueue(QueuedFrame::new(frame)).is_err() {
             TRACE_COUNTERS.motion_drops.fetch_add(1, Ordering::Relaxed);
+            TRACE_COUNTERS
+                .motion_drop_gap
+                .store(true, Ordering::Relaxed);
         } else {
             crate::transport::USB_WAKE.signal(());
         }
@@ -500,7 +514,7 @@ pub(crate) fn emit_phase_advance(
         PHASE_ADVANCE_PAYLOAD_LEN,
         SOURCE_KIND_FOCI,
         channel,
-        0,
+        motion_flags(),
     ));
     frame
         .payload_mut(PHASE_ADVANCE_PAYLOAD_LEN)
@@ -591,7 +605,7 @@ pub(crate) async fn sample_tick<B>(
         CRITICAL_PAYLOAD_LEN,
         SOURCE_KIND_FOCI,
         channel,
-        flags,
+        motion_flags(),
     ));
     frame
         .payload_mut(CRITICAL_PAYLOAD_LEN)
@@ -630,7 +644,7 @@ pub(crate) async fn sample_tick<B>(
         CONTROL_DETAIL_PAYLOAD_LEN,
         SOURCE_KIND_FOCI,
         channel,
-        detail_flags,
+        motion_flags(),
     ));
     frame
         .payload_mut(CONTROL_DETAIL_PAYLOAD_LEN)
@@ -695,7 +709,7 @@ fn emit_one_status(
         STATUS_PAYLOAD_LEN,
         source_kind,
         source_index,
-        0,
+        motion_flags(),
     ));
     frame
         .payload_mut(STATUS_PAYLOAD_LEN)
