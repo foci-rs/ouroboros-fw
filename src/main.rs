@@ -1656,6 +1656,17 @@ mod app {
             let mut all_channels_ready_for_homing_advance = true;
             #[cfg(feature = "trace")]
             let mut trace_metadata_due = false;
+            #[cfg(feature = "trace")]
+            let step_timing = if slow_control_tick {
+                let snapshot = crate::usb_trace::take_step_timing_snapshot();
+                if crate::usb_trace::is_configured() {
+                    Some(snapshot)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                 let Some(device) = ctx.local.tmc_mux.device(channel) else {
@@ -1760,6 +1771,7 @@ mod app {
                         trace_state.cached_accel_torque_offset,
                         trace_state.cached_accel_gain_permille,
                         trace_state.cached_accel_flags,
+                        step_timing,
                         trace_tick.sample_tick,
                     )
                     .await;
@@ -1994,7 +2006,11 @@ mod app {
                     next_event_clocks[idx] = Some(compare);
                 }
             }
-            Err(_) => fail_step_channel_deadline(channel, next_event_clocks),
+            Err(_) => {
+                #[cfg(feature = "trace")]
+                crate::usb_trace::note_missed_or_deferred_step();
+                fail_step_channel_deadline(channel, next_event_clocks);
+            }
         }
     }
 
@@ -2048,7 +2064,11 @@ mod app {
                         let immediate = compare != clock;
                         next_event_clocks[idx] = Some(if immediate { now } else { compare });
                     }
-                    Err(_) => fail_step_channel_deadline(channel, next_event_clocks),
+                    Err(_) => {
+                        #[cfg(feature = "trace")]
+                        crate::usb_trace::note_missed_or_deferred_step();
+                        fail_step_channel_deadline(channel, next_event_clocks);
+                    }
                 }
             }
             StepEventResult::NeedMove => {
@@ -2324,9 +2344,13 @@ mod app {
                 return;
             }
             if !budget.take() {
+                #[cfg(feature = "trace")]
+                crate::usb_trace::note_missed_or_deferred_step();
                 program_next_step_compare(next_event_clocks);
                 return;
             }
+            #[cfg(feature = "trace")]
+            crate::usb_trace::record_step_timing(due.clock, now);
             process_due_step_event(due.channel, next_event_clocks);
         }
     }

@@ -2,7 +2,7 @@
 
 #![cfg(feature = "trace")]
 
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use foci_firmware::trace_events::TraceClockExt;
 use foci_firmware::trace_stream::{
@@ -18,6 +18,41 @@ use crate::state::usb_trace::{
 pub(crate) const TRACE_PRODUCT: &str = "FOCI Ouroboros (trace)";
 
 static mut TRACE_CLOCK_EXT: TraceClockExt = TraceClockExt::new();
+
+/// Trace timing diagnostics for the board-global TIM5 CC1 step service.
+pub(crate) struct TraceTiming {
+    max_step_jitter_ticks: AtomicU32,
+    min_deadline_slack_ticks: AtomicI32,
+    last_served_step_tick_low: AtomicU32,
+    cached_last_served_step_tick_low: AtomicU32,
+    cached_last_served_step_tick_high: AtomicU32,
+    missed_or_deferred_steps: AtomicU32,
+}
+
+impl TraceTiming {
+    /// Create zeroed trace timing counters.
+    const fn new() -> Self {
+        Self {
+            max_step_jitter_ticks: AtomicU32::new(0),
+            min_deadline_slack_ticks: AtomicI32::new(i32::MAX),
+            last_served_step_tick_low: AtomicU32::new(0),
+            cached_last_served_step_tick_low: AtomicU32::new(0),
+            cached_last_served_step_tick_high: AtomicU32::new(0),
+            missed_or_deferred_steps: AtomicU32::new(0),
+        }
+    }
+}
+
+/// Board-global step timing values copied into critical trace samples.
+#[derive(Clone, Copy)]
+pub(crate) struct StepTimingSnapshot {
+    pub(crate) step_timer_jitter: u32,
+    pub(crate) min_deadline_slack: i32,
+    pub(crate) last_served_step_tick: u64,
+    pub(crate) missed_or_deferred_step_counter: u32,
+}
+
+pub(crate) static TRACE_TIMING: TraceTiming = TraceTiming::new();
 
 fn compute_boot_id() -> u32 {
     let tim5 = crate::helpers::lifecycle::read_tim5();
@@ -37,6 +72,116 @@ pub(crate) fn extend_tim5_low(low: u32) -> u64 {
         let ext = &mut *core::ptr::addr_of_mut!(TRACE_CLOCK_EXT);
         ext.extend_low(low)
     })
+}
+
+fn store_last_served_step_tick_low(ticks_low: u32) {
+    TRACE_TIMING
+        .last_served_step_tick_low
+        .store(ticks_low, Ordering::Relaxed);
+}
+
+fn store_cached_last_served_step_tick(ticks: u64) {
+    TRACE_TIMING
+        .cached_last_served_step_tick_low
+        .store(ticks as u32, Ordering::Relaxed);
+    TRACE_TIMING
+        .cached_last_served_step_tick_high
+        .store((ticks >> 32) as u32, Ordering::Relaxed);
+}
+
+/// Load the cached extended last-served step tick.
+pub(crate) fn load_last_served_step_tick() -> u64 {
+    u64::from(
+        TRACE_TIMING
+            .cached_last_served_step_tick_low
+            .load(Ordering::Relaxed),
+    ) | (u64::from(
+        TRACE_TIMING
+            .cached_last_served_step_tick_high
+            .load(Ordering::Relaxed),
+    ) << 32)
+}
+
+fn take_jitter_and_slack() -> (u32, i32, bool) {
+    let jitter = TRACE_TIMING
+        .max_step_jitter_ticks
+        .swap(0, Ordering::Relaxed);
+    let slack = TRACE_TIMING
+        .min_deadline_slack_ticks
+        .swap(i32::MAX, Ordering::Relaxed);
+    let event_observed = slack != i32::MAX;
+    let normalized_slack = if event_observed { slack } else { 0 };
+    (jitter, normalized_slack, event_observed)
+}
+
+/// Capture one board-global step timing snapshot for critical trace samples.
+pub(crate) fn take_step_timing_snapshot() -> StepTimingSnapshot {
+    let (step_timer_jitter, min_deadline_slack, event_observed) = take_jitter_and_slack();
+    let last_served_step_tick = if event_observed {
+        let low = TRACE_TIMING
+            .last_served_step_tick_low
+            .load(Ordering::Relaxed);
+        let now_low = crate::helpers::lifecycle::read_tim5();
+        let now_extended = extend_tim5_low(now_low);
+        let elapsed = now_low.wrapping_sub(low);
+        let extended = now_extended.wrapping_sub(u64::from(elapsed));
+        store_cached_last_served_step_tick(extended);
+        extended
+    } else {
+        load_last_served_step_tick()
+    };
+
+    StepTimingSnapshot {
+        step_timer_jitter,
+        min_deadline_slack,
+        last_served_step_tick,
+        missed_or_deferred_step_counter: TRACE_TIMING
+            .missed_or_deferred_steps
+            .load(Ordering::Relaxed),
+    }
+}
+
+/// Record timing for a served step-timer deadline.
+pub(crate) fn record_step_timing(scheduled: u32, actual: u32) {
+    let jitter = actual.wrapping_sub(scheduled) as i32;
+    let abs = jitter.unsigned_abs();
+    let mut current = TRACE_TIMING.max_step_jitter_ticks.load(Ordering::Relaxed);
+    while abs > current {
+        match TRACE_TIMING.max_step_jitter_ticks.compare_exchange_weak(
+            current,
+            abs,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+
+    let slack = scheduled.wrapping_sub(actual) as i32;
+    let mut min = TRACE_TIMING
+        .min_deadline_slack_ticks
+        .load(Ordering::Relaxed);
+    while slack < min {
+        match TRACE_TIMING.min_deadline_slack_ticks.compare_exchange_weak(
+            min,
+            slack,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next) => min = next,
+        }
+    }
+
+    store_last_served_step_tick_low(actual);
+}
+
+/// Count a missed deadline or IRQ-budget deferral in the step-timer path.
+pub(crate) fn note_missed_or_deferred_step() {
+    TRACE_TIMING
+        .missed_or_deferred_steps
+        .fetch_add(1, Ordering::Relaxed);
 }
 
 /// Record the trace boot timestamp after TIM5 starts.
@@ -375,6 +520,7 @@ pub(crate) async fn sample_tick<B>(
     cached_accel_torque_offset: i32,
     accel_feedforward_gain_permille: u16,
     accel_feedforward_flags: u8,
+    step_timing: Option<StepTimingSnapshot>,
     control_tick: u32,
 ) where
     B: embedded_hal_async::spi::SpiDevice<u8>,
@@ -395,6 +541,21 @@ pub(crate) async fn sample_tick<B>(
     let foc_uq_ud = read_sub_register_trace(tmc, INTERIM_FOC_UQ_UD, &mut flags).await;
     let foc_uq_ud_limited =
         read_sub_register_trace(tmc, INTERIM_FOC_UQ_UD_LIMITED, &mut flags).await;
+    let (
+        step_timer_jitter,
+        min_deadline_slack,
+        last_served_step_tick,
+        missed_or_deferred_step_counter,
+    ) = if let Some(snapshot) = step_timing {
+        (
+            snapshot.step_timer_jitter,
+            snapshot.min_deadline_slack,
+            snapshot.last_served_step_tick,
+            snapshot.missed_or_deferred_step_counter,
+        )
+    } else {
+        (0, 0, 0, 0)
+    };
 
     let critical = CriticalSample {
         step_position,
@@ -408,11 +569,11 @@ pub(crate) async fn sample_tick<B>(
             | (u8::from(refs.stepper.direction.load(Relaxed)) & 0x01),
         sample_flags: flags,
         timer_queue_depth: 0,
-        step_timer_jitter: 0,
-        min_deadline_slack: 0,
-        last_served_step_tick: 0,
+        step_timer_jitter,
+        min_deadline_slack,
+        last_served_step_tick,
         last_klipper_command_service_tick: 0,
-        missed_or_deferred_step_counter: 0,
+        missed_or_deferred_step_counter,
         interim_pidin_target_torque: 0,
         interim_pid_torque_target_actual,
         interim_foc_uq_ud: foc_uq_ud,
