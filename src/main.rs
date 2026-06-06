@@ -58,7 +58,10 @@ mod app {
     use foci_firmware::state::lifecycle::*;
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
     use foci_firmware::state::trsync::*;
-    use foci_firmware::tmc_control::{BoardAction, BoardActions, StepperAction, TmcControlRuntime};
+    use foci_firmware::tmc_control::{
+        BoardAction, BoardActions, HomingMaintenanceResult, StepperAction, TmcControlHomingRefs,
+        TmcControlRuntime, TmcControlStateRefs,
+    };
 
     bind_interrupts!(struct Irqs {
         DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH0>;
@@ -82,7 +85,6 @@ mod app {
     use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
     use crate::commissioning_backend::OuroborosBackend;
 
-    const HOLD_SETTLE_DELAY_MS: u8 = 100;
     const STATUS_NOT_PLL_LOCKED: u32 = 1 << 19;
     const STATUS_ADC_I_CLIPPED: u32 = 1 << 26;
     const STATUS_CRITICAL_FAULT_MASK: u32 = STATUS_NOT_PLL_LOCKED | STATUS_ADC_I_CLIPPED;
@@ -1641,6 +1643,7 @@ mod app {
             };
 
             let homing = HOMING_STATE.load(core::sync::atomic::Ordering::Relaxed);
+            let mut all_channels_ready_for_homing_advance = true;
 
             for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                 let Some(device) = ctx.local.tmc_mux.device(channel) else {
@@ -1689,146 +1692,52 @@ mod app {
                 }
                 let runtime = &mut runtimes[channel as usize];
 
-                // Hardware step/dir: position target is driven by TIM5 CC1 ISR
-                // toggling STEP GPIO → TMC4671 hardware step counter. No SPI
-                // position target write needed. The 1ms tick loop only handles
-                // STATUS_FLAGS polling, TrSync, endstop, and watchdog.
+                let refs = TmcControlStateRefs::new(tmc_state(channel), stepper_state(channel));
+                let homing_active = homing != 0;
+                let reset = refs
+                    .tmc
+                    .feedforward_reset
+                    .swap(false, core::sync::atomic::Ordering::Relaxed);
+                let command_velocity_reference =
+                    runtime.command_velocity_reference(refs, homing_active, reset);
 
-                // Velocity feedforward: compute offset from live step interval
-                // and write to PID_VELOCITY_OFFSET. Gated on:
-                // - motor_enabled (closedloop active, safe to write 0x67)
-                // - velocity_scale != 0 (encoder configured)
-                // - tmc_state().velocity_feedforward enabled (host config)
-                // - commission_engine is None (not commissioning)
-                // - homing not active
-                let ff_active = runtime.is_motor_enabled()
-                    && runtime.velocity_scale() != 0
-                    && tmc_state(channel)
-                        .velocity_feedforward
-                        .load(core::sync::atomic::Ordering::Relaxed)
-                    && !runtime.is_commission_active();
-
-                if ff_active {
-                    let homing_active = homing != 0;
-                    let reset = tmc_state(channel)
-                        .feedforward_reset
-                        .swap(false, core::sync::atomic::Ordering::Relaxed);
-
-                    let offset = if homing_active || reset {
-                        0i32
-                    } else {
-                        let interval = stepper_state(channel)
-                            .interval
-                            .load(core::sync::atomic::Ordering::Relaxed);
-                        let forward = stepper_state(channel)
-                            .direction
-                            .load(core::sync::atomic::Ordering::Relaxed);
-                        let multiplier = tmc_state(channel)
-                            .velocity_feedforward_multiplier
-                            .load(core::sync::atomic::Ordering::Relaxed);
-                        foci_firmware::tmc::compute_velocity_offset_scaled(
-                            runtime.velocity_scale(),
-                            interval,
-                            forward,
-                            multiplier,
-                        )
-                    };
-
-                    let _ = tmc
-                        .write_register(foci_tmc4671::registers::PID_VELOCITY_OFFSET, offset as u32)
-                        .await;
-                } else if runtime.feedforward_was_active() {
-                    // Feedforward just deactivated — clear stale offset.
-                    let _ = tmc
-                        .write_register(foci_tmc4671::registers::PID_VELOCITY_OFFSET, 0)
-                        .await;
-                }
-                runtime.set_feedforward_was_active(ff_active);
-
-                if tmc_state(channel)
-                    .pid_error_sums_clear
-                    .swap(false, core::sync::atomic::Ordering::Relaxed)
+                if runtime
+                    .apply_feedforward_tick(
+                        &mut tmc,
+                        refs,
+                        &tmc_control_config,
+                        homing_active,
+                        reset,
+                        true,
+                    )
+                    .await
+                    .is_err()
                 {
-                    runtime.set_pid_error_clear_countdown_ms(HOLD_SETTLE_DELAY_MS);
+                    defmt::warn!("TMC feedforward tick failed");
                 }
-                let timer_active = stepper_state(channel)
-                    .timer_active_mirror
-                    .load(core::sync::atomic::Ordering::Relaxed);
-                if runtime.is_motor_enabled()
-                    && !runtime.is_commission_active()
-                    && !timer_active
-                    && runtime.pid_error_clear_countdown_ms() > 0
-                {
-                    let next = runtime.pid_error_clear_countdown_ms().saturating_sub(1);
-                    runtime.set_pid_error_clear_countdown_ms(next);
-                    if next == 0 {
-                        if foci_firmware::tmc_ops::settle_hold_and_clear_pid_errors(
-                            &mut tmc,
-                            tmc_state(channel),
-                        )
-                        .await
-                        .is_err()
-                        {
-                            defmt::warn!("TMC4671 channel {} PID settle/clear failed", channel);
-                        } else {
-                            defmt::info!(
-                                "TMC4671 channel {} PID settled and cleared after motion",
-                                channel
-                            );
-                        }
-                    }
+
+                runtime
+                    .apply_phase_and_position_tick(
+                        &mut tmc,
+                        refs,
+                        command_velocity_reference,
+                        homing_active,
+                        reset,
+                    )
+                    .await;
+
+                runtime.apply_pid_error_settle_tick(&mut tmc, refs).await;
+
+                if runtime.is_motor_enabled() {
+                    let homing_result = runtime
+                        .apply_homing_channel_tick(&mut tmc, refs, homing)
+                        .await;
+                    all_channels_ready_for_homing_advance &=
+                        matches!(homing_result, HomingMaintenanceResult::ReadyToAdvance);
                 }
 
                 // TrSync and endstop polling have been replaced by the TIM5 CC2
                 // trigger scheduler. See step_timer_irq CC2 dispatch above.
-
-                // Homing I-suppression state machine.
-                //
-                // During homing the motor hits a physical constraint (endstop or
-                // bed). The position I integrator accumulates error, causing
-                // overshoot when the motor releases. Fix: zero position I gain
-                // while homing, restore + clear integrator when TrSync resolves.
-                {
-                    use core::sync::atomic::Ordering::Relaxed;
-                    match homing {
-                        1 if runtime.is_motor_enabled() => {
-                            // SuppressPending: write position P with I=0.
-                            let pos_p = tmc_state(channel).position_p_value.load(Relaxed);
-                            let reg = (pos_p as u32) << 16; // P in upper half, I=0
-                            let _ = tmc
-                                .write_register(
-                                    foci_tmc4671::registers::PID_POSITION_P_POSITION_I,
-                                    reg,
-                                )
-                                .await;
-                            defmt::info!("homing: channel {} position I suppressed", channel);
-                        }
-                        3 if runtime.is_motor_enabled() => {
-                            // RestorePending: restore position I and clear integrator.
-                            let pos_p = tmc_state(channel).position_p_value.load(Relaxed);
-                            let pos_i = tmc_state(channel).position_i_value.load(Relaxed);
-                            let reg = ((pos_p as u32) << 16) | pos_i as u32;
-                            let _ = tmc
-                                .write_register(
-                                    foci_tmc4671::registers::PID_POSITION_P_POSITION_I,
-                                    reg,
-                                )
-                                .await;
-                            // Clear position error integrator.
-                            let _ = tmc
-                                .write_sub_register(
-                                    foci_tmc4671::registers::PID_ERROR_PID_POSITION_ERROR_SUM,
-                                    0,
-                                )
-                                .await;
-                            defmt::info!(
-                                "homing: channel {} position I restored, integrator cleared",
-                                channel
-                            );
-                        }
-                        _ => {}
-                    }
-                }
 
                 if poll_status
                     && let Ok(flags) = tmc
@@ -1854,27 +1763,16 @@ mod app {
                 }
             }
 
-            {
-                use core::sync::atomic::Ordering::Relaxed;
-                match homing {
-                    1 => {
-                        HOMING_STATE.store(2, Relaxed);
-                    }
-                    // Suppressing: advance to RestorePending once a trigger
-                    // has fired via the HOMING_TRIGGERED sentinel (set by
-                    // TriggerDomain on first trigger, 0xFF = no trigger
-                    // pending). P1 never enters TriggerDomain per spec. If
-                    // host's trsync_trigger runs before P1 polls,
-                    // trsync_trigger advances HOMING_STATE 2->3 directly.
-                    2 if HOMING_TRIGGERED.load(Relaxed) != 0xFF => {
-                        HOMING_STATE.store(3, Relaxed);
-                    }
-                    3 => {
-                        HOMING_STATE.store(0, Relaxed);
-                    }
-                    _ => {} // Idle, nothing to do
-                }
-            }
+            // Suppressing: advance to RestorePending once a trigger has fired
+            // via the HOMING_TRIGGERED sentinel (set by TriggerDomain on first
+            // trigger, 0xFF = no trigger pending). P1 never enters
+            // TriggerDomain per spec. If host's trsync_trigger runs before P1
+            // polls, trsync_trigger advances HOMING_STATE 2->3 directly.
+            TmcControlRuntime::advance_homing_state_after_channels(
+                TmcControlHomingRefs::new(&HOMING_STATE, &HOMING_TRIGGERED),
+                homing,
+                all_channels_ready_for_homing_advance,
+            );
         }
     }
 
