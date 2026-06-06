@@ -2,7 +2,7 @@
 
 #![cfg(feature = "trace")]
 
-use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, Ordering};
 
 use foci_firmware::trace_events::TraceClockExt;
 use foci_firmware::trace_stream::{
@@ -23,6 +23,7 @@ const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path
 static mut TRACE_CLOCK_EXT: TraceClockExt = TraceClockExt::new();
 
 /// Trace timing diagnostics for the board-global TIM5 CC1 step service.
+#[allow(dead_code)]
 pub(crate) struct TraceTiming {
     max_step_jitter_ticks: AtomicU32,
     min_deadline_slack_ticks: AtomicI32,
@@ -30,6 +31,19 @@ pub(crate) struct TraceTiming {
     cached_last_served_step_tick_low: AtomicU32,
     cached_last_served_step_tick_high: AtomicU32,
     missed_or_deferred_steps: AtomicU32,
+    spi_error_count: AtomicU32,
+    status_interrupt_count: AtomicU32,
+    suppressed_status_change_count: AtomicU32,
+    pending_status_change: AtomicBool,
+    last_status_change_emit_tick: AtomicU32,
+    first_spi_sample_cycles: AtomicU32,
+    max_spi_sample_cycles: AtomicU32,
+    first_spi_duration_reported: AtomicBool,
+    skip_next_control_detail: AtomicBool,
+    trace_deadline_pressure_count: AtomicU32,
+    last_klipper_command_service_tick_low: AtomicU32,
+    last_klipper_command_service_tick_high: AtomicU32,
+    latest_step_queue_depth: AtomicU16,
 }
 
 impl TraceTiming {
@@ -42,6 +56,19 @@ impl TraceTiming {
             cached_last_served_step_tick_low: AtomicU32::new(0),
             cached_last_served_step_tick_high: AtomicU32::new(0),
             missed_or_deferred_steps: AtomicU32::new(0),
+            spi_error_count: AtomicU32::new(0),
+            status_interrupt_count: AtomicU32::new(0),
+            suppressed_status_change_count: AtomicU32::new(0),
+            pending_status_change: AtomicBool::new(false),
+            last_status_change_emit_tick: AtomicU32::new(0),
+            first_spi_sample_cycles: AtomicU32::new(0),
+            max_spi_sample_cycles: AtomicU32::new(0),
+            first_spi_duration_reported: AtomicBool::new(false),
+            skip_next_control_detail: AtomicBool::new(false),
+            trace_deadline_pressure_count: AtomicU32::new(0),
+            last_klipper_command_service_tick_low: AtomicU32::new(0),
+            last_klipper_command_service_tick_high: AtomicU32::new(0),
+            latest_step_queue_depth: AtomicU16::new(0),
         }
     }
 }
@@ -103,6 +130,36 @@ pub(crate) fn load_last_served_step_tick() -> u64 {
             .cached_last_served_step_tick_high
             .load(Ordering::Relaxed),
     ) << 32)
+}
+
+/// Store the last Klipper command-service tick.
+pub(crate) fn store_last_klipper_command_service_tick(ticks: u64) {
+    TRACE_TIMING
+        .last_klipper_command_service_tick_low
+        .store(ticks as u32, Ordering::Relaxed);
+    TRACE_TIMING
+        .last_klipper_command_service_tick_high
+        .store((ticks >> 32) as u32, Ordering::Relaxed);
+}
+
+#[allow(dead_code)]
+fn load_last_klipper_command_service_tick() -> u64 {
+    u64::from(
+        TRACE_TIMING
+            .last_klipper_command_service_tick_low
+            .load(Ordering::Relaxed),
+    ) | (u64::from(
+        TRACE_TIMING
+            .last_klipper_command_service_tick_high
+            .load(Ordering::Relaxed),
+    ) << 32)
+}
+
+/// Record the latest successful step queue depth for trace samples.
+pub(crate) fn record_step_queue_depth(queue_len: usize) {
+    TRACE_TIMING
+        .latest_step_queue_depth
+        .store(queue_len.min(u16::MAX as usize) as u16, Ordering::Relaxed);
 }
 
 fn take_jitter_and_slack() -> (u32, i32, bool) {
@@ -185,6 +242,24 @@ pub(crate) fn note_missed_or_deferred_step() {
     TRACE_TIMING
         .missed_or_deferred_steps
         .fetch_add(1, Ordering::Relaxed);
+}
+
+/// Record a TMC SPI error observed by trace-only reads.
+pub(crate) fn record_spi_error() {
+    TRACE_TIMING.spi_error_count.fetch_add(1, Ordering::Relaxed);
+    TRACE_TIMING
+        .pending_status_change
+        .store(true, Ordering::Relaxed);
+}
+
+/// Record a TMC STATUS pin interrupt for trace status frames.
+pub(crate) fn record_status_interrupt() {
+    TRACE_TIMING
+        .status_interrupt_count
+        .fetch_add(1, Ordering::Relaxed);
+    TRACE_TIMING
+        .pending_status_change
+        .store(true, Ordering::Relaxed);
 }
 
 /// Record the trace boot timestamp after TIM5 starts.
@@ -464,6 +539,7 @@ where
     match tmc.read_register(register).await {
         Ok(value) => value,
         Err(_) => {
+            record_spi_error();
             *sample_flags |= foci_firmware::trace_stream::SAMPLE_FLAG_SPI_ERROR;
             0
         }
@@ -481,6 +557,7 @@ where
     match tmc.read_sub_register(register).await {
         Ok(value) => value,
         Err(_) => {
+            record_spi_error();
             *sample_flags |= foci_firmware::trace_stream::SAMPLE_FLAG_SPI_ERROR;
             0
         }

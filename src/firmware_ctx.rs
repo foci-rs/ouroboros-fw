@@ -145,6 +145,13 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         emit_queue_full_diagnostic(channel, queue_len);
     }
 
+    fn record_queued_segment(&mut self, _channel: u8, _steps: u32, queue_len: usize) {
+        #[cfg(feature = "trace")]
+        crate::usb_trace::record_step_queue_depth(queue_len);
+        #[cfg(not(feature = "trace"))]
+        let _ = queue_len;
+    }
+
     fn arm_queue_step_timer(
         &mut self,
         state: &mut TriggerDomainState,
@@ -283,6 +290,10 @@ pub struct FirmwareCtx<'a> {
 
 impl<'a> FirmwareCtx<'a> {
     pub fn new(state: &'a mut State) -> Self {
+        #[cfg(feature = "trace")]
+        crate::usb_trace::store_last_klipper_command_service_tick(
+            crate::usb_trace::trace_now_ticks(),
+        );
         Self { state }
     }
 }
