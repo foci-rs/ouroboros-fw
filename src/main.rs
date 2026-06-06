@@ -530,8 +530,9 @@ mod app {
             }};
         }
 
-        // Counter for 1s STATUS_FLAGS poll (1000 * 1ms ticks).
-        let mut status_poll_counter: u16 = 0;
+        // Counter for 1s STATUS_FLAGS poll (1000 * slow-control ticks).
+        let mut status_poll_counters = [0u16; crate::board_config::TMC_CHANNEL_COUNT as usize];
+        let mut slow_control_accum_us = 0u16;
 
         // Whether the shutdown safe-state has already been applied this
         // shutdown cycle. Reset when shutdown clears.
@@ -887,7 +888,19 @@ mod app {
                 break;
             }
 
-            match select(rx.recv(), Mono::delay(1.millis())).await {
+            let control_refs = [
+                TmcControlStateRefs::new(tmc_state(0), stepper_state(0)),
+                TmcControlStateRefs::new(tmc_state(1), stepper_state(1)),
+            ];
+            let control_period_us =
+                TmcControlRuntime::minimum_control_period_us(&runtimes, &control_refs);
+
+            match select(
+                rx.recv(),
+                Mono::delay(u64::from(control_period_us).micros()),
+            )
+            .await
+            {
                 // Channel message received
                 Either::First(Ok(req)) => {
                     if req.channel >= crate::board_config::TMC_CHANNEL_COUNT {
@@ -1631,16 +1644,13 @@ mod app {
                 continue;
             }
 
-            // Poll STATUS_FLAGS every ~1 second as a backup for warning and
-            // critical flags. Channel 1 also gets a per-tick critical poll
+            // Poll STATUS_FLAGS every ~1 second on the shared slow-control
+            // cadence. Channel 1 still gets a per-control-tick critical poll
             // while it may be energized because PA2 cannot share EXTI2 with PE2.
-            status_poll_counter += 1;
-            let poll_status = if status_poll_counter >= 1000 {
-                status_poll_counter = 0;
-                true
-            } else {
-                false
-            };
+            let slow_control_tick = TmcControlRuntime::update_slow_control_accumulator(
+                &mut slow_control_accum_us,
+                control_period_us,
+            );
 
             let homing = HOMING_STATE.load(core::sync::atomic::Ordering::Relaxed);
             let mut all_channels_ready_for_homing_advance = true;
@@ -1708,12 +1718,19 @@ mod app {
                         &tmc_control_config,
                         homing_active,
                         reset,
-                        true,
+                        slow_control_tick,
                     )
                     .await
                     .is_err()
                 {
                     defmt::warn!("TMC feedforward tick failed");
+                }
+
+                if !slow_control_tick {
+                    if homing != 0 && runtime.is_motor_enabled() {
+                        all_channels_ready_for_homing_advance = false;
+                    }
+                    continue;
                 }
 
                 runtime
@@ -1738,6 +1755,16 @@ mod app {
 
                 // TrSync and endstop polling have been replaced by the TIM5 CC2
                 // trigger scheduler. See step_timer_irq CC2 dispatch above.
+
+                let status_idx = channel as usize;
+                status_poll_counters[status_idx] =
+                    status_poll_counters[status_idx].saturating_add(1);
+                let poll_status = if status_poll_counters[status_idx] >= 1000 {
+                    status_poll_counters[status_idx] = 0;
+                    true
+                } else {
+                    false
+                };
 
                 if poll_status
                     && let Ok(flags) = tmc
