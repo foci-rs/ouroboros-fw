@@ -20,6 +20,11 @@ pub(crate) const TRACE_PRODUCT: &str = "FOCI Ouroboros (trace)";
 /// Enable the lower-rate raw current-path diagnostic frame.
 const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path");
 
+// OpenFFBoard uses 120_000 cycles at 168 MHz, about 714 us. Scale that
+// wall-time budget to the 520 MHz H723 DWT clock: 120_000 * 520 / 168 =
+// 371_429, rounded up. Do not derive this from CLOCK_FREQ; CLOCK_FREQ is TIM5.
+const TRACE_DETAIL_SKIP_THRESHOLD_CYCLES: u32 = 372_000;
+
 static mut TRACE_CLOCK_EXT: TraceClockExt = TraceClockExt::new();
 
 /// Trace timing diagnostics for the board-global TIM5 CC1 step service.
@@ -142,7 +147,6 @@ pub(crate) fn store_last_klipper_command_service_tick(ticks: u64) {
         .store((ticks >> 32) as u32, Ordering::Relaxed);
 }
 
-#[allow(dead_code)]
 fn load_last_klipper_command_service_tick() -> u64 {
     u64::from(
         TRACE_TIMING
@@ -260,6 +264,39 @@ pub(crate) fn record_status_interrupt() {
     TRACE_TIMING
         .pending_status_change
         .store(true, Ordering::Relaxed);
+}
+
+/// Record measured trace sample await-span duration.
+pub(crate) fn record_spi_sample_cycles(cycles: u32) {
+    let mut current = TRACE_TIMING.max_spi_sample_cycles.load(Ordering::Relaxed);
+    while cycles > current {
+        match TRACE_TIMING.max_spi_sample_cycles.compare_exchange_weak(
+            current,
+            cycles,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+    let _ = TRACE_TIMING.first_spi_sample_cycles.compare_exchange(
+        0,
+        cycles,
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
+    if cycles > TRACE_DETAIL_SKIP_THRESHOLD_CYCLES {
+        TRACE_TIMING
+            .skip_next_control_detail
+            .store(true, Ordering::Relaxed);
+        TRACE_TIMING
+            .trace_deadline_pressure_count
+            .fetch_add(1, Ordering::Relaxed);
+        TRACE_TIMING
+            .pending_status_change
+            .store(true, Ordering::Relaxed);
+    }
 }
 
 /// Record the trace boot timestamp after TIM5 starts.
@@ -627,6 +664,7 @@ pub(crate) async fn sample_tick<B>(
         return;
     }
 
+    let spi_sample_start = cortex_m::peripheral::DWT::cycle_count();
     let mut flags = 0u8;
     let step_position = refs.stepper.position.load(Relaxed);
     let position_actual = read_register_trace(tmc, PID_POSITION_ACTUAL, &mut flags).await as i32;
@@ -662,11 +700,11 @@ pub(crate) async fn sample_tick<B>(
         enable_and_direction: (if motor_enabled { 0x80 } else { 0 })
             | (u8::from(refs.stepper.direction.load(Relaxed)) & 0x01),
         sample_flags: flags,
-        timer_queue_depth: 0,
+        timer_queue_depth: TRACE_TIMING.latest_step_queue_depth.load(Relaxed),
         step_timer_jitter,
         min_deadline_slack,
         last_served_step_tick,
-        last_klipper_command_service_tick: 0,
+        last_klipper_command_service_tick: load_last_klipper_command_service_tick(),
         missed_or_deferred_step_counter,
         interim_pidin_target_torque: 0,
         interim_pid_torque_target_actual,
@@ -727,44 +765,53 @@ pub(crate) async fn sample_tick<B>(
         enqueue_frame(frame);
     }
 
-    if !control_detail_due(control_tick, motion_queue_len(), MOTION_QUEUE_DEPTH, false) {
-        return;
+    let emit_control_detail = control_detail_due(
+        control_tick,
+        motion_queue_len(),
+        MOTION_QUEUE_DEPTH,
+        TRACE_TIMING
+            .skip_next_control_detail
+            .swap(false, Ordering::Relaxed),
+    );
+    if emit_control_detail {
+        let mut detail_flags = 0u8;
+        let detail = ControlDetailSample {
+            interim_pidout_target_torque: read_sub_register_trace(
+                tmc,
+                INTERIM_PIDOUT_TARGET_TORQUE,
+                &mut detail_flags,
+            )
+            .await,
+            interim_pidout_target_flux: read_sub_register_trace(
+                tmc,
+                INTERIM_PIDOUT_TARGET_FLUX,
+                &mut detail_flags,
+            )
+            .await,
+            interim_pidin_target_velocity: 0,
+            interim_pidout_target_velocity: 0,
+            pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
+            pid_torque_flux_limits: refs.tmc.current_limit_reg.load(Relaxed),
+            pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
+        };
+        let mut payload = [0u8; CONTROL_DETAIL_PAYLOAD_LEN];
+        encode_control_detail_payload(&detail, &mut payload);
+        let mut frame = FrameBuf::new();
+        frame.write_header(header(
+            FRAME_TYPE_CONTROL_DETAIL,
+            CONTROL_DETAIL_PAYLOAD_LEN,
+            SOURCE_KIND_FOCI,
+            channel,
+            motion_flags(),
+        ));
+        frame
+            .payload_mut(CONTROL_DETAIL_PAYLOAD_LEN)
+            .copy_from_slice(&payload);
+        enqueue_frame(frame);
     }
 
-    let mut detail_flags = 0u8;
-    let detail = ControlDetailSample {
-        interim_pidout_target_torque: read_sub_register_trace(
-            tmc,
-            INTERIM_PIDOUT_TARGET_TORQUE,
-            &mut detail_flags,
-        )
-        .await,
-        interim_pidout_target_flux: read_sub_register_trace(
-            tmc,
-            INTERIM_PIDOUT_TARGET_FLUX,
-            &mut detail_flags,
-        )
-        .await,
-        interim_pidin_target_velocity: 0,
-        interim_pidout_target_velocity: 0,
-        pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
-        pid_torque_flux_limits: refs.tmc.current_limit_reg.load(Relaxed),
-        pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
-    };
-    let mut payload = [0u8; CONTROL_DETAIL_PAYLOAD_LEN];
-    encode_control_detail_payload(&detail, &mut payload);
-    let mut frame = FrameBuf::new();
-    frame.write_header(header(
-        FRAME_TYPE_CONTROL_DETAIL,
-        CONTROL_DETAIL_PAYLOAD_LEN,
-        SOURCE_KIND_FOCI,
-        channel,
-        motion_flags(),
-    ));
-    frame
-        .payload_mut(CONTROL_DETAIL_PAYLOAD_LEN)
-        .copy_from_slice(&payload);
-    enqueue_frame(frame);
+    let spi_sample_cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(spi_sample_start);
+    record_spi_sample_cycles(spi_sample_cycles);
 }
 
 fn status_nonzero(sample: &foci_firmware::trace_stream::StatusSample) -> bool {
