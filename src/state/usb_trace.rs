@@ -4,7 +4,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 
-use foci_firmware::trace::stream::{FrameBuf, StatusSample};
+use foci_firmware::trace::{stream::FrameBuf, transport::StatusSnapshot};
 
 /// Motion/counter queue depth in frames.
 ///
@@ -75,35 +75,6 @@ impl TraceCounters {
     /// Allocate the next global per-device frame sequence.
     pub(crate) fn next_sequence(&self) -> u32 {
         self.sequence.fetch_add(1, Ordering::Relaxed)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct StatusSnapshot {
-    pub(crate) source_kind: u8,
-    pub(crate) source_index: u8,
-    pub(crate) sample: StatusSample,
-}
-
-impl StatusSnapshot {
-    pub(crate) const fn new() -> Self {
-        Self {
-            source_kind: 0,
-            source_index: 0,
-            sample: StatusSample {
-                status_flags: 0,
-                status_interrupt_count: 0,
-                clipping_flags: 0,
-                spi_error_count: 0,
-                watchdog_or_step_overrun_count: 0,
-                klipper_rx_queue_depth: 0,
-                usb_trace_queue_high_water: 0,
-                dropped_motion_sample_count: 0,
-                dropped_event_log_count: 0,
-                endpoint_not_ready_count: 0,
-                suppressed_status_change_count: 0,
-            },
-        }
     }
 }
 
