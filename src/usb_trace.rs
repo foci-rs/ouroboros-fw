@@ -2,9 +2,10 @@
 
 #![cfg(feature = "trace")]
 
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use foci_firmware::trace_events::TraceClockExt;
+use foci_firmware::trace_pressure::{TracePressureRuntime, TracePressureStatusInputs};
 use foci_firmware::trace_stream::{
     FrameBuf, METADATA_PAYLOAD_MAX, frame_sequence, sequence_before_or_equal,
 };
@@ -17,9 +18,7 @@ use crate::state::usb_trace::{
 /// Product string used by trace builds.
 pub(crate) const TRACE_PRODUCT: &str = "FOCI Ouroboros (trace)";
 
-const EVENT_LEVEL_INFO: u8 = 1;
-const SUBSYSTEM_TMC_CONTROL: u8 = 1;
-const EVENT_SPI_SAMPLE_DURATION: u16 = 11;
+static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
 
 /// Enable the lower-rate raw current-path diagnostic frame.
 const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path");
@@ -39,19 +38,6 @@ pub(crate) struct TraceTiming {
     cached_last_served_step_tick_low: AtomicU32,
     cached_last_served_step_tick_high: AtomicU32,
     missed_or_deferred_steps: AtomicU32,
-    spi_error_count: AtomicU32,
-    status_interrupt_count: AtomicU32,
-    suppressed_status_change_count: AtomicU32,
-    pending_status_change: AtomicBool,
-    last_status_change_emit_tick: AtomicU32,
-    first_spi_sample_cycles: AtomicU32,
-    max_spi_sample_cycles: AtomicU32,
-    first_spi_duration_reported: AtomicBool,
-    skip_next_control_detail: AtomicBool,
-    trace_deadline_pressure_count: AtomicU32,
-    last_klipper_command_service_tick_low: AtomicU32,
-    last_klipper_command_service_tick_high: AtomicU32,
-    latest_step_queue_depth: AtomicU16,
 }
 
 impl TraceTiming {
@@ -64,19 +50,6 @@ impl TraceTiming {
             cached_last_served_step_tick_low: AtomicU32::new(0),
             cached_last_served_step_tick_high: AtomicU32::new(0),
             missed_or_deferred_steps: AtomicU32::new(0),
-            spi_error_count: AtomicU32::new(0),
-            status_interrupt_count: AtomicU32::new(0),
-            suppressed_status_change_count: AtomicU32::new(0),
-            pending_status_change: AtomicBool::new(false),
-            last_status_change_emit_tick: AtomicU32::new(0),
-            first_spi_sample_cycles: AtomicU32::new(0),
-            max_spi_sample_cycles: AtomicU32::new(0),
-            first_spi_duration_reported: AtomicBool::new(false),
-            skip_next_control_detail: AtomicBool::new(false),
-            trace_deadline_pressure_count: AtomicU32::new(0),
-            last_klipper_command_service_tick_low: AtomicU32::new(0),
-            last_klipper_command_service_tick_high: AtomicU32::new(0),
-            latest_step_queue_depth: AtomicU16::new(0),
         }
     }
 }
@@ -142,31 +115,16 @@ pub(crate) fn load_last_served_step_tick() -> u64 {
 
 /// Store the last Klipper command-service tick.
 pub(crate) fn store_last_klipper_command_service_tick(ticks: u64) {
-    TRACE_TIMING
-        .last_klipper_command_service_tick_low
-        .store(ticks as u32, Ordering::Relaxed);
-    TRACE_TIMING
-        .last_klipper_command_service_tick_high
-        .store((ticks >> 32) as u32, Ordering::Relaxed);
+    TRACE_PRESSURE.store_last_command_service_tick(ticks);
 }
 
 fn load_last_klipper_command_service_tick() -> u64 {
-    u64::from(
-        TRACE_TIMING
-            .last_klipper_command_service_tick_low
-            .load(Ordering::Relaxed),
-    ) | (u64::from(
-        TRACE_TIMING
-            .last_klipper_command_service_tick_high
-            .load(Ordering::Relaxed),
-    ) << 32)
+    TRACE_PRESSURE.last_command_service_tick()
 }
 
 /// Record the latest successful step queue depth for trace samples.
 pub(crate) fn record_step_queue_depth(queue_len: usize) {
-    TRACE_TIMING
-        .latest_step_queue_depth
-        .store(queue_len.min(u16::MAX as usize) as u16, Ordering::Relaxed);
+    TRACE_PRESSURE.record_queue_depth(queue_len);
 }
 
 fn take_jitter_and_slack() -> (u32, i32, bool) {
@@ -253,53 +211,17 @@ pub(crate) fn note_missed_or_deferred_step() {
 
 /// Record a TMC SPI error observed by trace-only reads.
 pub(crate) fn record_spi_error() {
-    TRACE_TIMING.spi_error_count.fetch_add(1, Ordering::Relaxed);
-    TRACE_TIMING
-        .pending_status_change
-        .store(true, Ordering::Relaxed);
+    TRACE_PRESSURE.record_spi_error();
 }
 
 /// Record a TMC STATUS pin interrupt for trace status frames.
 pub(crate) fn record_status_interrupt() {
-    TRACE_TIMING
-        .status_interrupt_count
-        .fetch_add(1, Ordering::Relaxed);
-    TRACE_TIMING
-        .pending_status_change
-        .store(true, Ordering::Relaxed);
+    TRACE_PRESSURE.record_status_interrupt();
 }
 
 /// Record measured trace sample await-span duration.
 pub(crate) fn record_spi_sample_cycles(cycles: u32) {
-    let mut current = TRACE_TIMING.max_spi_sample_cycles.load(Ordering::Relaxed);
-    while cycles > current {
-        match TRACE_TIMING.max_spi_sample_cycles.compare_exchange_weak(
-            current,
-            cycles,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(next) => current = next,
-        }
-    }
-    let _ = TRACE_TIMING.first_spi_sample_cycles.compare_exchange(
-        0,
-        cycles,
-        Ordering::Relaxed,
-        Ordering::Relaxed,
-    );
-    if cycles > TRACE_DETAIL_SKIP_THRESHOLD_CYCLES {
-        TRACE_TIMING
-            .skip_next_control_detail
-            .store(true, Ordering::Relaxed);
-        TRACE_TIMING
-            .trace_deadline_pressure_count
-            .fetch_add(1, Ordering::Relaxed);
-        TRACE_TIMING
-            .pending_status_change
-            .store(true, Ordering::Relaxed);
-    }
+    TRACE_PRESSURE.record_spi_sample_cycles(cycles, TRACE_DETAIL_SKIP_THRESHOLD_CYCLES);
 }
 
 /// Record the trace boot timestamp after TIM5 starts.
@@ -525,31 +447,15 @@ pub(crate) fn request_spi_duration_event_if_ready() {
     if !is_configured() {
         return;
     }
-    if TRACE_TIMING
-        .first_spi_duration_reported
-        .swap(true, Ordering::Relaxed)
-    {
-        return;
+    if let Some(event) = TRACE_PRESSURE.take_spi_duration_event() {
+        request_event(
+            event.level,
+            event.subsystem_id,
+            event.event_id,
+            event.args,
+            event.arg_count,
+        );
     }
-    let cycles = TRACE_TIMING.first_spi_sample_cycles.load(Ordering::Relaxed);
-    if cycles == 0 {
-        TRACE_TIMING
-            .first_spi_duration_reported
-            .store(false, Ordering::Relaxed);
-        return;
-    }
-    request_event(
-        EVENT_LEVEL_INFO,
-        SUBSYSTEM_TMC_CONTROL,
-        EVENT_SPI_SAMPLE_DURATION,
-        [
-            cycles as i32,
-            TRACE_TIMING.max_spi_sample_cycles.load(Ordering::Relaxed) as i32,
-            0,
-            0,
-        ],
-        2,
-    );
 }
 
 fn push_str(out: &mut heapless::Vec<u8, METADATA_PAYLOAD_MAX>, value: &str) {
@@ -735,7 +641,7 @@ pub(crate) async fn sample_tick<B>(
         enable_and_direction: (if motor_enabled { 0x80 } else { 0 })
             | (u8::from(refs.stepper.direction.load(Relaxed)) & 0x01),
         sample_flags: flags,
-        timer_queue_depth: TRACE_TIMING.latest_step_queue_depth.load(Relaxed),
+        timer_queue_depth: TRACE_PRESSURE.latest_queue_depth(),
         step_timer_jitter,
         min_deadline_slack,
         last_served_step_tick,
@@ -804,9 +710,7 @@ pub(crate) async fn sample_tick<B>(
         control_tick,
         motion_queue_len(),
         MOTION_QUEUE_DEPTH,
-        TRACE_TIMING
-            .skip_next_control_detail
-            .swap(false, Ordering::Relaxed),
+        TRACE_PRESSURE.take_control_detail_skip(),
     );
     if emit_control_detail {
         let mut detail_flags = 0u8;
@@ -942,25 +846,8 @@ pub(crate) async fn emit_status_frames<B>(
         return;
     }
 
-    let pending_change = if channel == 0 {
-        TRACE_TIMING.pending_status_change.swap(false, Relaxed)
-    } else {
-        false
-    };
-    if !regular_tick && !pending_change {
+    if !TRACE_PRESSURE.should_emit_status(control_tick, regular_tick, channel == 0) {
         return;
-    }
-    if pending_change {
-        let previous = TRACE_TIMING.last_status_change_emit_tick.load(Relaxed);
-        if control_tick.wrapping_sub(previous) < 10 {
-            TRACE_TIMING
-                .suppressed_status_change_count
-                .fetch_add(1, Relaxed);
-            return;
-        }
-        TRACE_TIMING
-            .last_status_change_emit_tick
-            .store(control_tick, Relaxed);
     }
 
     let mut flags = 0u8;
@@ -970,44 +857,37 @@ pub(crate) async fn emit_status_frames<B>(
     const STATUS_ADC_CLIP_MASK: u32 = (1 << 26) | (1 << 27);
     let clipping_flags =
         status_flags & (STATUS_PID_LIMIT_MASK | STATUS_PWM_LIMIT_MASK | STATUS_ADC_CLIP_MASK);
-    let spi_errors = TRACE_TIMING.spi_error_count.load(Relaxed);
-    let status_interrupts = TRACE_TIMING.status_interrupt_count.load(Relaxed);
-    let missed = TRACE_TIMING.missed_or_deferred_steps.load(Relaxed);
-    let trace_pressure = TRACE_TIMING.trace_deadline_pressure_count.load(Relaxed);
-    let endpoint_or_trace_pressure = TRACE_COUNTERS
-        .endpoint_not_ready
-        .load(Relaxed)
-        .saturating_add(trace_pressure);
-    let suppressed = TRACE_TIMING.suppressed_status_change_count.load(Relaxed);
-    let queue_depth = TRACE_TIMING.latest_step_queue_depth.load(Relaxed);
+    let counters = TRACE_PRESSURE.status_counters(TracePressureStatusInputs {
+        endpoint_not_ready_count: TRACE_COUNTERS.endpoint_not_ready.load(Relaxed),
+        usb_trace_queue_high_water: TRACE_COUNTERS.high_water.load(Relaxed),
+        dropped_motion_sample_count: TRACE_COUNTERS.motion_drops.load(Relaxed),
+        dropped_event_log_count: TRACE_COUNTERS.event_drops.load(Relaxed),
+        missed_or_deferred_step_count: TRACE_TIMING.missed_or_deferred_steps.load(Relaxed),
+    });
     let foci = StatusSample {
         status_flags,
-        status_interrupt_count: status_interrupts,
+        status_interrupt_count: counters.status_interrupt_count,
         clipping_flags,
-        spi_error_count: spi_errors,
-        watchdog_or_step_overrun_count: missed,
+        spi_error_count: counters.spi_error_count,
+        watchdog_or_step_overrun_count: counters.watchdog_or_step_overrun_count,
         ..StatusSample::default()
     };
 
     if channel == 0 {
-        let event_drops = TRACE_COUNTERS.event_drops.load(Relaxed);
-        let motion_drops = TRACE_COUNTERS.motion_drops.load(Relaxed);
-        let high_water = TRACE_COUNTERS.high_water.load(Relaxed);
-
         // Trace deadline pressure is telemetry degradation, so it is reported
         // with endpoint-not-ready pressure instead of motion watchdog/step overruns.
         let board = StatusSample {
             status_flags,
-            status_interrupt_count: status_interrupts,
+            status_interrupt_count: counters.status_interrupt_count,
             clipping_flags,
-            spi_error_count: spi_errors,
-            watchdog_or_step_overrun_count: missed,
-            klipper_rx_queue_depth: queue_depth,
-            usb_trace_queue_high_water: high_water,
-            dropped_motion_sample_count: motion_drops,
-            dropped_event_log_count: event_drops,
-            endpoint_not_ready_count: endpoint_or_trace_pressure,
-            suppressed_status_change_count: suppressed,
+            spi_error_count: counters.spi_error_count,
+            watchdog_or_step_overrun_count: counters.watchdog_or_step_overrun_count,
+            klipper_rx_queue_depth: counters.latest_queue_depth,
+            usb_trace_queue_high_water: counters.usb_trace_queue_high_water,
+            dropped_motion_sample_count: counters.dropped_motion_sample_count,
+            dropped_event_log_count: counters.dropped_event_log_count,
+            endpoint_not_ready_count: counters.endpoint_not_ready_count,
+            suppressed_status_change_count: counters.suppressed_status_change_count,
         };
         emit_one_status(0, SOURCE_KIND_BOARD, SOURCE_INDEX_NA, board, regular_tick);
     }
@@ -1015,16 +895,12 @@ pub(crate) async fn emit_status_frames<B>(
     emit_one_status(1 + channel as usize, SOURCE_KIND_FOCI, channel, foci, false);
 
     if channel == 0 {
-        let event_drops = TRACE_COUNTERS.event_drops.load(Relaxed);
-        let motion_drops = TRACE_COUNTERS.motion_drops.load(Relaxed);
-        let high_water = TRACE_COUNTERS.high_water.load(Relaxed);
-
         let usb = StatusSample {
-            usb_trace_queue_high_water: high_water,
-            dropped_motion_sample_count: motion_drops,
-            dropped_event_log_count: event_drops,
-            endpoint_not_ready_count: endpoint_or_trace_pressure,
-            suppressed_status_change_count: suppressed,
+            usb_trace_queue_high_water: counters.usb_trace_queue_high_water,
+            dropped_motion_sample_count: counters.dropped_motion_sample_count,
+            dropped_event_log_count: counters.dropped_event_log_count,
+            endpoint_not_ready_count: counters.endpoint_not_ready_count,
+            suppressed_status_change_count: counters.suppressed_status_change_count,
             ..StatusSample::default()
         };
         emit_one_status(3, SOURCE_KIND_USB, SOURCE_INDEX_NA, usb, false);
