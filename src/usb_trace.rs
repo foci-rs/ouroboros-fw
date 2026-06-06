@@ -17,6 +17,9 @@ use crate::state::usb_trace::{
 /// Product string used by trace builds.
 pub(crate) const TRACE_PRODUCT: &str = "FOCI Ouroboros (trace)";
 
+/// Enable the lower-rate raw current-path diagnostic frame.
+const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path");
+
 static mut TRACE_CLOCK_EXT: TraceClockExt = TraceClockExt::new();
 
 /// Trace timing diagnostics for the board-global TIM5 CC1 step service.
@@ -611,6 +614,41 @@ pub(crate) async fn sample_tick<B>(
         .payload_mut(CRITICAL_PAYLOAD_LEN)
         .copy_from_slice(&payload);
     enqueue_frame(frame);
+
+    if current_path_due(
+        CURRENT_PATH_DIAGNOSTIC_ENABLED,
+        control_tick,
+        motion_queue_len(),
+        MOTION_QUEUE_DEPTH,
+    ) {
+        let mut current_path_flags = 0u8;
+        let interim_foc_iq_id =
+            read_sub_register_trace(tmc, INTERIM_FOC_IQ_ID, &mut current_path_flags).await;
+        let interim_foc_iwy_iux =
+            read_sub_register_trace(tmc, INTERIM_FOC_IWY_IUX, &mut current_path_flags).await;
+        let interim_adc_i1_i0 =
+            read_sub_register_trace(tmc, INTERIM_ADC_I1_I0, &mut current_path_flags).await;
+        let current_path = CurrentPathSample {
+            sample_flags: current_path_flags,
+            interim_foc_iq_id,
+            interim_foc_iwy_iux,
+            interim_adc_i1_i0,
+        };
+        let mut payload = [0u8; CURRENT_PATH_PAYLOAD_LEN];
+        encode_current_path_payload(&current_path, &mut payload);
+        let mut frame = FrameBuf::new();
+        frame.write_header(header(
+            FRAME_TYPE_CURRENT_PATH,
+            CURRENT_PATH_PAYLOAD_LEN,
+            SOURCE_KIND_FOCI,
+            channel,
+            motion_flags(),
+        ));
+        frame
+            .payload_mut(CURRENT_PATH_PAYLOAD_LEN)
+            .copy_from_slice(&payload);
+        enqueue_frame(frame);
+    }
 
     if !control_detail_due(control_tick, motion_queue_len(), MOTION_QUEUE_DEPTH, false) {
         return;
