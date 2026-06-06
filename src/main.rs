@@ -1794,10 +1794,10 @@ mod app {
                     crate::usb_trace::emit_status_frames(
                         channel,
                         &mut tmc,
+                        trace_tick.control_tick,
                         trace_tick.status_detail_due,
                     )
                     .await;
-                    crate::usb_trace::drain_pending_events();
                     if channel == 0 {
                         trace_metadata_due = trace_tick.metadata_due;
                     }
@@ -1851,8 +1851,12 @@ mod app {
             }
 
             #[cfg(feature = "trace")]
-            if trace_metadata_due {
-                crate::usb_trace::emit_metadata();
+            if slow_control_tick {
+                crate::usb_trace::request_spi_duration_event_if_ready();
+                crate::usb_trace::drain_pending_events();
+                if trace_metadata_due {
+                    crate::usb_trace::emit_metadata();
+                }
             }
 
             // Suppressing: advance to RestorePending once a trigger has fired
