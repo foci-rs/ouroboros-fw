@@ -4,7 +4,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use foci_firmware::trace_stream::FrameBuf;
+use foci_firmware::trace_stream::{FrameBuf, StatusSample};
 
 /// Event queue depth in frames.
 pub(crate) const EVENT_QUEUE_DEPTH: usize = 8;
@@ -66,12 +66,42 @@ impl TraceCounters {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct StatusSnapshot {
+    pub(crate) source_kind: u8,
+    pub(crate) source_index: u8,
+    pub(crate) sample: StatusSample,
+}
+
+impl StatusSnapshot {
+    pub(crate) const fn new() -> Self {
+        Self {
+            source_kind: 0,
+            source_index: 0,
+            sample: StatusSample {
+                status_flags: 0,
+                status_interrupt_count: 0,
+                clipping_flags: 0,
+                spi_error_count: 0,
+                watchdog_or_step_overrun_count: 0,
+                klipper_rx_queue_depth: 0,
+                usb_trace_queue_high_water: 0,
+                dropped_motion_sample_count: 0,
+                dropped_event_log_count: 0,
+                endpoint_not_ready_count: 0,
+                suppressed_status_change_count: 0,
+            },
+        }
+    }
+}
+
 pub(crate) static TRACE_COUNTERS: TraceCounters = TraceCounters::new();
 
 pub(crate) static mut EVENT_QUEUE: heapless::spsc::Queue<QueuedFrame, EVENT_QUEUE_DEPTH> =
     heapless::spsc::Queue::new();
 pub(crate) static mut PENDING_EVENTS: heapless::Deque<PendingEvent, PENDING_EVENT_DEPTH> =
     heapless::Deque::new();
+pub(crate) static mut LAST_STATUS: [StatusSnapshot; 4] = [StatusSnapshot::new(); 4];
 
 /// Partially sent frame owned by the single USB trace consumer.
 pub(crate) static mut CURRENT_TX: Option<QueuedFrame> = None;

@@ -1654,6 +1654,8 @@ mod app {
 
             let homing = HOMING_STATE.load(core::sync::atomic::Ordering::Relaxed);
             let mut all_channels_ready_for_homing_advance = true;
+            #[cfg(feature = "trace")]
+            let mut trace_metadata_due = false;
 
             for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                 let Some(device) = ctx.local.tmc_mux.device(channel) else {
@@ -1743,6 +1745,52 @@ mod app {
                     )
                     .await;
 
+                #[cfg(feature = "trace")]
+                {
+                    let trace_tick = runtime.advance_trace_tick();
+                    let trace_state = runtime.trace_state();
+                    crate::usb_trace::sample_tick(
+                        channel,
+                        refs,
+                        &mut tmc,
+                        runtime.is_motor_enabled(),
+                        trace_state.cached_velocity_reference,
+                        trace_state.cached_velocity_offset,
+                        trace_state.cached_velocity_transient_offset,
+                        trace_state.cached_accel_torque_offset,
+                        trace_state.cached_accel_gain_permille,
+                        trace_state.cached_accel_flags,
+                        trace_tick.sample_tick,
+                    )
+                    .await;
+                    if trace_tick.phase_advance_due {
+                        crate::usb_trace::emit_phase_advance(
+                            channel,
+                            trace_tick.phase_advance_counts,
+                            trace_tick.phase_advance_flags,
+                            refs.tmc
+                                .phase_advance_gain_ppm
+                                .load(core::sync::atomic::Ordering::Relaxed),
+                            refs.tmc
+                                .phase_advance_max_counts
+                                .load(core::sync::atomic::Ordering::Relaxed),
+                            refs.tmc
+                                .phase_advance_deadband
+                                .load(core::sync::atomic::Ordering::Relaxed),
+                        );
+                    }
+                    crate::usb_trace::emit_status_frames(
+                        channel,
+                        &mut tmc,
+                        trace_tick.status_detail_due,
+                    )
+                    .await;
+                    crate::usb_trace::drain_pending_events();
+                    if channel == 0 {
+                        trace_metadata_due = trace_tick.metadata_due;
+                    }
+                }
+
                 runtime.apply_pid_error_settle_tick(&mut tmc, refs).await;
 
                 if runtime.is_motor_enabled() {
@@ -1788,6 +1836,11 @@ mod app {
                         defmt::warn!("TMC4671 channel {} STATUS: {:#010x}", channel, flags);
                     }
                 }
+            }
+
+            #[cfg(feature = "trace")]
+            if trace_metadata_due {
+                crate::usb_trace::emit_metadata();
             }
 
             // Suppressing: advance to RestorePending once a trigger has fired
