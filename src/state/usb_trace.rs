@@ -2,9 +2,15 @@
 
 #![cfg(feature = "trace")]
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 
 use foci_firmware::trace_stream::{FrameBuf, StatusSample};
+
+/// Motion/counter queue depth in frames.
+///
+/// `FrameBuf` is 256 bytes, so depth 32 reserves 8 KiB. This matches the
+/// OpenFFBoard trace transport and fits the STM32H723 SRAM budget.
+pub(crate) const MOTION_QUEUE_DEPTH: usize = 32;
 
 /// Event queue depth in frames.
 pub(crate) const EVENT_QUEUE_DEPTH: usize = 8;
@@ -42,8 +48,10 @@ pub(crate) struct TraceCounters {
     pub(crate) configured: AtomicBool,
     pub(crate) boot_id: AtomicU32,
     pub(crate) sequence: AtomicU32,
+    pub(crate) motion_drops: AtomicU32,
     pub(crate) event_drops: AtomicU32,
     pub(crate) event_drop_gap: AtomicBool,
+    pub(crate) high_water: AtomicU16,
     pub(crate) endpoint_not_ready: AtomicU32,
 }
 
@@ -54,8 +62,10 @@ impl TraceCounters {
             configured: AtomicBool::new(false),
             boot_id: AtomicU32::new(0),
             sequence: AtomicU32::new(0),
+            motion_drops: AtomicU32::new(0),
             event_drops: AtomicU32::new(0),
             event_drop_gap: AtomicBool::new(false),
+            high_water: AtomicU16::new(0),
             endpoint_not_ready: AtomicU32::new(0),
         }
     }
@@ -97,6 +107,8 @@ impl StatusSnapshot {
 
 pub(crate) static TRACE_COUNTERS: TraceCounters = TraceCounters::new();
 
+pub(crate) static mut MOTION_QUEUE: heapless::spsc::Queue<QueuedFrame, MOTION_QUEUE_DEPTH> =
+    heapless::spsc::Queue::new();
 pub(crate) static mut EVENT_QUEUE: heapless::spsc::Queue<QueuedFrame, EVENT_QUEUE_DEPTH> =
     heapless::spsc::Queue::new();
 pub(crate) static mut PENDING_EVENTS: heapless::Deque<PendingEvent, PENDING_EVENT_DEPTH> =
@@ -105,6 +117,20 @@ pub(crate) static mut LAST_STATUS: [StatusSnapshot; 4] = [StatusSnapshot::new();
 
 /// Partially sent frame owned by the single USB trace consumer.
 pub(crate) static mut CURRENT_TX: Option<QueuedFrame> = None;
+
+/// Return the trace motion/counter queue.
+///
+/// # Safety
+///
+/// Callers must uphold the single-producer/single-consumer access discipline:
+/// producer contexts enqueue only, and the USB task is the sole consumer.
+#[inline]
+pub(crate) unsafe fn motion_queue()
+-> &'static mut heapless::spsc::Queue<QueuedFrame, MOTION_QUEUE_DEPTH> {
+    let ptr = core::ptr::addr_of_mut!(MOTION_QUEUE);
+    // SAFETY: The caller guarantees exclusive access for this RTIC context.
+    unsafe { &mut *ptr }
+}
 
 /// Return the trace event queue.
 ///

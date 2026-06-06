@@ -5,10 +5,13 @@
 use core::sync::atomic::Ordering;
 
 use foci_firmware::trace_events::TraceClockExt;
-use foci_firmware::trace_stream::{FrameBuf, METADATA_PAYLOAD_MAX};
+use foci_firmware::trace_stream::{
+    FrameBuf, METADATA_PAYLOAD_MAX, frame_sequence, sequence_before_or_equal,
+};
 
 use crate::state::usb_trace::{
-    PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_COUNTERS, current_tx, event_queue,
+    MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_COUNTERS, current_tx,
+    event_queue, motion_queue,
 };
 
 /// Product string used by trace builds.
@@ -93,7 +96,34 @@ fn header(
 }
 
 fn enqueue_frame(frame: FrameBuf) {
-    enqueue_event(frame);
+    enqueue_motion(frame);
+}
+
+fn enqueue_motion(frame: FrameBuf) {
+    // SAFETY: Trace producers enqueue complete frames; the USB task is the
+    // only consumer. Producers never dequeue from the motion queue.
+    unsafe {
+        let queue = motion_queue();
+        if queue.enqueue(QueuedFrame::new(frame)).is_err() {
+            TRACE_COUNTERS.motion_drops.fetch_add(1, Ordering::Relaxed);
+        } else {
+            crate::transport::USB_WAKE.signal(());
+        }
+
+        let len = queue.len() as u16;
+        let mut current = TRACE_COUNTERS.high_water.load(Ordering::Relaxed);
+        while len > current {
+            match TRACE_COUNTERS.high_water.compare_exchange_weak(
+                current,
+                len,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(next) => current = next,
+            }
+        }
+    }
 }
 
 fn enqueue_event(frame: FrameBuf) {
@@ -192,6 +222,13 @@ fn enqueue_event_frame(event: PendingEvent) {
     enqueue_event(frame);
 }
 
+fn motion_queue_len() -> usize {
+    // SAFETY: Trace producers may inspect the queue length for decimation. The
+    // USB task remains the sole consumer, and enqueue paths retain ownership of
+    // actual queue mutation.
+    unsafe { motion_queue().len() }
+}
+
 /// Convert pending multi-producer event requests into event frames.
 pub(crate) fn drain_pending_events() {
     loop {
@@ -251,7 +288,7 @@ pub(crate) fn emit_metadata() {
         trace_now_ticks(),
     ));
     frame.payload_mut(payload.len()).copy_from_slice(&payload);
-    enqueue_event(frame);
+    enqueue_motion(frame);
 }
 
 async fn read_register_trace<B>(
@@ -400,7 +437,7 @@ pub(crate) async fn sample_tick<B>(
         .copy_from_slice(&payload);
     enqueue_frame(frame);
 
-    if !control_detail_due(control_tick, 0, 0, false) {
+    if !control_detail_due(control_tick, motion_queue_len(), MOTION_QUEUE_DEPTH, false) {
         return;
     }
 
@@ -542,39 +579,76 @@ pub(crate) async fn emit_status_frames<B>(
     const STATUS_ADC_CLIP_MASK: u32 = (1 << 26) | (1 << 27);
     let clipping_flags =
         status_flags & (STATUS_PID_LIMIT_MASK | STATUS_PWM_LIMIT_MASK | STATUS_ADC_CLIP_MASK);
-    let endpoint_not_ready = TRACE_COUNTERS.endpoint_not_ready.load(Relaxed);
-    let event_drops = TRACE_COUNTERS.event_drops.load(Relaxed);
-    let high_water = 0u16;
-
-    let board = StatusSample {
-        status_flags,
-        status_interrupt_count: 0,
-        clipping_flags,
-        spi_error_count: u32::from(flags != 0),
-        watchdog_or_step_overrun_count: 0,
-        klipper_rx_queue_depth: 0,
-        usb_trace_queue_high_water: high_water,
-        dropped_motion_sample_count: 0,
-        dropped_event_log_count: event_drops,
-        endpoint_not_ready_count: endpoint_not_ready,
-        suppressed_status_change_count: 0,
-    };
     let foci = StatusSample {
         status_flags,
         clipping_flags,
         spi_error_count: u32::from(flags != 0),
         ..StatusSample::default()
     };
-    let usb = StatusSample {
-        usb_trace_queue_high_water: high_water,
-        dropped_event_log_count: event_drops,
-        endpoint_not_ready_count: endpoint_not_ready,
-        ..StatusSample::default()
-    };
 
-    emit_one_status(0, SOURCE_KIND_BOARD, SOURCE_INDEX_NA, board, regular_tick);
+    if channel == 0 {
+        let endpoint_not_ready = TRACE_COUNTERS.endpoint_not_ready.load(Relaxed);
+        let event_drops = TRACE_COUNTERS.event_drops.load(Relaxed);
+        let motion_drops = TRACE_COUNTERS.motion_drops.load(Relaxed);
+        let high_water = TRACE_COUNTERS.high_water.load(Relaxed);
+
+        let board = StatusSample {
+            status_flags,
+            status_interrupt_count: 0,
+            clipping_flags,
+            spi_error_count: u32::from(flags != 0),
+            watchdog_or_step_overrun_count: 0,
+            klipper_rx_queue_depth: 0,
+            usb_trace_queue_high_water: high_water,
+            dropped_motion_sample_count: motion_drops,
+            dropped_event_log_count: event_drops,
+            endpoint_not_ready_count: endpoint_not_ready,
+            suppressed_status_change_count: 0,
+        };
+        emit_one_status(0, SOURCE_KIND_BOARD, SOURCE_INDEX_NA, board, regular_tick);
+    }
+
     emit_one_status(1 + channel as usize, SOURCE_KIND_FOCI, channel, foci, false);
-    emit_one_status(3, SOURCE_KIND_USB, SOURCE_INDEX_NA, usb, false);
+
+    if channel == 0 {
+        let endpoint_not_ready = TRACE_COUNTERS.endpoint_not_ready.load(Relaxed);
+        let event_drops = TRACE_COUNTERS.event_drops.load(Relaxed);
+        let motion_drops = TRACE_COUNTERS.motion_drops.load(Relaxed);
+        let high_water = TRACE_COUNTERS.high_water.load(Relaxed);
+
+        let usb = StatusSample {
+            usb_trace_queue_high_water: high_water,
+            dropped_motion_sample_count: motion_drops,
+            dropped_event_log_count: event_drops,
+            endpoint_not_ready_count: endpoint_not_ready,
+            ..StatusSample::default()
+        };
+        emit_one_status(3, SOURCE_KIND_USB, SOURCE_INDEX_NA, usb, false);
+    }
+}
+
+fn dequeue_next_frame() -> Option<QueuedFrame> {
+    // SAFETY: The USB task is the only trace consumer. Peeking copies sequence
+    // numbers from queue heads before dequeuing from exactly one queue.
+    unsafe {
+        let motion = motion_queue();
+        let event = event_queue();
+        let motion_seq = motion.peek().map(|queued| frame_sequence(&queued.frame));
+        let event_seq = event.peek().map(|queued| frame_sequence(&queued.frame));
+
+        match (motion_seq, event_seq) {
+            (Some(motion_seq), Some(event_seq)) => {
+                if sequence_before_or_equal(motion_seq, event_seq) {
+                    motion.dequeue()
+                } else {
+                    event.dequeue()
+                }
+            }
+            (Some(_), None) => motion.dequeue(),
+            (None, Some(_)) => event.dequeue(),
+            (None, None) => None,
+        }
+    }
 }
 
 /// Drain at most one 64-byte trace packet to USB.
@@ -585,7 +659,7 @@ pub(crate) fn drain_once() {
     unsafe {
         let current_tx = current_tx();
         if current_tx.is_none() {
-            *current_tx = event_queue().dequeue();
+            *current_tx = dequeue_next_frame();
         }
         let Some(current) = current_tx.as_mut() else {
             return;
