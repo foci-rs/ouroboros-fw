@@ -89,11 +89,21 @@ pub(crate) async fn handle_tmc_request(
         TmcRequestKind::SetVoltageLimit { voltage_limit } => {
             foci_firmware::tmc_ops::apply_set_voltage_limit(tmc, tmc_state, voltage_limit).await?;
         }
-        TmcRequestKind::CurrentStepTest { .. } => {}
-        TmcRequestKind::CurrentVectorStepTest { .. } => {}
-        TmcRequestKind::CurrentTorqueSampleTest { .. } => {}
-        TmcRequestKind::PositionTorqueOffsetSampleTest { .. } => {}
-        TmcRequestKind::VoltageStepTest { .. } => {}
+        TmcRequestKind::CurrentStepTest { .. } => {
+            defmt::warn!("handle_tmc_request: CurrentStepTest handled by main loop");
+        }
+        TmcRequestKind::CurrentVectorStepTest { .. } => {
+            defmt::warn!("handle_tmc_request: CurrentVectorStepTest handled by main loop");
+        }
+        TmcRequestKind::CurrentTorqueSampleTest { .. } => {
+            defmt::warn!("handle_tmc_request: CurrentTorqueSampleTest handled by main loop");
+        }
+        TmcRequestKind::PositionTorqueOffsetSampleTest { .. } => {
+            defmt::warn!("handle_tmc_request: PositionTorqueOffsetSampleTest handled by main loop");
+        }
+        TmcRequestKind::VoltageStepTest { .. } => {
+            defmt::warn!("handle_tmc_request: VoltageStepTest handled by main loop");
+        }
         TmcRequestKind::SelfTest { .. } => {
             defmt::warn!("handle_tmc_request: SelfTest handled by main loop");
         }
