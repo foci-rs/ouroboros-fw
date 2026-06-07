@@ -4,7 +4,10 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 
-use foci_firmware::trace::{stream::FrameBuf, transport::StatusSnapshot};
+use foci_firmware::trace::{
+    stream::FrameBuf,
+    transport::{self, StatusSnapshot},
+};
 
 /// Motion/counter queue depth in frames.
 ///
@@ -78,6 +81,9 @@ impl TraceCounters {
     }
 }
 
+const STATUS_SLOT_COUNT: usize =
+    transport::status_slot_count(crate::board_config::TMC_CHANNEL_COUNT as usize);
+
 pub(crate) static TRACE_COUNTERS: TraceCounters = TraceCounters::new();
 
 pub(crate) static mut MOTION_QUEUE: heapless::spsc::Queue<QueuedFrame, MOTION_QUEUE_DEPTH> =
@@ -86,7 +92,8 @@ pub(crate) static mut EVENT_QUEUE: heapless::spsc::Queue<QueuedFrame, EVENT_QUEU
     heapless::spsc::Queue::new();
 pub(crate) static mut PENDING_EVENTS: heapless::Deque<PendingEvent, PENDING_EVENT_DEPTH> =
     heapless::Deque::new();
-pub(crate) static mut LAST_STATUS: [StatusSnapshot; 4] = [StatusSnapshot::new(); 4];
+pub(crate) static mut LAST_STATUS: [StatusSnapshot; STATUS_SLOT_COUNT] =
+    [StatusSnapshot::new(); STATUS_SLOT_COUNT];
 
 /// Partially sent frame owned by the single USB trace consumer.
 pub(crate) static mut CURRENT_TX: Option<QueuedFrame> = None;

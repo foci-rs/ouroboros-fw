@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
-use foci_firmware::trace::stream::{FrameBuf, METADATA_PAYLOAD_MAX, frame_sequence};
+use foci_firmware::trace::stream::{FrameBuf, frame_sequence};
 use foci_firmware::trace::transport::{self, TraceQueueSelection};
 
 use crate::state::usb_trace::{
@@ -443,13 +443,6 @@ pub(crate) fn request_spi_duration_event_if_ready() {
     }
 }
 
-fn push_str(out: &mut heapless::Vec<u8, METADATA_PAYLOAD_MAX>, value: &str) {
-    let bytes = value.as_bytes();
-    let len = bytes.len().min(31);
-    let _ = out.push(len as u8);
-    let _ = out.extend_from_slice(&bytes[..len]);
-}
-
 /// Emit stream metadata.
 pub(crate) fn emit_metadata() {
     use foci_firmware::trace::stream::*;
@@ -458,25 +451,26 @@ pub(crate) fn emit_metadata() {
         return;
     }
 
-    let source_count = crate::board_config::TMC_CHANNEL_COUNT;
-    let mut payload: heapless::Vec<u8, METADATA_PAYLOAD_MAX> = heapless::Vec::new();
-    let _ = payload.extend_from_slice(&[
-        1, // metadata schema
-        1, // trace feature revision
-        source_count,
-        0, // skipped sample counter count
-    ]);
-    let _ = payload.extend_from_slice(&crate::ankyra::constants::CLOCK_FREQ.to_le_bytes());
-    let _ = payload.extend_from_slice(&0u32.to_le_bytes());
-    let _ = payload.extend_from_slice(&0u32.to_le_bytes());
-    let _ = payload.extend_from_slice(&0u32.to_le_bytes());
-    push_str(&mut payload, "ouroboros-fw");
-    push_str(&mut payload, TRACE_PRODUCT);
-    push_str(&mut payload, "");
-    for channel in 0..source_count {
-        let _ = payload.extend_from_slice(&[SOURCE_KIND_FOCI, channel, 7]);
-        let _ = payload.extend_from_slice(b"channel");
-    }
+    let Ok(sources) = transport::canonical_sources(crate::board_config::TMC_CHANNEL_COUNT) else {
+        return;
+    };
+    let Ok(payload) = transport::build_metadata_payload(transport::TraceMetadataInputs {
+        skipped_sample_counter_count: 0,
+        clock_freq: crate::ankyra::constants::CLOCK_FREQ,
+        critical_hz: 0,
+        control_detail_hz: 0,
+        status_hz: 0,
+        pre_configuration_elapsed_ms: 0,
+        pre_configuration_skipped_critical: 0,
+        pre_configuration_skipped_control_detail: 0,
+        pre_configuration_skipped_status: 0,
+        firmware_id: "ouroboros-fw",
+        product: TRACE_PRODUCT,
+        serial: "",
+        sources: sources.as_slice(),
+    }) else {
+        return;
+    };
 
     let mut frame = FrameBuf::new();
     frame.write_header(header_at_timestamp(
@@ -823,6 +817,10 @@ pub(crate) async fn emit_status_frames<B>(
         watchdog_or_step_overrun_count: counters.watchdog_or_step_overrun_count,
         ..StatusSample::default()
     };
+    let klipper = StatusSample {
+        klipper_rx_queue_depth: counters.latest_queue_depth,
+        ..StatusSample::default()
+    };
 
     if channel == 0 {
         // Trace deadline pressure is telemetry degradation, so it is reported
@@ -840,12 +838,6 @@ pub(crate) async fn emit_status_frames<B>(
             endpoint_not_ready_count: counters.endpoint_not_ready_count,
             suppressed_status_change_count: counters.suppressed_status_change_count,
         };
-        emit_one_status(0, SOURCE_KIND_BOARD, SOURCE_INDEX_NA, board, regular_tick);
-    }
-
-    emit_one_status(1 + channel as usize, SOURCE_KIND_FOCI, channel, foci, false);
-
-    if channel == 0 {
         let usb = StatusSample {
             usb_trace_queue_high_water: counters.usb_trace_queue_high_water,
             dropped_motion_sample_count: counters.dropped_motion_sample_count,
@@ -854,8 +846,36 @@ pub(crate) async fn emit_status_frames<B>(
             suppressed_status_change_count: counters.suppressed_status_change_count,
             ..StatusSample::default()
         };
-        emit_one_status(3, SOURCE_KIND_USB, SOURCE_INDEX_NA, usb, false);
+        emit_one_status(
+            transport::board_status_slot(),
+            SOURCE_KIND_BOARD,
+            SOURCE_INDEX_NA,
+            board,
+            regular_tick,
+        );
+        emit_one_status(
+            transport::usb_status_slot(),
+            SOURCE_KIND_USB,
+            SOURCE_INDEX_NA,
+            usb,
+            false,
+        );
+        emit_one_status(
+            transport::klipper_status_slot(),
+            SOURCE_KIND_KLIPPER,
+            SOURCE_INDEX_NA,
+            klipper,
+            false,
+        );
     }
+
+    emit_one_status(
+        transport::foci_status_slot(channel),
+        SOURCE_KIND_FOCI,
+        channel,
+        foci,
+        false,
+    );
 }
 
 fn dequeue_next_frame() -> Option<QueuedFrame> {
