@@ -4,10 +4,12 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use embassy_stm32::gpio::Output;
 use foci_firmware::tmc_control::TmcControlRuntime;
+use foci_firmware::tmc_control::helpers::refresh_velocity_scale_from_state;
 use foci_tmc4671::spi::Tmc4671Spi;
 
+use crate::ankyra::constants::CLOCK_FREQ;
 use crate::app_types::TmcSpiDevice;
-use crate::board_config::TMC_CHANNEL_COUNT;
+use crate::board_config::{TMC_CHANNEL_COUNT, TMC_CONFIG};
 use crate::commissioning_backend::OuroborosBackend;
 
 pub(crate) type TmcEnablePins = [Output<'static>; TMC_CHANNEL_COUNT as usize];
@@ -69,4 +71,23 @@ pub(crate) fn channel_may_be_energized(channel: u8, runtime: &TmcControlRuntime)
     runtime.is_motor_enabled()
         || runtime.is_commission_active()
         || tmc_state(channel).motor_armed.load(Relaxed)
+}
+
+pub(crate) fn refresh_velocity_scale(channel: u8, runtime: &mut TmcControlRuntime) {
+    refresh_velocity_scale_from_state(
+        runtime,
+        tmc_state(channel),
+        CLOCK_FREQ,
+        TMC_CONFIG.pwm_freq_hz(),
+    );
+}
+
+pub(crate) fn next_commission_trace_seq(
+    commission_trace_engine_seq: &mut [u32; TMC_CHANNEL_COUNT as usize],
+    channel: u8,
+) -> u32 {
+    let idx = channel as usize;
+    let seq = commission_trace_engine_seq[idx];
+    commission_trace_engine_seq[idx] = commission_trace_engine_seq[idx].wrapping_add(1);
+    seq
 }
