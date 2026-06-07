@@ -23,6 +23,7 @@ mod interrupts;
 mod platform_impl;
 mod state;
 mod stepper_pins;
+mod tmc_control;
 mod tmc_control_glue;
 mod tmc_dispatch;
 mod tmc_mux;
@@ -45,11 +46,15 @@ mod app {
     use rtic_monotonics::stm32::prelude::*;
     use rtic_sync::channel::Receiver;
 
-    use crate::app_types::TmcSpiDevice;
     use crate::helpers::lifecycle::*;
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
     use crate::state::tmc::*;
+    use crate::tmc_control::board::{
+        TmcEnablePins, TmcRuntimes, channel_may_be_energized, channel_needs_safe_state,
+        commissioning_request_blocked, enable_pin, new_tmc_runtimes, ouroboros_backend,
+        stepper_state, tmc_state,
+    };
     use crate::tmc_control_glue::ActionDisposition;
     use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
     use foci_firmware::context::stepper::{
@@ -83,49 +88,11 @@ mod app {
     use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 
     use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
-    use crate::commissioning_backend::OuroborosBackend;
 
     const STATUS_NOT_PLL_LOCKED: u32 = 1 << 19;
     const STATUS_ADC_I_CLIPPED: u32 = 1 << 26;
     const STATUS_CRITICAL_FAULT_MASK: u32 = STATUS_NOT_PLL_LOCKED | STATUS_ADC_I_CLIPPED;
     const CHANNEL1_STATUS_FALLBACK: u8 = 1;
-
-    type TmcEnablePins = [Output<'static>; crate::board_config::TMC_CHANNEL_COUNT as usize];
-    type TmcRuntimes = [TmcControlRuntime; crate::board_config::TMC_CHANNEL_COUNT as usize];
-
-    const _: [(); 2] = [(); crate::board_config::TMC_CHANNEL_COUNT as usize];
-
-    fn new_tmc_runtimes() -> TmcRuntimes {
-        [
-            TmcControlRuntime::new_for_channel(0),
-            TmcControlRuntime::new_for_channel(1),
-        ]
-    }
-
-    fn tmc_state(channel: u8) -> &'static foci_firmware::state::tmc::TmcChannelState {
-        foci_firmware::state::tmc::tmc_channel(channel).expect("validated TMC channel")
-    }
-
-    fn stepper_state(channel: u8) -> &'static foci_firmware::state::stepper::StepperChannelState {
-        foci_firmware::state::stepper::stepper_channel(channel).expect("validated TMC channel")
-    }
-
-    fn ouroboros_backend<'a, 'spi>(
-        channel: u8,
-        tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
-        enable_pin: &'a mut Output<'static>,
-    ) -> OuroborosBackend<'a, 'spi> {
-        OuroborosBackend {
-            channel,
-            tmc,
-            enable_pin,
-            tmc_state: tmc_state(channel),
-        }
-    }
-
-    fn enable_pin(enable_pins: &mut TmcEnablePins, channel: u8) -> &mut Output<'static> {
-        &mut enable_pins[channel as usize]
-    }
 
     fn lower_all_enable_pins(enable_pins: &mut TmcEnablePins) {
         for pin in enable_pins {
@@ -159,34 +126,6 @@ mod app {
                 .store(false, core::sync::atomic::Ordering::Relaxed);
         }
         lower_all_enable_pins(enable_pins);
-    }
-
-    fn channel_needs_safe_state(channel: u8, runtime: &TmcControlRuntime) -> bool {
-        runtime.is_motor_enabled()
-            || runtime.is_commission_active()
-            || tmc_state(channel)
-                .motor_armed
-                .load(core::sync::atomic::Ordering::Relaxed)
-            || tmc_state(channel)
-                .commission_in_flight
-                .load(core::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn commissioning_request_blocked(runtimes: &TmcRuntimes, _request_channel: u8) -> bool {
-        for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-            if runtimes[channel as usize].is_commission_active() {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn channel_may_be_energized(channel: u8, runtime: &TmcControlRuntime) -> bool {
-        runtime.is_motor_enabled()
-            || runtime.is_commission_active()
-            || tmc_state(channel)
-                .motor_armed
-                .load(core::sync::atomic::Ordering::Relaxed)
     }
 
     fn latch_tmc_fault() {
