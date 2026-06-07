@@ -9,6 +9,7 @@
 //! dispatches here.
 
 use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
+use foci_firmware::tmc_control::dispatch::{SharedTmcDispatch, apply_shared_tmc_request};
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;
@@ -45,7 +46,13 @@ pub(crate) async fn handle_tmc_request(
         return Err(());
     };
 
-    match req.kind {
+    let kind = req.kind;
+    match apply_shared_tmc_request(&kind, tmc, tmc_state, CURRENT_SCALE_MA_PER_LSB).await? {
+        SharedTmcDispatch::Handled => return Ok(()),
+        SharedTmcDispatch::Unhandled => {}
+    }
+
+    match kind {
         #[cfg(feature = "dev")]
         TmcRequestKind::Write { addr, value } => {
             let reg = foci_tmc4671::registers::Register::new(addr);
@@ -70,24 +77,6 @@ pub(crate) async fn handle_tmc_request(
                     defmt::error!("TMC4671 SPI read failed: addr={:#04x}", addr);
                 }
             }
-        }
-        TmcRequestKind::SetCurrent { run_ma } => {
-            foci_firmware::tmc_ops::apply_set_current(
-                tmc,
-                tmc_state,
-                run_ma,
-                CURRENT_SCALE_MA_PER_LSB,
-            )
-            .await?;
-        }
-        TmcRequestKind::SetEncoder { ppr } => {
-            foci_firmware::tmc_ops::apply_set_encoder(tmc, ppr).await?;
-        }
-        TmcRequestKind::SetEncoderDir { invert } => {
-            foci_firmware::tmc_ops::apply_set_encoder_dir(tmc, tmc_state, invert).await?;
-        }
-        TmcRequestKind::SetVoltageLimit { voltage_limit } => {
-            foci_firmware::tmc_ops::apply_set_voltage_limit(tmc, tmc_state, voltage_limit).await?;
         }
         TmcRequestKind::CurrentStepTest { .. } => {
             defmt::warn!("handle_tmc_request: CurrentStepTest handled by main loop");
@@ -166,19 +155,9 @@ pub(crate) async fn handle_tmc_request(
         TmcRequestKind::Calibrate { .. } => {
             defmt::warn!("handle_tmc_request: Calibrate handled by main loop");
         }
-        TmcRequestKind::SetVelocityFilter { .. } => {}
-        TmcRequestKind::SetTorqueFilter { .. } => {}
-        TmcRequestKind::SetPositionFilter { .. } => {}
-        TmcRequestKind::SetFluxFilter { .. } => {}
         TmcRequestKind::SetPositionGains { .. } => {
             defmt::warn!("handle_tmc_request: SetPositionGains handled by main loop");
         }
-        TmcRequestKind::SetVelocityFeedforward { .. } => {}
-        TmcRequestKind::SetVelocityTransientFeedforward { .. } => {}
-        TmcRequestKind::SetAccelFeedforward { .. } => {}
-        TmcRequestKind::SetDecouplingFeedforward { .. } => {}
-        TmcRequestKind::SetPositionLead { .. } => {}
-        TmcRequestKind::SetPhaseAdvance { .. } => {}
         TmcRequestKind::Commission { .. } => {
             defmt::warn!("handle_tmc_request: Commission handled by main loop");
         }
@@ -192,6 +171,10 @@ pub(crate) async fn handle_tmc_request(
         #[cfg(feature = "dev")]
         TmcRequestKind::TestSpin { .. } => {
             defmt::warn!("handle_tmc_request: TestSpin handled by main loop");
+        }
+        _ => {
+            defmt::error!("handle_tmc_request: unhandled request kind after shared dispatch");
+            unreachable!("shared TMC dispatch coverage mismatch");
         }
     }
     Ok(())
