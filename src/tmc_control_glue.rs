@@ -2,25 +2,29 @@
 
 use foci_firmware::commission_dispatch::ReplyPayload;
 use foci_firmware::state::tmc::TMC_DISABLE_SIGNAL;
+use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::{BoardAction, BoardActions, ShutdownReason, StepperAction};
 
 use crate::helpers::lifecycle::read_tim5;
 use crate::helpers::stepper::stepper_stop_from_p1;
 
 /// Result of applying pre-request runtime actions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActionDisposition {
     /// No terminal action was applied; continue the existing request match.
     ContinueRequest,
     /// A terminal action consumed the request.
     RequestHandled,
+    /// Run this active diagnostic in the board main loop.
+    RunDiagnostic(TmcRequest),
 }
 
 /// Apply runtime actions emitted before SPI-heavy request handling.
 ///
 /// Returns [`ActionDisposition::RequestHandled`] if a terminal action was
-/// observed. Stepper-only action lists apply their non-terminal effects and
-/// return [`ActionDisposition::ContinueRequest`].
+/// observed, or [`ActionDisposition::RunDiagnostic`] if an active diagnostic
+/// should run in the board main loop. Stepper-only action lists apply their
+/// non-terminal effects and return [`ActionDisposition::ContinueRequest`].
 pub(crate) fn apply_pre_request_actions<F>(
     channel: u8,
     actions: BoardActions,
@@ -32,44 +36,50 @@ where
     let mut disposition = ActionDisposition::ContinueRequest;
 
     for action in actions {
-        if apply_action(channel, action, &mut enter_shutdown) {
-            disposition = ActionDisposition::RequestHandled;
+        if let Some(next) = apply_action(channel, action, &mut enter_shutdown) {
+            disposition = next;
         }
     }
 
     disposition
 }
 
-fn apply_action<F>(channel: u8, action: BoardAction, enter_shutdown: &mut F) -> bool
+fn apply_action<F>(
+    channel: u8,
+    action: BoardAction,
+    enter_shutdown: &mut F,
+) -> Option<ActionDisposition>
 where
     F: FnMut(ShutdownReason),
 {
     match action {
         BoardAction::Shutdown(reason) => {
             enter_shutdown(reason);
-            true
+            Some(ActionDisposition::RequestHandled)
         }
         BoardAction::SignalEmergencyDisable => {
             TMC_DISABLE_SIGNAL.signal(());
-            true
+            Some(ActionDisposition::RequestHandled)
         }
-        BoardAction::Stepper(StepperAction::None) => false,
+        BoardAction::Stepper(StepperAction::None) => None,
         BoardAction::Stepper(StepperAction::StopNow) => {
             stepper_stop_from_p1(channel);
-            false
+            None
         }
         BoardAction::Stepper(StepperAction::ArmCheck { .. }) => {
             defmt::panic!("ArmCheck requires SPI/backend state and must be handled inline")
         }
         BoardAction::Stepper(StepperAction::ApplyPostAction(_)) => {
             defmt::warn!("TMC runtime post-action requires dispatch state; handled inline");
-            false
+            None
         }
         BoardAction::Reply(reply) => {
             emit_reply(reply);
-            true
+            Some(ActionDisposition::RequestHandled)
         }
-        BoardAction::DelegatedDiagnostic(_delegated) => true,
+        BoardAction::DelegatedDiagnostic(delegated) => {
+            Some(ActionDisposition::RunDiagnostic(delegated.request))
+        }
     }
 }
 

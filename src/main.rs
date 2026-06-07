@@ -931,19 +931,16 @@ mod app {
                     };
                     let mut tmc = Tmc4671Spi::new(device);
                     let actions = runtimes[channel as usize].classify_request(req.clone());
-                    let request_handled = matches!(
-                        crate::tmc_control_glue::apply_pre_request_actions(
-                            channel,
-                            actions,
-                            |reason| {
-                                ctx.shared.app_state.lock(|state| {
-                                    if crate::firmware_ctx::enter_shutdown(state) {
-                                        crate::tmc_control_glue::emit_shutdown(reason);
-                                    }
-                                });
-                            }
-                        ),
-                        ActionDisposition::RequestHandled
+                    let disposition = crate::tmc_control_glue::apply_pre_request_actions(
+                        channel,
+                        actions,
+                        |reason| {
+                            ctx.shared.app_state.lock(|state| {
+                                if crate::firmware_ctx::enter_shutdown(state) {
+                                    crate::tmc_control_glue::emit_shutdown(reason);
+                                }
+                            });
+                        },
                     );
 
                     let commissioning_blocked = match &req.kind {
@@ -961,85 +958,94 @@ mod app {
                     };
                     let runtime = &mut runtimes[channel as usize];
 
-                    match req {
-                        _ if request_handled => {}
-                        TmcRequest {
-                            kind: TmcRequestKind::SetEnable(enabled),
-                            ..
-                        } => {
-                            if enabled {
-                                if !runtime.is_calibrated() {
-                                    // Auto-calibrate: Klipper may send enable before
-                                    // the Python module's foci_calibrate arrives due
-                                    // to queue_digital_out timing. Launch the
-                                    // commissioning engine to run ADC calibration
-                                    // asynchronously; the CalibrateDone handler will
-                                    // complete encoder alignment and closed-loop entry.
-                                    if commissioning_blocked {
-                                        defmt::warn!(
-                                            "Auto-calibrate rejected: commissioning already active"
-                                        );
-                                        continue;
-                                    }
-                                    if !foci_firmware::tmc::auto_calibrate_on_enable_allowed(
-                                        channel,
-                                    ) {
-                                        defmt::warn!("Auto-calibrate rejected: host gate closed");
-                                        continue;
-                                    }
-                                    if tmc_state(channel)
-                                        .commission_in_flight
-                                        .swap(true, core::sync::atomic::Ordering::Relaxed)
-                                    {
-                                        defmt::warn!(
-                                            "Auto-calibrate skipped: commission in flight"
-                                        );
-                                        continue;
-                                    }
-                                    defmt::info!("Auto-calibrating on enable");
-                                    runtime.set_commission_engine(
+                    match disposition {
+                        ActionDisposition::RequestHandled => {}
+                        ActionDisposition::RunDiagnostic(_diagnostic_req) => {}
+                        ActionDisposition::ContinueRequest => {
+                            match req {
+                                TmcRequest {
+                                    kind: TmcRequestKind::SetEnable(enabled),
+                                    ..
+                                } => {
+                                    if enabled {
+                                        if !runtime.is_calibrated() {
+                                            // Auto-calibrate: Klipper may send enable before
+                                            // the Python module's foci_calibrate arrives due
+                                            // to queue_digital_out timing. Launch the
+                                            // commissioning engine to run ADC calibration
+                                            // asynchronously; the CalibrateDone handler will
+                                            // complete encoder alignment and closed-loop entry.
+                                            if commissioning_blocked {
+                                                defmt::warn!(
+                                                    "Auto-calibrate rejected: commissioning already active"
+                                                );
+                                                continue;
+                                            }
+                                            if !foci_firmware::tmc::auto_calibrate_on_enable_allowed(
+                                                channel,
+                                            ) {
+                                                defmt::warn!(
+                                                    "Auto-calibrate rejected: host gate closed"
+                                                );
+                                                continue;
+                                            }
+                                            if tmc_state(channel)
+                                                .commission_in_flight
+                                                .swap(true, core::sync::atomic::Ordering::Relaxed)
+                                            {
+                                                defmt::warn!(
+                                                    "Auto-calibrate skipped: commission in flight"
+                                                );
+                                                continue;
+                                            }
+                                            defmt::info!("Auto-calibrating on enable");
+                                            runtime.set_commission_engine(
                                         foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc_with_trace_seq(
                                             0,
                                             tmc_state(channel),
                                             next_commission_trace_seq!(channel),
                                         ),
                                     );
-                                    // Don't set motor_enabled/tmc_state().motor_armed yet --
-                                    // the CalibrateDone handler does that after
-                                    // encoder alignment + closed-loop entry.
-                                    continue;
-                                }
-                                // Existing precondition: this arm runs only when
-                                // calibrated == true (the !calibrated branch above
-                                // continues to the auto-calibrate path).
-                                if runtime.is_motor_enabled() {
-                                    defmt::info!("Motor enable sync (already armed)");
-                                    continue;
-                                }
-
-                                let actions = runtime.prepare_enable_request(tmc_state(channel));
-                                for action in actions {
-                                    if let BoardAction::Stepper(StepperAction::ArmCheck {
-                                        post_action,
-                                    }) = action
-                                    {
-                                        if !runtime.restore_phase_advance_now(&mut tmc).await {
-                                            defmt::warn!(
-                                                "phase advance: failed to restore ABN offset before arm"
-                                            );
-                                            continue 'control_loop;
+                                            // Don't set motor_enabled/tmc_state().motor_armed yet --
+                                            // the CalibrateDone handler does that after
+                                            // encoder alignment + closed-loop entry.
+                                            continue;
                                         }
-                                        {
-                                            let mut backend = ouroboros_backend(
-                                                channel,
-                                                &mut tmc,
-                                                enable_pin(enable_pins, channel),
-                                            );
-                                            let mut state = runtime.dispatch_state(
-                                                tmc_state(channel),
-                                                stepper_state(channel),
-                                            );
-                                            if let Err(error) =
+                                        // Existing precondition: this arm runs only when
+                                        // calibrated == true (the !calibrated branch above
+                                        // continues to the auto-calibrate path).
+                                        if runtime.is_motor_enabled() {
+                                            defmt::info!("Motor enable sync (already armed)");
+                                            continue;
+                                        }
+
+                                        let actions =
+                                            runtime.prepare_enable_request(tmc_state(channel));
+                                        for action in actions {
+                                            if let BoardAction::Stepper(StepperAction::ArmCheck {
+                                                post_action,
+                                            }) = action
+                                            {
+                                                if !runtime
+                                                    .restore_phase_advance_now(&mut tmc)
+                                                    .await
+                                                {
+                                                    defmt::warn!(
+                                                        "phase advance: failed to restore ABN offset before arm"
+                                                    );
+                                                    continue 'control_loop;
+                                                }
+                                                {
+                                                    let mut backend = ouroboros_backend(
+                                                        channel,
+                                                        &mut tmc,
+                                                        enable_pin(enable_pins, channel),
+                                                    );
+                                                    let mut state = runtime.dispatch_state(
+                                                        tmc_state(channel),
+                                                        stepper_state(channel),
+                                                    );
+                                                    if let Err(error) =
                                                 foci_firmware::tmc_ops::arm_motor_electrical(
                                                     &mut backend,
                                                     &mut state,
@@ -1057,370 +1063,387 @@ mod app {
                                                 .await;
                                                 continue 'control_loop;
                                             }
-                                            apply_stepper_post_action(
-                                                post_action,
-                                                &mut state,
+                                                    apply_stepper_post_action(
+                                                        post_action,
+                                                        &mut state,
+                                                        channel,
+                                                    );
+                                                }
+
+                                                defmt::info!(
+                                                    "Motor enabled (calibrated, step/dir armed)"
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        // Disable: stop stepping first, then kill motor electrically.
+                                        let stop_disposition =
+                                            crate::tmc_control_glue::apply_pre_request_actions(
                                                 channel,
+                                                runtime.prepare_disable_request(),
+                                                |reason| {
+                                                    ctx.shared.app_state.lock(|state| {
+                                                        if crate::firmware_ctx::enter_shutdown(
+                                                            state,
+                                                        ) {
+                                                            crate::tmc_control_glue::emit_shutdown(
+                                                                reason,
+                                                            );
+                                                        }
+                                                    });
+                                                },
+                                            );
+                                        debug_assert_eq!(
+                                            stop_disposition,
+                                            ActionDisposition::ContinueRequest
+                                        );
+
+                                        let phase_advance_restored =
+                                            runtime.restore_phase_advance_now(&mut tmc).await;
+                                        if !phase_advance_restored {
+                                            defmt::warn!(
+                                                "phase advance: failed to restore ABN offset before disarm"
                                             );
                                         }
+                                        {
+                                            let mut backend = ouroboros_backend(
+                                                channel,
+                                                &mut tmc,
+                                                enable_pin(enable_pins, channel),
+                                            );
+                                            let mut state = runtime.dispatch_state(
+                                                tmc_state(channel),
+                                                stepper_state(channel),
+                                            );
+                                            foci_firmware::tmc_ops::disarm_motor(
+                                                &mut backend,
+                                                &mut state,
+                                            )
+                                            .await;
+                                        }
 
-                                        defmt::info!("Motor enabled (calibrated, step/dir armed)");
+                                        // Zero position counter
+                                        stepper_state(channel)
+                                            .position
+                                            .store(0, core::sync::atomic::Ordering::Relaxed);
+
+                                        if !phase_advance_restored {
+                                            continue;
+                                        }
+
+                                        defmt::info!("TMC4671 motor disabled");
                                     }
                                 }
-                            } else {
-                                // Disable: stop stepping first, then kill motor electrically.
-                                let stop_disposition =
-                                    crate::tmc_control_glue::apply_pre_request_actions(
-                                        channel,
-                                        runtime.prepare_disable_request(),
-                                        |reason| {
-                                            ctx.shared.app_state.lock(|state| {
-                                                if crate::firmware_ctx::enter_shutdown(state) {
-                                                    crate::tmc_control_glue::emit_shutdown(reason);
-                                                }
-                                            });
-                                        },
-                                    );
-                                debug_assert_eq!(
-                                    stop_disposition,
-                                    ActionDisposition::ContinueRequest
-                                );
-
-                                let phase_advance_restored =
-                                    runtime.restore_phase_advance_now(&mut tmc).await;
-                                if !phase_advance_restored {
-                                    defmt::warn!(
-                                        "phase advance: failed to restore ABN offset before disarm"
-                                    );
-                                }
-                                {
-                                    let mut backend = ouroboros_backend(
-                                        channel,
-                                        &mut tmc,
-                                        enable_pin(enable_pins, channel),
-                                    );
-                                    let mut state = runtime
-                                        .dispatch_state(tmc_state(channel), stepper_state(channel));
-                                    foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state)
-                                        .await;
-                                }
-
-                                // Zero position counter
-                                stepper_state(channel)
-                                    .position
-                                    .store(0, core::sync::atomic::Ordering::Relaxed);
-
-                                if !phase_advance_restored {
-                                    continue;
-                                }
-
-                                defmt::info!("TMC4671 motor disabled");
-                            }
-                        }
-                        TmcRequest {
-                            kind: TmcRequestKind::Calibrate { oid },
-                            ..
-                        } => {
-                            if commissioning_blocked {
-                                defmt::warn!("foci_calibrate rejected: commission in flight");
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCalibrateResult,
-                                    oid: u8 = oid,
-                                    status: u8 = foci_firmware::calibration::CalibrationError::InternalError.status_code(),
-                                    adc_i0: u16 = 0,
-                                    adc_i1: u16 = 0,
-                                    encoder_count: u32 = 0,
-                                );
-                                continue;
-                            }
-                            if runtime.is_motor_enabled() {
-                                defmt::warn!("foci_calibrate rejected: motor already enabled");
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCalibrateResult,
-                                    oid: u8 = oid,
-                                    status: u8 = foci_firmware::calibration::CalibrationError::AlreadyEnabled.status_code(),
-                                    adc_i0: u16 = 0,
-                                    adc_i1: u16 = 0,
-                                    encoder_count: u32 = 0,
-                                );
-                                continue;
-                            }
-                            // Engine tick will drive ADC cal; CalibrateDone handler
-                            // performs encoder alignment and closed-loop entry.
-                            runtime.clear_calibrated();
-                            runtime.set_commission_engine(
+                                TmcRequest {
+                                    kind: TmcRequestKind::Calibrate { oid },
+                                    ..
+                                } => {
+                                    if commissioning_blocked {
+                                        defmt::warn!(
+                                            "foci_calibrate rejected: commission in flight"
+                                        );
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCalibrateResult,
+                                            oid: u8 = oid,
+                                            status: u8 = foci_firmware::calibration::CalibrationError::InternalError.status_code(),
+                                            adc_i0: u16 = 0,
+                                            adc_i1: u16 = 0,
+                                            encoder_count: u32 = 0,
+                                        );
+                                        continue;
+                                    }
+                                    if runtime.is_motor_enabled() {
+                                        defmt::warn!(
+                                            "foci_calibrate rejected: motor already enabled"
+                                        );
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCalibrateResult,
+                                            oid: u8 = oid,
+                                            status: u8 = foci_firmware::calibration::CalibrationError::AlreadyEnabled.status_code(),
+                                            adc_i0: u16 = 0,
+                                            adc_i1: u16 = 0,
+                                            encoder_count: u32 = 0,
+                                        );
+                                        continue;
+                                    }
+                                    // Engine tick will drive ADC cal; CalibrateDone handler
+                                    // performs encoder alignment and closed-loop entry.
+                                    runtime.clear_calibrated();
+                                    runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_calibrate_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
                                     next_commission_trace_seq!(channel),
                                 ),
                             );
-                        }
-                        #[cfg(feature = "dev")]
-                        TmcRequest {
-                            kind: TmcRequestKind::Init,
-                            ..
-                        } => {
-                            defmt::info!("TMC4671 init: starting open-loop stepper config");
-                            tmc_enter_openloop(&mut tmc, enable_pin(enable_pins, channel)).await;
-                        }
-                        #[cfg(feature = "dev")]
-                        TmcRequest {
-                            kind: TmcRequestKind::TestSpin { revolutions },
-                            ..
-                        } => {
-                            do_test_spin(&mut tmc, revolutions).await;
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::SetPidGains {
-                                    flux_p,
-                                    flux_i,
-                                    torque_p,
-                                    torque_i,
-                                },
-                            ..
-                        } => {
-                            let gains = foci_firmware::pid::InnerLoopGains {
-                                flux_p,
-                                flux_i,
-                                torque_p,
-                                torque_i,
-                            };
-                            runtime.set_stored_gains(gains);
-                            let (flux_reg, torque_reg) =
-                                foci_firmware::tmc_ops::pack_inner_gain_registers(gains);
-                            let flux_ok = tmc
-                                .write_register(
-                                    foci_tmc4671::registers::PID_FLUX_P_FLUX_I,
-                                    flux_reg,
-                                )
-                                .await
-                                .is_ok();
-                            let torque_ok = tmc
-                                .write_register(
-                                    foci_tmc4671::registers::PID_TORQUE_P_TORQUE_I,
-                                    torque_reg,
-                                )
-                                .await
-                                .is_ok();
-                            if !flux_ok || !torque_ok {
-                                defmt::warn!("PID gains live write failed");
-                            }
-                            defmt::info!(
-                                "PID gains received: flux P={} I={}, torque P={} I={}",
-                                flux_p,
-                                flux_i,
-                                torque_p,
-                                torque_i,
-                            );
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::SetPositionGains {
-                                    position_p,
-                                    position_i,
-                                    velocity_p,
-                                    velocity_i,
-                                },
-                            ..
-                        } => {
-                            tmc_state(channel)
-                                .position_p_value
-                                .store(position_p, core::sync::atomic::Ordering::Relaxed);
-                            tmc_state(channel)
-                                .position_i_value
-                                .store(position_i, core::sync::atomic::Ordering::Relaxed);
-                            tmc_state(channel)
-                                .velocity_p_value
-                                .store(velocity_p, core::sync::atomic::Ordering::Relaxed);
-                            tmc_state(channel)
-                                .velocity_i_value
-                                .store(velocity_i, core::sync::atomic::Ordering::Relaxed);
-                            let (velocity_reg, position_reg) =
-                                foci_firmware::tmc_ops::pack_outer_gain_registers(
-                                    position_p, position_i, velocity_p, velocity_i,
-                                );
-                            let velocity_ok = tmc
-                                .write_register(
-                                    foci_tmc4671::registers::PID_VELOCITY_P_VELOCITY_I,
-                                    velocity_reg,
-                                )
-                                .await
-                                .is_ok();
-                            let position_ok = tmc
-                                .write_register(
-                                    foci_tmc4671::registers::PID_POSITION_P_POSITION_I,
-                                    position_reg,
-                                )
-                                .await
-                                .is_ok();
-                            if !velocity_ok || !position_ok {
-                                defmt::warn!("Position gains live write failed");
-                            }
-                            defmt::info!(
-                                "Position gains received: pos P={} I={}, vel P={} I={}",
-                                position_p,
-                                position_i,
-                                velocity_p,
-                                velocity_i,
-                            );
-                        }
-                        TmcRequest {
-                            kind: TmcRequestKind::SetVelocityFeedforward { enable, multiplier },
-                            ..
-                        } => {
-                            defmt::info!(
-                                "Velocity feedforward: {} multiplier={} (via queue)",
-                                enable,
-                                multiplier
-                            );
-                            // Feedforward flag is already set by the atomic in the
-                            // command handler; this arm exists for exhaustiveness.
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::SetVelocityTransientFeedforward {
-                                    enable,
-                                    lead_time_us,
-                                    gain_permille,
-                                    max_offset,
-                                    rate_hz,
-                                },
-                            ..
-                        } => {
-                            defmt::info!(
-                                "Velocity transient feedforward: {} lead_time_us={} \
+                                }
+                                #[cfg(feature = "dev")]
+                                TmcRequest {
+                                    kind: TmcRequestKind::Init,
+                                    ..
+                                } => {
+                                    defmt::info!("TMC4671 init: starting open-loop stepper config");
+                                    tmc_enter_openloop(&mut tmc, enable_pin(enable_pins, channel))
+                                        .await;
+                                }
+                                #[cfg(feature = "dev")]
+                                TmcRequest {
+                                    kind: TmcRequestKind::TestSpin { revolutions },
+                                    ..
+                                } => {
+                                    do_test_spin(&mut tmc, revolutions).await;
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetPidGains {
+                                            flux_p,
+                                            flux_i,
+                                            torque_p,
+                                            torque_i,
+                                        },
+                                    ..
+                                } => {
+                                    let gains = foci_firmware::pid::InnerLoopGains {
+                                        flux_p,
+                                        flux_i,
+                                        torque_p,
+                                        torque_i,
+                                    };
+                                    runtime.set_stored_gains(gains);
+                                    let (flux_reg, torque_reg) =
+                                        foci_firmware::tmc_ops::pack_inner_gain_registers(gains);
+                                    let flux_ok = tmc
+                                        .write_register(
+                                            foci_tmc4671::registers::PID_FLUX_P_FLUX_I,
+                                            flux_reg,
+                                        )
+                                        .await
+                                        .is_ok();
+                                    let torque_ok = tmc
+                                        .write_register(
+                                            foci_tmc4671::registers::PID_TORQUE_P_TORQUE_I,
+                                            torque_reg,
+                                        )
+                                        .await
+                                        .is_ok();
+                                    if !flux_ok || !torque_ok {
+                                        defmt::warn!("PID gains live write failed");
+                                    }
+                                    defmt::info!(
+                                        "PID gains received: flux P={} I={}, torque P={} I={}",
+                                        flux_p,
+                                        flux_i,
+                                        torque_p,
+                                        torque_i,
+                                    );
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetPositionGains {
+                                            position_p,
+                                            position_i,
+                                            velocity_p,
+                                            velocity_i,
+                                        },
+                                    ..
+                                } => {
+                                    tmc_state(channel)
+                                        .position_p_value
+                                        .store(position_p, core::sync::atomic::Ordering::Relaxed);
+                                    tmc_state(channel)
+                                        .position_i_value
+                                        .store(position_i, core::sync::atomic::Ordering::Relaxed);
+                                    tmc_state(channel)
+                                        .velocity_p_value
+                                        .store(velocity_p, core::sync::atomic::Ordering::Relaxed);
+                                    tmc_state(channel)
+                                        .velocity_i_value
+                                        .store(velocity_i, core::sync::atomic::Ordering::Relaxed);
+                                    let (velocity_reg, position_reg) =
+                                        foci_firmware::tmc_ops::pack_outer_gain_registers(
+                                            position_p, position_i, velocity_p, velocity_i,
+                                        );
+                                    let velocity_ok = tmc
+                                        .write_register(
+                                            foci_tmc4671::registers::PID_VELOCITY_P_VELOCITY_I,
+                                            velocity_reg,
+                                        )
+                                        .await
+                                        .is_ok();
+                                    let position_ok = tmc
+                                        .write_register(
+                                            foci_tmc4671::registers::PID_POSITION_P_POSITION_I,
+                                            position_reg,
+                                        )
+                                        .await
+                                        .is_ok();
+                                    if !velocity_ok || !position_ok {
+                                        defmt::warn!("Position gains live write failed");
+                                    }
+                                    defmt::info!(
+                                        "Position gains received: pos P={} I={}, vel P={} I={}",
+                                        position_p,
+                                        position_i,
+                                        velocity_p,
+                                        velocity_i,
+                                    );
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetVelocityFeedforward { enable, multiplier },
+                                    ..
+                                } => {
+                                    defmt::info!(
+                                        "Velocity feedforward: {} multiplier={} (via queue)",
+                                        enable,
+                                        multiplier
+                                    );
+                                    // Feedforward flag is already set by the atomic in the
+                                    // command handler; this arm exists for exhaustiveness.
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetVelocityTransientFeedforward {
+                                            enable,
+                                            lead_time_us,
+                                            gain_permille,
+                                            max_offset,
+                                            rate_hz,
+                                        },
+                                    ..
+                                } => {
+                                    defmt::info!(
+                                        "Velocity transient feedforward: {} lead_time_us={} \
                                 gain_permille={} max_offset={} rate_hz={} (via queue)",
-                                enable,
-                                lead_time_us,
-                                gain_permille,
-                                max_offset,
-                                rate_hz
-                            );
-                            // OpenFFBoard is the active trace/tuning target for this
-                            // diagnostic; this arm exists for exhaustiveness.
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::SetAccelFeedforward {
-                                    enable,
-                                    accel_gain_permille,
-                                    decel_gain_permille,
-                                },
-                            ..
-                        } => {
-                            defmt::info!(
-                                "Acceleration feedforward: {} accel_gain_permille={} \
+                                        enable,
+                                        lead_time_us,
+                                        gain_permille,
+                                        max_offset,
+                                        rate_hz
+                                    );
+                                    // OpenFFBoard is the active trace/tuning target for this
+                                    // diagnostic; this arm exists for exhaustiveness.
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetAccelFeedforward {
+                                            enable,
+                                            accel_gain_permille,
+                                            decel_gain_permille,
+                                        },
+                                    ..
+                                } => {
+                                    defmt::info!(
+                                        "Acceleration feedforward: {} accel_gain_permille={} \
                                 decel_gain_permille={} (via queue)",
-                                enable,
-                                accel_gain_permille,
-                                decel_gain_permille
-                            );
-                            // OpenFFBoard is the active trace/tuning target for
-                            // this diagnostic path; keep Ouroboros exhaustive.
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::SetPositionLead {
-                                    enable,
-                                    gain_permille,
-                                    max_counts,
-                                },
-                            ..
-                        } => {
-                            defmt::info!(
-                                "Position lead: {} gain_permille={} max_counts={} (via queue)",
-                                enable,
-                                gain_permille,
-                                max_counts
-                            );
-                            // OpenFFBoard owns this diagnostic implementation;
-                            // keep Ouroboros exhaustive for shared enum growth.
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::SetPhaseAdvance {
-                                    enable,
-                                    gain_ppm,
-                                    max_counts,
-                                    deadband,
-                                },
-                            ..
-                        } => {
-                            defmt::info!(
-                                "Phase advance: {} gain_ppm={} max_counts={} deadband={} \
+                                        enable,
+                                        accel_gain_permille,
+                                        decel_gain_permille
+                                    );
+                                    // OpenFFBoard is the active trace/tuning target for
+                                    // this diagnostic path; keep Ouroboros exhaustive.
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetPositionLead {
+                                            enable,
+                                            gain_permille,
+                                            max_counts,
+                                        },
+                                    ..
+                                } => {
+                                    defmt::info!(
+                                        "Position lead: {} gain_permille={} max_counts={} (via queue)",
+                                        enable,
+                                        gain_permille,
+                                        max_counts
+                                    );
+                                    // OpenFFBoard owns this diagnostic implementation;
+                                    // keep Ouroboros exhaustive for shared enum growth.
+                                }
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::SetPhaseAdvance {
+                                            enable,
+                                            gain_ppm,
+                                            max_counts,
+                                            deadband,
+                                        },
+                                    ..
+                                } => {
+                                    defmt::info!(
+                                        "Phase advance: {} gain_ppm={} max_counts={} deadband={} \
                                 (via queue)",
-                                enable,
-                                gain_ppm,
-                                max_counts,
-                                deadband
-                            );
-                            // OpenFFBoard owns this diagnostic implementation;
-                            // keep Ouroboros exhaustive for shared enum growth.
-                        }
-                        TmcRequest {
-                            kind: TmcRequestKind::Commission { oid, profile },
-                            ..
-                        } => {
-                            if commissioning_blocked {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCommissionPhase,
-                                    oid: u8 = oid,
-                                    phase: u8 = 0,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::AlreadyRunning
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            if runtime.is_motor_enabled() {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCommissionPhase,
-                                    oid: u8 = oid,
-                                    phase: u8 = 0,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::MotorEnabled
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            let current_limit = tmc_state(channel)
-                                .current_limit_reg
-                                .load(core::sync::atomic::Ordering::Relaxed);
-                            if current_limit == 0 {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCommissionPhase,
-                                    oid: u8 = oid,
-                                    phase: u8 = 0,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::NoCurrent
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            runtime.clear_calibrated();
-                            runtime.set_commission_engine(
+                                        enable,
+                                        gain_ppm,
+                                        max_counts,
+                                        deadband
+                                    );
+                                    // OpenFFBoard owns this diagnostic implementation;
+                                    // keep Ouroboros exhaustive for shared enum growth.
+                                }
+                                TmcRequest {
+                                    kind: TmcRequestKind::Commission { oid, profile },
+                                    ..
+                                } => {
+                                    if commissioning_blocked {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCommissionPhase,
+                                            oid: u8 = oid,
+                                            phase: u8 = 0,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::AlreadyRunning
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    if runtime.is_motor_enabled() {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCommissionPhase,
+                                            oid: u8 = oid,
+                                            phase: u8 = 0,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::MotorEnabled
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    let current_limit = tmc_state(channel)
+                                        .current_limit_reg
+                                        .load(core::sync::atomic::Ordering::Relaxed);
+                                    if current_limit == 0 {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCommissionPhase,
+                                            oid: u8 = oid,
+                                            phase: u8 = 0,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::NoCurrent
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    runtime.clear_calibrated();
+                                    runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_commission_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
@@ -1428,115 +1451,126 @@ mod app {
                                     next_commission_trace_seq!(channel),
                                 ),
                             );
-                        }
-                        TmcRequest {
-                            kind:
-                                TmcRequestKind::Tune {
-                                    oid,
-                                    profile,
-                                    mode,
-                                    inner_lambda_us,
-                                    theta_e_us,
-                                    current_ringing_count,
-                                    current_bandwidth_hz,
-                                    tau_e_us,
-                                    tau_e_crosscheck_us,
-                                    tau_residual_permille,
-                                    inner_warning_flags,
-                                },
-                            ..
-                        } => {
-                            // Stage 2 requires the motor to be enabled and
-                            // holding in closed-loop position mode (from Stage 1
-                            // or a prior calibrate). Reject if not ready.
-                            if commissioning_blocked {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCommissionPhase,
-                                    oid: u8 = oid,
-                                    phase: u8 = 0,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::AlreadyRunning
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            if !runtime.is_motor_enabled() || !runtime.is_calibrated() {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCommissionPhase,
-                                    oid: u8 = oid,
-                                    phase: u8 = 0,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::EncoderNotAligned
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            let current_limit = tmc_state(channel)
-                                .current_limit_reg
-                                .load(core::sync::atomic::Ordering::Relaxed);
-                            if current_limit == 0 {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociCommissionPhase,
-                                    oid: u8 = oid,
-                                    phase: u8 = 0,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::NoCurrent
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            let entry_snapshot = {
-                                use core::sync::atomic::Ordering::Relaxed;
-                                foci_firmware::commission::EntrySnapshot {
-                                    velocity_p: tmc_state(channel).velocity_p_value.load(Relaxed),
-                                    velocity_i: tmc_state(channel).velocity_i_value.load(Relaxed),
-                                    position_p: tmc_state(channel).position_p_value.load(Relaxed),
-                                    position_i: tmc_state(channel).position_i_value.load(Relaxed),
-                                    velocity_limit: tmc_state(channel)
-                                        .velocity_limit_cfg
-                                        .load(Relaxed),
-                                    voltage_limit: tmc_state(channel)
-                                        .voltage_limit_cfg
-                                        .load(Relaxed),
-                                    velocity_filter_hz: tmc_state(channel)
-                                        .velocity_filter_hz
-                                        .load(Relaxed),
-                                    torque_filter_hz: tmc_state(channel)
-                                        .torque_filter_hz
-                                        .load(Relaxed),
-                                    position_filter_hz: tmc_state(channel)
-                                        .position_filter_hz
-                                        .load(Relaxed),
-                                    flux_filter_hz: tmc_state(channel).flux_filter_hz.load(Relaxed),
                                 }
-                            };
-                            let outer_params = foci_firmware::commission::OuterTuneParams {
-                                profile: foci_firmware::autotune::CommissionProfile::from_u8(
-                                    profile,
-                                ),
-                                mode: foci_firmware::autotune::OperatingMode::from_u8(mode),
-                                inner_lambda_us,
-                                theta_e_us,
-                                current_ringing: current_ringing_count > 1,
-                                current_bandwidth_hz,
-                                tau_e_us,
-                                tau_e_crosscheck_us,
-                                tau_residual_permille,
-                                inner_warning_flags,
-                            };
-                            runtime.set_commission_engine(
+                                TmcRequest {
+                                    kind:
+                                        TmcRequestKind::Tune {
+                                            oid,
+                                            profile,
+                                            mode,
+                                            inner_lambda_us,
+                                            theta_e_us,
+                                            current_ringing_count,
+                                            current_bandwidth_hz,
+                                            tau_e_us,
+                                            tau_e_crosscheck_us,
+                                            tau_residual_permille,
+                                            inner_warning_flags,
+                                        },
+                                    ..
+                                } => {
+                                    // Stage 2 requires the motor to be enabled and
+                                    // holding in closed-loop position mode (from Stage 1
+                                    // or a prior calibrate). Reject if not ready.
+                                    if commissioning_blocked {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCommissionPhase,
+                                            oid: u8 = oid,
+                                            phase: u8 = 0,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::AlreadyRunning
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    if !runtime.is_motor_enabled() || !runtime.is_calibrated() {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCommissionPhase,
+                                            oid: u8 = oid,
+                                            phase: u8 = 0,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::EncoderNotAligned
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    let current_limit = tmc_state(channel)
+                                        .current_limit_reg
+                                        .load(core::sync::atomic::Ordering::Relaxed);
+                                    if current_limit == 0 {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociCommissionPhase,
+                                            oid: u8 = oid,
+                                            phase: u8 = 0,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::NoCurrent
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    let entry_snapshot = {
+                                        use core::sync::atomic::Ordering::Relaxed;
+                                        foci_firmware::commission::EntrySnapshot {
+                                            velocity_p: tmc_state(channel)
+                                                .velocity_p_value
+                                                .load(Relaxed),
+                                            velocity_i: tmc_state(channel)
+                                                .velocity_i_value
+                                                .load(Relaxed),
+                                            position_p: tmc_state(channel)
+                                                .position_p_value
+                                                .load(Relaxed),
+                                            position_i: tmc_state(channel)
+                                                .position_i_value
+                                                .load(Relaxed),
+                                            velocity_limit: tmc_state(channel)
+                                                .velocity_limit_cfg
+                                                .load(Relaxed),
+                                            voltage_limit: tmc_state(channel)
+                                                .voltage_limit_cfg
+                                                .load(Relaxed),
+                                            velocity_filter_hz: tmc_state(channel)
+                                                .velocity_filter_hz
+                                                .load(Relaxed),
+                                            torque_filter_hz: tmc_state(channel)
+                                                .torque_filter_hz
+                                                .load(Relaxed),
+                                            position_filter_hz: tmc_state(channel)
+                                                .position_filter_hz
+                                                .load(Relaxed),
+                                            flux_filter_hz: tmc_state(channel)
+                                                .flux_filter_hz
+                                                .load(Relaxed),
+                                        }
+                                    };
+                                    let outer_params = foci_firmware::commission::OuterTuneParams {
+                                        profile:
+                                            foci_firmware::autotune::CommissionProfile::from_u8(
+                                                profile,
+                                            ),
+                                        mode: foci_firmware::autotune::OperatingMode::from_u8(mode),
+                                        inner_lambda_us,
+                                        theta_e_us,
+                                        current_ringing: current_ringing_count > 1,
+                                        current_bandwidth_hz,
+                                        tau_e_us,
+                                        tau_e_crosscheck_us,
+                                        tau_residual_permille,
+                                        inner_warning_flags,
+                                    };
+                                    runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_outer_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
@@ -1545,88 +1579,90 @@ mod app {
                                     next_commission_trace_seq!(channel),
                                 ),
                             );
-                        }
-                        TmcRequest {
-                            kind: TmcRequestKind::SelfTest { oid },
-                            ..
-                        } => {
-                            if commissioning_blocked {
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociSelftestDone,
-                                    oid: u8 = oid,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::AlreadyRunning
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            if runtime.is_motor_enabled() {
-                                defmt::warn!("foci_selftest rejected: motor enabled");
-                                tmc_state(channel)
-                                    .commission_in_flight
-                                    .store(false, core::sync::atomic::Ordering::Relaxed);
-                                ::ankyra::klipper_reply_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    foci_firmware::ankyra::replies::FociSelftestDone,
-                                    oid: u8 = oid,
-                                    status: u8 =
-                                        foci_firmware::autotune::CommissionError::MotorEnabled
-                                            .status_code(),
-                                );
-                                continue;
-                            }
-                            // Engine tick drives selftest phases; SelftestDone
-                            // handler sends the completion signal.
-                            runtime.set_commission_engine(
+                                }
+                                TmcRequest {
+                                    kind: TmcRequestKind::SelfTest { oid },
+                                    ..
+                                } => {
+                                    if commissioning_blocked {
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociSelftestDone,
+                                            oid: u8 = oid,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::AlreadyRunning
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    if runtime.is_motor_enabled() {
+                                        defmt::warn!("foci_selftest rejected: motor enabled");
+                                        tmc_state(channel)
+                                            .commission_in_flight
+                                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                                        ::ankyra::klipper_reply_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            foci_firmware::ankyra::replies::FociSelftestDone,
+                                            oid: u8 = oid,
+                                            status: u8 =
+                                                foci_firmware::autotune::CommissionError::MotorEnabled
+                                                    .status_code(),
+                                        );
+                                        continue;
+                                    }
+                                    // Engine tick drives selftest phases; SelftestDone
+                                    // handler sends the completion signal.
+                                    runtime.set_commission_engine(
                                 foci_firmware::commission::CommissioningEngine::new_selftest_for_tmc_with_trace_seq(
                                     oid,
                                     tmc_state(channel),
                                     next_commission_trace_seq!(channel),
                                 ),
                             );
-                        }
-                        req @ TmcRequest {
-                            kind: TmcRequestKind::SetEncoder { .. },
-                            ..
-                        } => {
-                            if handle_tmc_request(req, &mut tmc).await.is_err() {
-                                ctx.shared.app_state.lock(|state| {
-                                    if crate::firmware_ctx::enter_shutdown(state) {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "TMC request validation failed",
-                                            read_tim5(),
-                                        );
+                                }
+                                req @ TmcRequest {
+                                    kind: TmcRequestKind::SetEncoder { .. },
+                                    ..
+                                } => {
+                                    if handle_tmc_request(req, &mut tmc).await.is_err() {
+                                        ctx.shared.app_state.lock(|state| {
+                                            if crate::firmware_ctx::enter_shutdown(state) {
+                                                ::ankyra::klipper_shutdown_from!(
+                                                    &mut crate::_ankyra_config::Sender,
+                                                    "TMC request validation failed",
+                                                    read_tim5(),
+                                                );
+                                            }
+                                        });
                                     }
-                                });
-                            }
-                            // Compute feedforward scale factor from step_width and PWM config
-                            runtime.set_velocity_scale(
-                                foci_firmware::tmc::compute_velocity_scale_factor(
-                                    tmc_state(channel)
-                                        .step_width_value
-                                        .load(core::sync::atomic::Ordering::Relaxed)
-                                        .unsigned_abs(),
-                                    CLOCK_FREQ,
-                                    TMC_CONFIG.pwm_freq_hz(),
-                                ),
-                            );
-                        }
-                        other => {
-                            if handle_tmc_request(other, &mut tmc).await.is_err() {
-                                ctx.shared.app_state.lock(|state| {
-                                    if crate::firmware_ctx::enter_shutdown(state) {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "TMC request validation failed",
-                                            read_tim5(),
-                                        );
+                                    // Compute feedforward scale factor from step_width and PWM config
+                                    runtime.set_velocity_scale(
+                                        foci_firmware::tmc::compute_velocity_scale_factor(
+                                            tmc_state(channel)
+                                                .step_width_value
+                                                .load(core::sync::atomic::Ordering::Relaxed)
+                                                .unsigned_abs(),
+                                            CLOCK_FREQ,
+                                            TMC_CONFIG.pwm_freq_hz(),
+                                        ),
+                                    );
+                                }
+                                other => {
+                                    if handle_tmc_request(other, &mut tmc).await.is_err() {
+                                        ctx.shared.app_state.lock(|state| {
+                                            if crate::firmware_ctx::enter_shutdown(state) {
+                                                ::ankyra::klipper_shutdown_from!(
+                                                    &mut crate::_ankyra_config::Sender,
+                                                    "TMC request validation failed",
+                                                    read_tim5(),
+                                                );
+                                            }
+                                        });
                                     }
-                                });
+                                }
                             }
                         }
                     }
