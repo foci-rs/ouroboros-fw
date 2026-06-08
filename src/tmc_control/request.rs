@@ -335,7 +335,7 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                                     let mut state = runtime
                                         .dispatch_state(tmc_state(channel), stepper_state(channel));
                                     if let Err(error) =
-                                        foci_firmware::tmc_ops::arm_motor_electrical(
+                                        foci_firmware::tmc_control::lifecycle::arm_motor_electrical(
                                             &mut backend,
                                             &mut state,
                                         )
@@ -345,7 +345,7 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                                             "Motor enable rejected by sentinel verify: {}",
                                             error
                                         );
-                                        foci_firmware::tmc_ops::disarm_motor(
+                                        foci_firmware::tmc_control::lifecycle::disarm_motor(
                                             &mut backend,
                                             &mut state,
                                         )
@@ -378,7 +378,11 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                                 ouroboros_backend(channel, tmc, enable_pin(enable_pins, channel));
                             let mut state =
                                 runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
-                            foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state).await;
+                            foci_firmware::tmc_control::lifecycle::disarm_motor(
+                                &mut backend,
+                                &mut state,
+                            )
+                            .await;
                         }
 
                         // Zero position counter

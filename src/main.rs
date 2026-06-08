@@ -618,7 +618,11 @@ mod app {
                             runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
                         // disarm_motor clears tmc_state().motor_armed, motor_enabled, calibrated,
                         // and runs restore_safe_state_via_backend (best-effort SPI writes).
-                        foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state).await;
+                        foci_firmware::tmc_control::lifecycle::disarm_motor(
+                            &mut backend,
+                            &mut state,
+                        )
+                        .await;
                         tmc_state(channel)
                             .commission_in_flight
                             .store(false, core::sync::atomic::Ordering::Relaxed);
@@ -662,7 +666,11 @@ mod app {
                         let runtime = &mut runtimes[channel as usize];
                         let mut state =
                             runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
-                        foci_firmware::tmc_ops::disarm_motor(&mut backend, &mut state).await;
+                        foci_firmware::tmc_control::lifecycle::disarm_motor(
+                            &mut backend,
+                            &mut state,
+                        )
+                        .await;
                     }
                     runtimes[channel as usize].reset_runtime_state();
                     tmc_state(channel)
