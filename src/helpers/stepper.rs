@@ -3,8 +3,9 @@
 //! step-timer ISR share a single implementation.
 
 use crate::trigger_domain::stop_physical_stepper_no_lock;
-use foci_firmware::commission_dispatch::{DispatchState, StepperPostAction};
-use foci_firmware::tmc_ops::StepperTaskDirective;
+use foci_firmware::commission_dispatch::{
+    DispatchState, StepperPostAction, StepperTaskDirective, apply_stepper_post_action_state,
+};
 
 /// Minimum lead time when arming TIM5 CC1.
 ///
@@ -114,7 +115,7 @@ pub(crate) fn apply_stepper_post_action(
     state: &mut DispatchState<'_>,
     channel: u8,
 ) {
-    match foci_firmware::tmc_ops::apply_stepper_post_action_state(action, state) {
+    match apply_stepper_post_action_state(action, state) {
         StepperTaskDirective::None => {}
         StepperTaskDirective::StopCheck => {
             stepper_stop_from_p1(channel);
