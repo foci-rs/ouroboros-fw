@@ -4,11 +4,11 @@
 
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
-use foci_firmware::trace::commissioning::{
-    CommissionTraceSampleDecision, commission_trace_sample_decision,
-};
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
+use foci_firmware::trace::sampling::{
+    TraceSampleInputs, TraceSamplePlan, commissioning_trace_sample_plan,
+};
 use foci_firmware::trace::stream::{FrameBuf, frame_sequence};
 use foci_firmware::trace::transport::{self, TraceQueueSelection};
 
@@ -562,20 +562,23 @@ pub(crate) fn emit_phase_advance(
     enqueue_frame(frame);
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Board-local inputs for one Ouroboros trace sample.
+#[derive(Clone, Copy)]
+pub(crate) struct TraceSampleContext<'a> {
+    /// TMC channel and FOCI trace source index.
+    pub(crate) channel: u8,
+    /// Borrowed TMC and stepper state for the selected channel.
+    pub(crate) refs: foci_firmware::tmc_control::TmcControlStateRefs<'a>,
+    /// Whether the selected channel's runtime currently considers the motor enabled.
+    pub(crate) motor_enabled: bool,
+    /// Optional board-global step timing snapshot for the critical frame.
+    pub(crate) step_timing: Option<StepTimingSnapshot>,
+}
+
 pub(crate) async fn sample_tick<B>(
-    channel: u8,
-    refs: foci_firmware::tmc_control::TmcControlStateRefs<'_>,
     tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
-    motor_enabled: bool,
-    command_velocity_reference: i32,
-    cached_velocity_offset: i32,
-    cached_velocity_transient_offset: i32,
-    cached_accel_torque_offset: i32,
-    accel_feedforward_gain_permille: u16,
-    accel_feedforward_flags: u8,
-    step_timing: Option<StepTimingSnapshot>,
-    control_tick: u32,
+    context: TraceSampleContext<'_>,
+    inputs: TraceSampleInputs,
 ) where
     B: embedded_hal_async::spi::SpiDevice<u8>,
 {
@@ -587,6 +590,8 @@ pub(crate) async fn sample_tick<B>(
         return;
     }
 
+    let channel = context.channel;
+    let refs = context.refs;
     let spi_sample_start = cortex_m::peripheral::DWT::cycle_count();
     let mut flags = 0u8;
     let step_position = refs.stepper.position.load(Relaxed);
@@ -601,7 +606,7 @@ pub(crate) async fn sample_tick<B>(
         min_deadline_slack,
         last_served_step_tick,
         missed_or_deferred_step_counter,
-    ) = if let Some(snapshot) = step_timing {
+    ) = if let Some(snapshot) = context.step_timing {
         (
             snapshot.step_timer_jitter,
             snapshot.min_deadline_slack,
@@ -616,11 +621,11 @@ pub(crate) async fn sample_tick<B>(
         step_position,
         tmc_position_actual: position_actual,
         position_error: step_position.wrapping_sub(position_actual),
-        target_velocity: command_velocity_reference,
+        target_velocity: inputs.command_velocity_reference,
         pid_velocity_actual: 0,
-        cached_pid_velocity_offset: cached_velocity_offset,
+        cached_pid_velocity_offset: inputs.cached_velocity_offset,
         velocity_error: 0,
-        enable_and_direction: (if motor_enabled { 0x80 } else { 0 })
+        enable_and_direction: (if context.motor_enabled { 0x80 } else { 0 })
             | (u8::from(refs.stepper.direction.load(Relaxed)) & 0x01),
         sample_flags: flags,
         timer_queue_depth: TRACE_PRESSURE.latest_queue_depth(),
@@ -633,10 +638,10 @@ pub(crate) async fn sample_tick<B>(
         interim_pid_torque_target_actual,
         interim_foc_uq_ud: foc_uq_ud,
         interim_foc_uq_ud_limited: foc_uq_ud_limited,
-        cached_accel_torque_offset,
-        accel_feedforward_gain_permille,
-        accel_feedforward_flags,
-        cached_velocity_transient_offset,
+        cached_accel_torque_offset: inputs.cached_accel_torque_offset,
+        accel_feedforward_gain_permille: inputs.accel_feedforward_gain_permille,
+        accel_feedforward_flags: inputs.accel_feedforward_flags,
+        cached_velocity_transient_offset: inputs.cached_velocity_transient_offset,
     };
     let mut payload = [0u8; CRITICAL_PAYLOAD_LEN];
     encode_critical_payload(&critical, &mut payload);
@@ -655,7 +660,7 @@ pub(crate) async fn sample_tick<B>(
 
     if current_path_due(
         CURRENT_PATH_DIAGNOSTIC_ENABLED,
-        control_tick,
+        inputs.control_tick,
         motion_queue_len(),
         MOTION_QUEUE_DEPTH,
     ) {
@@ -689,7 +694,7 @@ pub(crate) async fn sample_tick<B>(
     }
 
     let emit_control_detail = control_detail_due(
-        control_tick,
+        inputs.control_tick,
         motion_queue_len(),
         MOTION_QUEUE_DEPTH,
         TRACE_PRESSURE.take_control_detail_skip(),
@@ -735,65 +740,41 @@ pub(crate) async fn sample_tick<B>(
     record_spi_sample_cycles(spi_sample_cycles);
 }
 
-/// Board-local inputs for one commissioning closed-loop trace sample.
-pub(crate) struct CommissionTraceSample<'a, R, D> {
-    /// TMC channel and FOCI trace source index.
-    pub(crate) channel: u8,
-    /// Borrowed TMC and stepper state for the selected channel.
-    pub(crate) refs: foci_firmware::tmc_control::TmcControlStateRefs<'a>,
-    /// Whether the selected channel's runtime currently considers the motor enabled.
-    pub(crate) motor_enabled: bool,
-    /// Optional board-global step timing snapshot for the critical frame.
-    pub(crate) step_timing: Option<StepTimingSnapshot>,
-    /// Runtime trace sample tick for decimation and frame timestamps.
-    pub(crate) control_tick: u32,
-    /// Remaining commissioning tick budget in microseconds.
-    pub(crate) remaining_budget_us: R,
-    /// Whether the commissioning tick deadline has already elapsed.
-    pub(crate) past_deadline: D,
-}
-
 /// Sample the selected channel during commissioning closed-loop entry.
 pub(crate) async fn sample_commission_closed_loop_entry<B, R, D>(
     tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
-    sample: CommissionTraceSample<'_, R, D>,
+    context: TraceSampleContext<'_>,
+    control_tick: u32,
+    remaining_budget_us: R,
+    past_deadline: D,
 ) where
     B: embedded_hal_async::spi::SpiDevice<u8>,
     R: Fn() -> u64,
     D: Fn() -> bool,
 {
     let trace_configured = is_configured();
-    let past_deadline = trace_configured && (sample.past_deadline)();
+    let past_deadline = trace_configured && past_deadline();
     let remaining_budget_us = if trace_configured && !past_deadline {
-        (sample.remaining_budget_us)()
+        remaining_budget_us()
     } else {
         0
     };
 
-    match commission_trace_sample_decision(trace_configured, past_deadline, remaining_budget_us) {
-        CommissionTraceSampleDecision::SkipUnconfigured => {}
-        CommissionTraceSampleDecision::DropForBudget => {
+    match commissioning_trace_sample_plan(
+        trace_configured,
+        past_deadline,
+        remaining_budget_us,
+        control_tick,
+    ) {
+        TraceSamplePlan::SkipUnconfigured => {}
+        TraceSamplePlan::DropForBudget => {
             TRACE_COUNTERS.motion_drops.fetch_add(1, Ordering::Relaxed);
             TRACE_COUNTERS
                 .motion_drop_gap
                 .store(true, Ordering::Relaxed);
         }
-        CommissionTraceSampleDecision::Sample => {
-            sample_tick(
-                sample.channel,
-                sample.refs,
-                tmc,
-                sample.motor_enabled,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                sample.step_timing,
-                sample.control_tick,
-            )
-            .await;
+        TraceSamplePlan::Sample(inputs) => {
+            sample_tick(tmc, context, inputs).await;
         }
     }
 }

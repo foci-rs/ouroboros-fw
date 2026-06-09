@@ -862,20 +862,20 @@ mod app {
                             let mut tmc = Tmc4671Spi::new(device);
                             crate::usb_trace::sample_commission_closed_loop_entry(
                                 &mut tmc,
-                                crate::usb_trace::CommissionTraceSample {
+                                crate::usb_trace::TraceSampleContext {
                                     channel,
                                     refs,
                                     motor_enabled,
                                     step_timing,
-                                    control_tick: trace_tick,
-                                    remaining_budget_us: || {
-                                        engine_tick_deadline
-                                            .checked_duration_since(Mono::now())
-                                            .map(|d| d.to_micros())
-                                            .unwrap_or(0)
-                                    },
-                                    past_deadline: || Mono::now() > engine_tick_deadline,
                                 },
+                                trace_tick,
+                                || {
+                                    engine_tick_deadline
+                                        .checked_duration_since(Mono::now())
+                                        .map(|d| d.to_micros())
+                                        .unwrap_or(0)
+                                },
+                                || Mono::now() > engine_tick_deadline,
                             )
                             .await;
                         }
@@ -1149,20 +1149,20 @@ mod app {
                 #[cfg(feature = "trace")]
                 {
                     let trace_tick = runtime.advance_trace_tick();
-                    let trace_state = runtime.trace_state();
+                    let inputs =
+                        foci_firmware::trace::sampling::TraceSampleInputs::from_runtime_trace(
+                            runtime.trace_state(),
+                            trace_tick,
+                        );
                     crate::usb_trace::sample_tick(
-                        channel,
-                        refs,
                         &mut tmc,
-                        runtime.is_motor_enabled(),
-                        trace_state.cached_velocity_reference,
-                        trace_state.cached_velocity_offset,
-                        trace_state.cached_velocity_transient_offset,
-                        trace_state.cached_accel_torque_offset,
-                        trace_state.cached_accel_gain_permille,
-                        trace_state.cached_accel_flags,
-                        step_timing,
-                        trace_tick.sample_tick,
+                        crate::usb_trace::TraceSampleContext {
+                            channel,
+                            refs,
+                            motor_enabled: runtime.is_motor_enabled(),
+                            step_timing,
+                        },
+                        inputs,
                     )
                     .await;
                     if trace_tick.phase_advance_due {
