@@ -13,6 +13,10 @@ static STEPPER_EXECUTION_STATS: StepperExecutionStats<STEPPER_CHANNEL_COUNT> =
     StepperExecutionStats::new();
 static STEPPER_PERF_COUNTERS: StepperPerfCounters<520> = StepperPerfCounters::new();
 
+pub(crate) const PERF_SITE_TRIGGER_DOMAIN: u8 = 0;
+pub(crate) const PERF_SITE_QUEUE_STEP: u8 = 1;
+pub(crate) const PERF_SITE_TIM5: u8 = 2;
+
 pub(crate) fn record_timer_activation(channel: u8, clock: u32) {
     STEPPER_EXECUTION_STATS.record_timer_activation(channel, clock);
 }
@@ -89,4 +93,32 @@ pub(crate) fn perf_snapshot(
     clear: bool,
 ) -> foci_firmware::diagnostic::StepperPerfSnapshot {
     STEPPER_PERF_COUNTERS.snapshot(channel, clear, cfg!(feature = "trace"))
+}
+
+pub(crate) fn record_critical_section(site: u8, cycles: u32) {
+    STEPPER_PERF_COUNTERS.record_critical_section(site, cycles);
+}
+
+pub(crate) fn record_tim5_entry_latency(lateness_ticks: u32) {
+    STEPPER_PERF_COUNTERS.record_tim5_entry_latency(lateness_ticks);
+}
+
+pub(crate) fn record_tim5_defer() {
+    STEPPER_PERF_COUNTERS.record_tim5_defer();
+}
+
+pub(crate) fn record_scheduler_pop_lateness(lateness_ticks: u32) {
+    STEPPER_PERF_COUNTERS.record_scheduler_pop_lateness(lateness_ticks);
+}
+
+pub(crate) fn record_scheduler_full() {
+    STEPPER_PERF_COUNTERS.record_scheduler_full();
+}
+
+pub(crate) fn record_scheduler_cycles(scheduler_cycles: u32, event_count: u32) {
+    STEPPER_PERF_COUNTERS.record_scheduler_cycles(scheduler_cycles, event_count);
+}
+
+pub(crate) fn record_tim5_irq(irq_cycles: u32, dispatch_cycles: u32, event_count: u32) {
+    STEPPER_PERF_COUNTERS.record_tim5_irq(irq_cycles, dispatch_cycles, event_count);
 }

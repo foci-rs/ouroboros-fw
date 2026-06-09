@@ -37,7 +37,7 @@ use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
 use crate::state::stepper::{isr_stepper, p2_stepper, step_queue};
 use crate::trigger_domain::{
     OuroborosDispatchBoard, PHYSICAL_STEPPER_INDICES, disarm_trigger_scheduler, reprogram_cc2,
-    set_timer_active, with_trigger_domain,
+    set_timer_active, with_trigger_domain, with_trigger_domain_site,
 };
 
 fn emit_invalid_stepper_channel_and_shutdown(state: &mut State, channel: u8) {
@@ -259,7 +259,11 @@ impl<'a> TrsyncBoard for OuroborosTrsyncBoard<'a> {
         ENDSTOP_PIN_IDS[endstop_idx].load(core::sync::atomic::Ordering::Relaxed)
     }
 
-    fn record_schedule_result(&mut self, _result: ScheduleResult) {}
+    fn record_schedule_result(&mut self, result: ScheduleResult) {
+        if matches!(result, ScheduleResult::Full) {
+            crate::state::stepper_diag::record_scheduler_full();
+        }
+    }
 
     fn reprogram_trigger_timer(&mut self, state: &mut TriggerDomainState) {
         reprogram_cc2(state);
@@ -392,7 +396,7 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
         let tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
             .ok_or(CommandError::InvalidChannel(channel))?;
 
-        with_trigger_domain(|td| {
+        with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_QUEUE_STEP, |td| {
             let mut board = OuroborosStepperBoard {
                 tmc_state: Some(tmc_state),
             };

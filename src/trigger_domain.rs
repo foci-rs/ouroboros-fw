@@ -82,14 +82,6 @@ impl TriggerDomain {
         let mut board = OuroborosDispatchBoard;
         trsync::dispatch_trigger(&mut self.state, &mut board, trsync_oid, reason, clock)
     }
-
-    /// Reprogram TIM5 CC2 from the scheduler's earliest deadline.
-    ///
-    /// Called inside the TriggerDomain lock from both P2 command handlers
-    /// and the P3 ISR after processing events.
-    pub(crate) fn reprogram_cc2(&mut self) {
-        reprogram_cc2(&mut self.state);
-    }
 }
 
 impl Deref for TriggerDomain {
@@ -153,9 +145,32 @@ pub(crate) fn disarm_trigger_scheduler(state: &mut TriggerDomainState) {
     state.scheduler.set_cc2_active(false);
 }
 
+pub(crate) fn reprogram_cc2_measured(
+    state: &mut TriggerDomainState,
+    scheduler_cycles: &core::cell::Cell<u32>,
+) {
+    reprogram_cc2_inner(state, Some(scheduler_cycles));
+}
+
 pub(crate) fn reprogram_cc2(state: &mut TriggerDomainState) {
+    reprogram_cc2_inner(state, None);
+}
+
+fn reprogram_cc2_inner(
+    state: &mut TriggerDomainState,
+    scheduler_cycles: Option<&core::cell::Cell<u32>>,
+) {
     let tim5 = embassy_stm32::pac::TIM5;
-    if let Some(earliest) = state.scheduler.earliest_deadline() {
+    let start = cortex_m::peripheral::DWT::cycle_count();
+    let earliest = state.scheduler.earliest_deadline();
+    if let Some(accumulator) = scheduler_cycles {
+        accumulator.set(
+            accumulator
+                .get()
+                .wrapping_add(cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start)),
+        );
+    }
+    if let Some(earliest) = earliest {
         let now = tim5.cnt().read();
         let clamped =
             foci_klipper::scheduler::timer_arm_clock(now, earliest, TRIGGER_TIMER_MIN_LEAD_TICKS);
@@ -192,12 +207,24 @@ pub(crate) fn with_trigger_domain<F, R>(f: F) -> R
 where
     F: FnOnce(&mut TriggerDomain) -> R,
 {
-    cortex_m::interrupt::free(|_| {
+    with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_TRIGGER_DOMAIN, f)
+}
+
+#[inline]
+pub(crate) fn with_trigger_domain_site<F, R>(site: u8, f: F) -> R
+where
+    F: FnOnce(&mut TriggerDomain) -> R,
+{
+    let start = cortex_m::peripheral::DWT::cycle_count();
+    let result = cortex_m::interrupt::free(|_| {
         // SAFETY: All access to TRIGGER_DOMAIN goes through this function.
         // interrupt::free ensures exclusive access across all priorities.
         // addr_of_mut! avoids creating a reference to the static mut.
         unsafe { f(&mut *core::ptr::addr_of_mut!(TRIGGER_DOMAIN).cast::<TriggerDomain>()) }
-    })
+    });
+    let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start);
+    crate::state::stepper_diag::record_critical_section(site, cycles);
+    result
 }
 
 /// Stop a physical stepper without locking TriggerDomain.
