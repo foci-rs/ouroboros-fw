@@ -32,6 +32,7 @@ use foci_klipper::state::State;
 
 use crate::helpers::lifecycle::{KATAPULT_BYPASS, katapult_reset, read_tim5};
 use crate::helpers::stepper::arm_step_timer_if_earlier;
+use crate::helpers::stepper_diag::record_stepper_event;
 use crate::helpers::tmc::OuroborosTmcQueue;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
 use crate::state::stepper::{isr_stepper, p2_stepper, step_queue};
@@ -203,8 +204,16 @@ impl StepperResetBoard for OuroborosStepperBoard {
         Ok(())
     }
 
-    fn record_reset_step_clock(&mut self, channel: u8, _clock: u32, stats: StepperDrainStats) {
+    fn record_reset_step_clock(&mut self, channel: u8, clock: u32, stats: StepperDrainStats) {
         crate::state::stepper_diag::record_reset(channel, stats.segments, stats.steps);
+        record_stepper_event(
+            StepperEventReason::ResetStepClock,
+            channel,
+            read_tim5(),
+            0,
+            clock,
+            0,
+        );
     }
 }
 

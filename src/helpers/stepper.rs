@@ -101,6 +101,14 @@ pub(crate) fn stepper_stop_from_p1(channel: u8) {
         .motor_armed
         .store(false, core::sync::atomic::Ordering::Relaxed);
     stop_physical_stepper_no_lock(channel as usize, StepperEventReason::P1Stop);
+    crate::helpers::stepper_diag::record_stepper_event(
+        StepperEventReason::P1Stop,
+        channel,
+        crate::helpers::lifecycle::read_tim5(),
+        0,
+        0,
+        0,
+    );
     stepper_state
         .timer_active_mirror
         .store(false, core::sync::atomic::Ordering::Relaxed);

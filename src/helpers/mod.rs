@@ -9,5 +9,6 @@
 pub mod dev;
 pub mod lifecycle;
 pub mod stepper;
+pub mod stepper_diag;
 pub mod tmc;
 pub mod trsync;

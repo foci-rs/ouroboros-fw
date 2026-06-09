@@ -1,10 +1,12 @@
-//! Stepper execution and performance diagnostic counters.
+//! Stepper execution counters, performance counters, and async diagnostic queues.
 //!
-//! This module intentionally excludes async stepper diagnostic event queues.
-
+//! Events are produced from P1/P2/P3 contexts and drained from a P2 task.
+//! Queue access is protected by short interrupt-free critical sections so
+//! producers never touch the transport from an ISR or P1 stop path.
 
 use foci_firmware::diagnostic::{
-    StepperEventReason, StepperExecutionSnapshot, StepperExecutionStats, StepperPerfCounters,
+    StepperDiagnosticEvent, StepperDiagnosticQueue, StepperEventReason, StepperExecutionSnapshot,
+    StepperExecutionStats, StepperPerfCounters, StepperPerfDiagnosticEvent,
 };
 
 use crate::state::stepper::STEPPER_CHANNEL_COUNT;
@@ -13,9 +15,61 @@ static STEPPER_EXECUTION_STATS: StepperExecutionStats<STEPPER_CHANNEL_COUNT> =
     StepperExecutionStats::new();
 static STEPPER_PERF_COUNTERS: StepperPerfCounters<520> = StepperPerfCounters::new();
 
+pub(crate) const STEPPER_DIAG_QUEUE_DEPTH: usize = 16;
+pub(crate) const STEPPER_PERF_EVENT_QUEUE_DEPTH: usize = 4;
+
+static mut STEPPER_DIAG_EVENTS: StepperDiagnosticQueue<
+    StepperDiagnosticEvent,
+    STEPPER_DIAG_QUEUE_DEPTH,
+> = StepperDiagnosticQueue::new();
+static mut STEPPER_PERF_EVENTS: StepperDiagnosticQueue<
+    StepperPerfDiagnosticEvent,
+    STEPPER_PERF_EVENT_QUEUE_DEPTH,
+> = StepperDiagnosticQueue::new();
+
 pub(crate) const PERF_SITE_TRIGGER_DOMAIN: u8 = 0;
 pub(crate) const PERF_SITE_QUEUE_STEP: u8 = 1;
 pub(crate) const PERF_SITE_TIM5: u8 = 2;
+
+pub(crate) fn push_event(event: StepperDiagnosticEvent) {
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: all accesses to this static go through this interrupt-free
+        // critical section.
+        unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_DIAG_EVENTS) }.push_drop_oldest(event);
+    });
+}
+
+pub(crate) fn pop_event() -> Option<StepperDiagnosticEvent> {
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: all accesses to this static go through this interrupt-free
+        // critical section.
+        unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_DIAG_EVENTS) }.pop()
+    })
+}
+
+pub(crate) fn push_perf_event(event: StepperPerfDiagnosticEvent) {
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: all accesses to this static go through this interrupt-free
+        // critical section.
+        unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_PERF_EVENTS) }.push_drop_oldest(event);
+    });
+}
+
+pub(crate) fn pop_perf_event() -> Option<StepperPerfDiagnosticEvent> {
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: all accesses to this static go through this interrupt-free
+        // critical section.
+        unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_PERF_EVENTS) }.pop()
+    })
+}
+
+pub(crate) fn record_perf_event(reason: StepperEventReason, channel: u8, clock: u32) {
+    push_perf_event(StepperPerfDiagnosticEvent {
+        reason,
+        clock,
+        snapshot: perf_snapshot(channel, false),
+    });
+}
 
 pub(crate) fn record_timer_activation(channel: u8, clock: u32) {
     STEPPER_EXECUTION_STATS.record_timer_activation(channel, clock);

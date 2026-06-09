@@ -110,13 +110,15 @@ impl TriggerDispatchBoard for OuroborosDispatchBoard {
         stop_physical_stepper_no_lock(stepper_idx, reason);
     }
 
-    fn record_trsync_stop(
-        &mut self,
-        _stepper_idx: usize,
-        _clock: u32,
-        _trsync_oid: u8,
-        _reason: u8,
-    ) {
+    fn record_trsync_stop(&mut self, stepper_idx: usize, clock: u32, trsync_oid: u8, reason: u8) {
+        crate::helpers::stepper_diag::record_stepper_event(
+            StepperEventReason::TrsyncStop,
+            stepper_idx as u8,
+            clock,
+            0,
+            trsync_oid as u32,
+            reason as u32,
+        );
     }
 
     fn set_timer_active(

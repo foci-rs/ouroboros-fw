@@ -86,9 +86,11 @@ mod app {
     // automatically via an extended u64 counter in a TimerQueueBackend.
     stm32_tim2_monotonic!(Mono, 1_000_000);
 
+    use foci_firmware::diagnostic::StepperEventReason;
     use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 
     use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
+    use crate::helpers::stepper_diag::{UNKNOWN_QUEUE_LEN, record_stepper_event};
 
     const STATUS_NOT_PLL_LOCKED: u32 = 1 << 19;
     const STATUS_ADC_I_CLIPPED: u32 = 1 << 26;
@@ -499,6 +501,14 @@ mod app {
                             "TMC4671 channel {} emergency disable: STATUS={:#010x}",
                             report_channel,
                             report_flags
+                        );
+                        record_stepper_event(
+                            StepperEventReason::TmcDisableSignal,
+                            report_channel,
+                            read_tim5(),
+                            UNKNOWN_QUEUE_LEN,
+                            report_flags,
+                            0,
                         );
                         if report_flags & STATUS_NOT_PLL_LOCKED != 0 {
                             reported_shutdown = true;
@@ -1291,6 +1301,16 @@ mod app {
             unsafe { crate::state::stepper::step_queue(channel).and_then(|queue| queue.dequeue()) };
         let Some(move_) = next_move else {
             crate::state::stepper_diag::record_queue_empty(channel);
+            if HOMING_STATE.load(Relaxed) != 0 {
+                record_stepper_event(
+                    StepperEventReason::QueueEmpty,
+                    channel,
+                    read_tim5(),
+                    0,
+                    0,
+                    0,
+                );
+            }
             clear_step_channel(channel, next_event_clocks);
             return;
         };
@@ -1331,6 +1351,14 @@ mod app {
             Err(_) => {
                 crate::state::stepper_diag::record_loaded_segment(channel, loaded_steps);
                 crate::state::stepper_diag::record_missed_deadline(channel);
+                record_stepper_event(
+                    StepperEventReason::MissedDeadlineLoad,
+                    channel,
+                    now,
+                    UNKNOWN_QUEUE_LEN,
+                    scheduled,
+                    now,
+                );
                 #[cfg(feature = "trace")]
                 crate::usb_trace::note_missed_or_deferred_step();
                 fail_step_channel_deadline(channel, next_event_clocks);
@@ -1852,6 +1880,12 @@ mod app {
             },
             &REPORT_PENDING,
         );
+    }
+
+    /// Send pending stepper diagnostic events outside ISR/P1 contexts.
+    #[task(priority = 2)]
+    async fn stepper_diag_task(_ctx: stepper_diag_task::Context) {
+        crate::heartbeat::emit_stepper_diagnostics();
     }
 
     /// Periodic stats heartbeat sent to Klipper.
