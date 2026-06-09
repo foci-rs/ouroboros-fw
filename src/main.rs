@@ -40,6 +40,10 @@ mod app {
     use embassy_stm32::spi::Spi;
     use embassy_stm32::wdg::IndependentWatchdog;
     use embassy_stm32::{bind_interrupts, peripherals};
+    #[cfg(feature = "trace")]
+    use foci_firmware::autotune::PhaseId;
+    #[cfg(feature = "trace")]
+    use foci_firmware::commissioning::types::EngineKind;
     use foci_klipper::state::State;
     use foci_tmc4671::spi::Tmc4671Spi;
     use rtic_monotonics::fugit::ExtU64;
@@ -459,6 +463,10 @@ mod app {
         );
         let mut commission_trace_engine_seq =
             [0u32; crate::board_config::TMC_CHANNEL_COUNT as usize];
+        #[cfg(feature = "trace")]
+        let mut commission_trace_phase: [Option<(EngineKind, PhaseId)>;
+            crate::board_config::TMC_CHANNEL_COUNT as usize] =
+            [None; crate::board_config::TMC_CHANNEL_COUNT as usize];
 
         // Counter for 1s STATUS_FLAGS poll (1000 * slow-control ticks).
         let mut status_poll_counters = [0u16; crate::board_config::TMC_CHANNEL_COUNT as usize];
@@ -478,6 +486,8 @@ mod app {
             macro_rules! quiesce_and_report_tmc_fault {
                 () => {{
                     quiesce_all_channels(&mut runtimes, enable_pins);
+                    #[cfg(feature = "trace")]
+                    commission_trace_phase.fill(None);
                     let mut reported_shutdown = false;
                     for report_channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(report_channel) else {
@@ -609,6 +619,8 @@ mod app {
             if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
                 if !shutdown_handled {
                     quiesce_all_channels(&mut runtimes, enable_pins);
+                    #[cfg(feature = "trace")]
+                    commission_trace_phase.fill(None);
                     for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -657,6 +669,8 @@ mod app {
                 // Stop steppers, clear local armed/enabled state, and lower both
                 // enable pins before any SPI awaits in the restore-safe-state pass.
                 quiesce_all_channels(&mut runtimes, enable_pins);
+                #[cfg(feature = "trace")]
+                commission_trace_phase.fill(None);
 
                 for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                     if needs_disarm[channel as usize] {
@@ -737,6 +751,9 @@ mod app {
                     continue;
                 };
                 let mut tmc = Tmc4671Spi::new(device);
+                #[cfg(feature = "trace")]
+                let engine_tick_deadline =
+                    Mono::now() + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
 
                 // Sequential borrows: engine.step() consumes the backend
                 // first, then dispatch re-borrows it for post-processing.
@@ -749,6 +766,10 @@ mod app {
                     runtime.step_commissioning(&mut backend).await
                 };
                 let Some(result) = result else {
+                    #[cfg(feature = "trace")]
+                    {
+                        commission_trace_phase[channel as usize] = None;
+                    }
                     let _ = tmc;
                     continue;
                 };
@@ -788,6 +809,10 @@ mod app {
 
                 use foci_firmware::tmc_control::CommissionTickAction;
                 let Some(action) = action else {
+                    #[cfg(feature = "trace")]
+                    {
+                        commission_trace_phase[channel as usize] = None;
+                    }
                     continue;
                 };
                 match action {
@@ -804,14 +829,71 @@ mod app {
                             quiesce_and_report_tmc_fault!();
                             continue 'control_loop;
                         }
+                        #[cfg(feature = "trace")]
+                        if let Some((engine_kind, phase_id)) =
+                            commission_trace_phase[channel as usize]
+                            && foci_firmware::trace::commissioning::commission_trace_phase_samples_closed_loop_entry(
+                                engine_kind,
+                                phase_id,
+                            ) {
+                            let trace_tick =
+                                runtimes[channel as usize].advance_trace_sample_tick();
+                            let refs =
+                                TmcControlStateRefs::new(tmc_state(channel), stepper_state(channel));
+                            let motor_enabled = runtimes[channel as usize].is_motor_enabled();
+                            let step_timing = crate::usb_trace::take_step_timing_snapshot();
+                            let step_timing = if crate::usb_trace::is_configured() {
+                                Some(step_timing)
+                            } else {
+                                None
+                            };
+                            let Some(device) = ctx.local.tmc_mux.device(channel) else {
+                                ctx.shared.app_state.lock(|state| {
+                                    if crate::firmware_ctx::enter_shutdown(state) {
+                                        ::ankyra::klipper_shutdown_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            "Invalid TMC channel",
+                                            read_tim5(),
+                                        );
+                                    }
+                                });
+                                continue 'control_loop;
+                            };
+                            let mut tmc = Tmc4671Spi::new(device);
+                            crate::usb_trace::sample_commission_closed_loop_entry(
+                                &mut tmc,
+                                crate::usb_trace::CommissionTraceSample {
+                                    channel,
+                                    refs,
+                                    motor_enabled,
+                                    step_timing,
+                                    control_tick: trace_tick,
+                                    remaining_budget_us: || {
+                                        engine_tick_deadline
+                                            .checked_duration_since(Mono::now())
+                                            .map(|d| d.to_micros())
+                                            .unwrap_or(0)
+                                    },
+                                    past_deadline: || Mono::now() > engine_tick_deadline,
+                                },
+                            )
+                            .await;
+                        }
                         Mono::delay(1.millis()).await;
                         continue 'control_loop;
                     }
                     CommissionTickAction::PhaseChanged {
                         oid,
                         phase_id,
-                        engine_kind: _,
+                        engine_kind,
                     } => {
+                        #[cfg(feature = "trace")]
+                        {
+                            commission_trace_phase[channel as usize] =
+                                Some((engine_kind, phase_id));
+                        }
+                        #[cfg(not(feature = "trace"))]
+                        let _ = engine_kind;
                         emit_phase_reply(oid, phase_id);
                         if TMC_DISABLE_SIGNAL.try_take().is_some() {
                             quiesce_and_report_tmc_fault!();
@@ -821,6 +903,10 @@ mod app {
                         continue 'control_loop;
                     }
                     CommissionTickAction::Terminal { reply, actions } => {
+                        #[cfg(feature = "trace")]
+                        {
+                            commission_trace_phase[channel as usize] = None;
+                        }
                         {
                             let runtime = &mut runtimes[channel as usize];
                             let mut state =

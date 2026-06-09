@@ -4,6 +4,9 @@
 
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
+use foci_firmware::trace::commissioning::{
+    CommissionTraceSampleDecision, commission_trace_sample_decision,
+};
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
 use foci_firmware::trace::stream::{FrameBuf, frame_sequence};
@@ -730,6 +733,69 @@ pub(crate) async fn sample_tick<B>(
 
     let spi_sample_cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(spi_sample_start);
     record_spi_sample_cycles(spi_sample_cycles);
+}
+
+/// Board-local inputs for one commissioning closed-loop trace sample.
+pub(crate) struct CommissionTraceSample<'a, R, D> {
+    /// TMC channel and FOCI trace source index.
+    pub(crate) channel: u8,
+    /// Borrowed TMC and stepper state for the selected channel.
+    pub(crate) refs: foci_firmware::tmc_control::TmcControlStateRefs<'a>,
+    /// Whether the selected channel's runtime currently considers the motor enabled.
+    pub(crate) motor_enabled: bool,
+    /// Optional board-global step timing snapshot for the critical frame.
+    pub(crate) step_timing: Option<StepTimingSnapshot>,
+    /// Runtime trace sample tick for decimation and frame timestamps.
+    pub(crate) control_tick: u32,
+    /// Remaining commissioning tick budget in microseconds.
+    pub(crate) remaining_budget_us: R,
+    /// Whether the commissioning tick deadline has already elapsed.
+    pub(crate) past_deadline: D,
+}
+
+/// Sample the selected channel during commissioning closed-loop entry.
+pub(crate) async fn sample_commission_closed_loop_entry<B, R, D>(
+    tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
+    sample: CommissionTraceSample<'_, R, D>,
+) where
+    B: embedded_hal_async::spi::SpiDevice<u8>,
+    R: Fn() -> u64,
+    D: Fn() -> bool,
+{
+    let trace_configured = is_configured();
+    let past_deadline = trace_configured && (sample.past_deadline)();
+    let remaining_budget_us = if trace_configured && !past_deadline {
+        (sample.remaining_budget_us)()
+    } else {
+        0
+    };
+
+    match commission_trace_sample_decision(trace_configured, past_deadline, remaining_budget_us) {
+        CommissionTraceSampleDecision::SkipUnconfigured => {}
+        CommissionTraceSampleDecision::DropForBudget => {
+            TRACE_COUNTERS.motion_drops.fetch_add(1, Ordering::Relaxed);
+            TRACE_COUNTERS
+                .motion_drop_gap
+                .store(true, Ordering::Relaxed);
+        }
+        CommissionTraceSampleDecision::Sample => {
+            sample_tick(
+                sample.channel,
+                sample.refs,
+                tmc,
+                sample.motor_enabled,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                sample.step_timing,
+                sample.control_tick,
+            )
+            .await;
+        }
+    }
 }
 
 fn emit_one_status(
