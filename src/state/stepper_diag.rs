@@ -1,17 +1,17 @@
-//! Stepper execution diagnostic counters.
+//! Stepper execution and performance diagnostic counters.
 //!
-//! This module intentionally contains only non-performance stats.
-//! Dispatch perf counters and async stepper event queues are tracked by later
-//! parity passes.
+//! This module intentionally excludes async stepper diagnostic event queues.
+
 
 use foci_firmware::diagnostic::{
-    StepperEventReason, StepperExecutionSnapshot, StepperExecutionStats,
+    StepperEventReason, StepperExecutionSnapshot, StepperExecutionStats, StepperPerfCounters,
 };
 
 use crate::state::stepper::STEPPER_CHANNEL_COUNT;
 
 static STEPPER_EXECUTION_STATS: StepperExecutionStats<STEPPER_CHANNEL_COUNT> =
     StepperExecutionStats::new();
+static STEPPER_PERF_COUNTERS: StepperPerfCounters<520> = StepperPerfCounters::new();
 
 pub(crate) fn record_timer_activation(channel: u8, clock: u32) {
     STEPPER_EXECUTION_STATS.record_timer_activation(channel, clock);
@@ -33,6 +33,8 @@ pub(crate) fn record_loaded_segment_timing(
     compare: u32,
 ) {
     STEPPER_EXECUTION_STATS.record_loaded_segment_timing(channel, steps, now, scheduled, compare);
+    let lateness = now.wrapping_sub(scheduled) as i32;
+    STEPPER_PERF_COUNTERS.record_stepper_load_lateness(lateness);
 }
 
 pub(crate) fn record_executed_step(channel: u8, forward: bool, clock: u32) {
@@ -80,4 +82,11 @@ pub(crate) fn snapshot(
     queue_len: u16,
 ) -> Option<StepperExecutionSnapshot> {
     STEPPER_EXECUTION_STATS.snapshot(channel, position, timer_active, queue_len)
+}
+
+pub(crate) fn perf_snapshot(
+    channel: u8,
+    clear: bool,
+) -> foci_firmware::diagnostic::StepperPerfSnapshot {
+    STEPPER_PERF_COUNTERS.snapshot(channel, clear, cfg!(feature = "trace"))
 }

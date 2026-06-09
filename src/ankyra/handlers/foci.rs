@@ -175,6 +175,57 @@ pub fn foci_stepper_timing_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
     );
 }
 
+/// Query board-local step-dispatch performance counters.
+#[klipper_command]
+pub fn foci_stepper_perf_stats(ctx: &mut FirmwareCtx<'_>, oid: u8, clear: u8) {
+    let channel = match ctx.state().stepper_channel(oid) {
+        Some(channel) => channel,
+        None => {
+            if ctx.enter_shutdown() {
+                let clock = ctx.now();
+                ctx.send_shutdown(ShutdownReason::InvalidTmcChannel, clock);
+            }
+            return;
+        }
+    };
+    let snapshot = crate::state::stepper_diag::perf_snapshot(channel, clear != 0);
+
+    ::ankyra::klipper_reply_from!(
+        &mut crate::_ankyra_config::Sender,
+        foci_firmware::ankyra::replies::FociStepperPerfStatsResult,
+        oid: u8 = oid,
+        channel: u8 = snapshot.channel,
+        crit_max_cycles: u32 = snapshot.crit_max_cycles,
+        crit_max_site: u8 = snapshot.crit_max_site,
+        crit_over_10us: u32 = snapshot.crit_over_10us,
+        crit_over_50us: u32 = snapshot.crit_over_50us,
+        crit_over_100us: u32 = snapshot.crit_over_100us,
+        crit_over_1000us: u32 = snapshot.crit_over_1000us,
+        queue_step_count: u32 = snapshot.queue_step_count,
+        queue_step_max_cycles: u32 = snapshot.queue_step_max_cycles,
+        tim5_activation_count: u32 = snapshot.tim5_activation_count,
+        tim5_irq_max_cycles: u32 = snapshot.tim5_irq_max_cycles,
+        tim5_dispatch_max_cycles: u32 = snapshot.tim5_dispatch_max_cycles,
+        tim5_dispatch_max_cycles_events: u32 = snapshot.tim5_dispatch_max_cycles_events,
+        tim5_events_max_per_irq: u32 = snapshot.tim5_events_max_per_irq,
+        tim5_event_count_total: u32 = snapshot.tim5_event_count_total,
+        tim5_defer_count: u32 = snapshot.tim5_defer_count,
+        tim5_burst_cycles_per_event_max_cycles: u32 = snapshot.tim5_burst_cycles_per_event_max_cycles,
+        tim5_burst_cycles_per_event_max_events: u32 = snapshot.tim5_burst_cycles_per_event_max_events,
+        tim5_burst_cycles_per_event_floor3_max: u32 = snapshot.tim5_burst_cycles_per_event_floor3_max,
+        tim5_entry_latency_max_ticks: u32 = snapshot.tim5_entry_latency_max_ticks,
+        tim5_pop_lateness_max_ticks: u32 = snapshot.tim5_pop_lateness_max_ticks,
+        scheduler_cycles_max: u32 = snapshot.scheduler_cycles_max,
+        scheduler_cycles_events_at_max: u32 = snapshot.scheduler_cycles_events_at_max,
+        scheduler_cycles_per_event_max: u32 = snapshot.scheduler_cycles_per_event_max,
+        scheduler_cycles_per_event_floor3_max: u32 = snapshot.scheduler_cycles_per_event_floor3_max,
+        scheduler_full_count: u32 = snapshot.scheduler_full_count,
+        stepper_load_lateness_max_ticks: u32 = snapshot.stepper_load_lateness_max_ticks,
+        stepper_load_lateness_last_ticks: i32 = snapshot.stepper_load_lateness_last_ticks,
+        build_trace_enabled: u8 = snapshot.build_trace_enabled as u8,
+    );
+}
+
 /// Query board-local physical-stop and reset counters.
 #[klipper_command]
 pub fn foci_stepper_stop_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
