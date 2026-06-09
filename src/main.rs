@@ -1423,6 +1423,14 @@ mod app {
                     }
                     Err(_) => {
                         crate::state::stepper_diag::record_missed_deadline(channel);
+                        record_stepper_event(
+                            StepperEventReason::MissedDeadlineStep,
+                            channel,
+                            now,
+                            UNKNOWN_QUEUE_LEN,
+                            clock,
+                            now,
+                        );
                         #[cfg(feature = "trace")]
                         crate::usb_trace::note_missed_or_deferred_step();
                         fail_step_channel_deadline(channel, next_event_clocks);
