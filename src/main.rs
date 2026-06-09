@@ -1273,9 +1273,11 @@ mod app {
         let next_move =
             unsafe { crate::state::stepper::step_queue(channel).and_then(|queue| queue.dequeue()) };
         let Some(move_) = next_move else {
+            crate::state::stepper_diag::record_queue_empty(channel);
             clear_step_channel(channel, next_event_clocks);
             return;
         };
+        let loaded_steps = u32::from(move_.count);
 
         let dir_changed = stepper.load_move(move_);
         stepper_state
@@ -1295,6 +1297,13 @@ mod app {
         let scheduled = stepper.next_step_clock();
         match stepper.check_deadline(scheduled, now, CLOCK_FREQ) {
             Ok(compare) => {
+                crate::state::stepper_diag::record_loaded_segment_timing(
+                    channel,
+                    loaded_steps,
+                    now,
+                    scheduled,
+                    compare,
+                );
                 let immediate = compare != scheduled;
                 if immediate {
                     next_event_clocks[idx] = Some(now);
@@ -1303,6 +1312,8 @@ mod app {
                 }
             }
             Err(_) => {
+                crate::state::stepper_diag::record_loaded_segment(channel, loaded_steps);
+                crate::state::stepper_diag::record_missed_deadline(channel);
                 #[cfg(feature = "trace")]
                 crate::usb_trace::note_missed_or_deferred_step();
                 fail_step_channel_deadline(channel, next_event_clocks);
@@ -1346,21 +1357,27 @@ mod app {
 
         match stepper.step_event() {
             StepEventResult::ScheduleNext { clock, phase } => {
+                let now = embassy_stm32::pac::TIM5.cnt().read();
                 let is_step = matches!(phase, StepPhase::Step);
                 if is_step {
                     let dir = if stepper.dir_state() { 1i32 } else { -1i32 };
                     stepper_state.position.fetch_add(dir, Relaxed);
+                    crate::state::stepper_diag::record_executed_step(
+                        channel,
+                        stepper.dir_state(),
+                        now,
+                    );
                 }
                 stepper_state
                     .interval
                     .store(stepper.current_interval(), Relaxed);
-                let now = embassy_stm32::pac::TIM5.cnt().read();
                 match stepper.check_deadline(clock, now, CLOCK_FREQ) {
                     Ok(compare) => {
                         let immediate = compare != clock;
                         next_event_clocks[idx] = Some(if immediate { now } else { compare });
                     }
                     Err(_) => {
+                        crate::state::stepper_diag::record_missed_deadline(channel);
                         #[cfg(feature = "trace")]
                         crate::usb_trace::note_missed_or_deferred_step();
                         fail_step_channel_deadline(channel, next_event_clocks);
@@ -1456,9 +1473,11 @@ mod app {
             &mut self,
             state: &mut foci_firmware::context::trsync::TriggerDomainState,
             stepper_idx: usize,
-            _channel: u8,
+            channel: u8,
         ) {
-            arm_step_timer_if_earlier(read_tim5().wrapping_add(1));
+            let now = read_tim5();
+            crate::state::stepper_diag::record_timer_activation(channel, now);
+            arm_step_timer_if_earlier(now.wrapping_add(1));
             self.set_timer_active(state, stepper_idx, true);
         }
     }

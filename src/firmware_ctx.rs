@@ -145,20 +145,27 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         emit_queue_full_diagnostic(channel, queue_len);
     }
 
-    fn record_queued_segment(&mut self, _channel: u8, _steps: u32, queue_len: usize) {
+    fn record_discarded_segment(&mut self, channel: u8, steps: u32) {
+        crate::state::stepper_diag::record_discarded_segment(channel, steps);
+    }
+
+    fn record_queued_segment(&mut self, channel: u8, steps: u32, queue_len: usize) {
         #[cfg(feature = "trace")]
         crate::usb_trace::record_step_queue_depth(queue_len);
         #[cfg(not(feature = "trace"))]
         let _ = queue_len;
+        crate::state::stepper_diag::record_queued_segment(channel, steps);
     }
 
     fn arm_queue_step_timer(
         &mut self,
         state: &mut TriggerDomainState,
         stepper_idx: usize,
-        _channel: u8,
+        channel: u8,
     ) {
-        arm_step_timer_if_earlier(read_tim5().wrapping_add(1));
+        let now = read_tim5();
+        crate::state::stepper_diag::record_timer_activation(channel, now);
+        arm_step_timer_if_earlier(now.wrapping_add(1));
         self.set_timer_active(state, stepper_idx, true);
     }
 }
@@ -175,8 +182,12 @@ impl StepperResetBoard for OuroborosStepperBoard {
     fn drain_step_queue(&mut self, channel: u8) -> Result<StepperDrainStats, CommandError> {
         // SAFETY: Timer is not active (checked by shared policy), P3 is quiesced.
         let queue = unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
-        while queue.dequeue().is_some() {}
-        Ok(StepperDrainStats::ZERO)
+        let mut stats = StepperDrainStats::ZERO;
+        while let Some(m) = queue.dequeue() {
+            stats.segments = stats.segments.saturating_add(1);
+            stats.steps = stats.steps.saturating_add(u32::from(m.count));
+        }
+        Ok(stats)
     }
 
     fn reset_stepper_clocks(&mut self, channel: u8, clock: u32) -> Result<(), CommandError> {
@@ -190,6 +201,10 @@ impl StepperResetBoard for OuroborosStepperBoard {
             );
         }
         Ok(())
+    }
+
+    fn record_reset_step_clock(&mut self, channel: u8, _clock: u32, stats: StepperDrainStats) {
+        crate::state::stepper_diag::record_reset(channel, stats.segments, stats.steps);
     }
 }
 

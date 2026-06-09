@@ -60,6 +60,15 @@ impl TriggerDomain {
         set_timer_active(&mut self.state, stepper_idx, active);
     }
 
+    /// Return whether the step timer is active for a stepper.
+    pub(crate) fn timer_active(&self, stepper_idx: usize) -> bool {
+        self.state
+            .stepper_stop
+            .get(stepper_idx)
+            .map(|runtime| runtime.timer_active)
+            .unwrap_or(false)
+    }
+
     /// Attempt to trigger a trsync, dispatching stop signals to all
     /// linked steppers. Returns the trigger result.
     ///
@@ -104,9 +113,9 @@ impl TriggerDispatchBoard for OuroborosDispatchBoard {
         &mut self,
         _state: &TriggerDomainState,
         stepper_idx: usize,
-        _reason: StepperEventReason,
+        reason: StepperEventReason,
     ) {
-        stop_physical_stepper_no_lock(stepper_idx);
+        stop_physical_stepper_no_lock(stepper_idx, reason);
     }
 
     fn record_trsync_stop(
@@ -201,9 +210,9 @@ where
 ///
 /// Only acts on physical stepper indices (CC1 timer, GPIO, queue).
 ///
-/// Per spec: disable CC1, clear interval, reset ISR stepper engine,
-/// drain queue, reset direction GPIO.
-pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize) {
+/// Per spec: disable CC1, clear interval, snapshot stop stats, reset ISR
+/// stepper engine, drain queue, reset direction GPIO.
+pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize, reason: StepperEventReason) {
     use core::sync::atomic::Ordering::Relaxed;
     if !PHYSICAL_STEPPER_INDICES.contains(&stepper_idx) {
         return;
@@ -237,6 +246,16 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize) {
         .timer_active_mirror
         .store(false, Relaxed);
     tmc_state.pid_error_sums_clear.store(true, Relaxed);
+    let remaining_events = unsafe {
+        isr_stepper(channel)
+            .map(|stepper| stepper.active_event_count())
+            .unwrap_or(0)
+    };
+    let queue_len = unsafe {
+        step_queue(channel)
+            .map(|queue| queue.len().min(u16::MAX as usize) as u16)
+            .unwrap_or(0)
+    };
     // 3. Reset ISR stepper engine state (clear stale partial segment)
     // SAFETY: ISR stepper state is exclusively touched by the P3 step-timer
     // IRQ. If another channel is still active, the stopped channel is first
@@ -265,11 +284,20 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize) {
     //   gets processed at the next motor enable (against the freshly-zeroed
     //   channel position applied by `apply_stepper_post_action_state`) or is
     //   drained again by the next `stepper_stop_from_p1`.
-    while unsafe {
-        step_queue(channel)
-            .map(|queue| queue.dequeue().is_some())
-            .unwrap_or(false)
-    } {}
+    let mut drained_segments = 0u32;
+    let mut drained_steps = 0u32;
+    while let Some(m) = unsafe { step_queue(channel).and_then(|queue| queue.dequeue()) } {
+        drained_segments = drained_segments.saturating_add(1);
+        drained_steps = drained_steps.saturating_add(u32::from(m.count));
+    }
+    crate::state::stepper_diag::record_physical_stop(
+        channel,
+        reason,
+        remaining_events,
+        queue_len,
+        drained_segments,
+        drained_steps,
+    );
     // 5. Reset direction state to the default forward value.
     channel_stepper_state.direction.store(true, Relaxed);
     // 6. Reset STEP/DIR GPIOs to LOW.

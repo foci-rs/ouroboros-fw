@@ -6,6 +6,7 @@ use crate::trigger_domain::stop_physical_stepper_no_lock;
 use foci_firmware::commission_dispatch::{
     DispatchState, StepperPostAction, StepperTaskDirective, apply_stepper_post_action_state,
 };
+use foci_firmware::diagnostic::StepperEventReason;
 
 /// Minimum lead time when arming TIM5 CC1.
 ///
@@ -99,7 +100,7 @@ pub(crate) fn stepper_stop_from_p1(channel: u8) {
     tmc_state
         .motor_armed
         .store(false, core::sync::atomic::Ordering::Relaxed);
-    stop_physical_stepper_no_lock(channel as usize);
+    stop_physical_stepper_no_lock(channel as usize, StepperEventReason::P1Stop);
     stepper_state
         .timer_active_mirror
         .store(false, core::sync::atomic::Ordering::Relaxed);
