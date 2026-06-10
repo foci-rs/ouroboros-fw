@@ -547,8 +547,8 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                         max_offset,
                         rate_hz
                     );
-                    // OpenFFBoard is the active trace/tuning target for this
-                    // diagnostic; this arm exists for exhaustiveness.
+                    // Transient feedforward atomics are set by the command handler;
+                    // this arm exists for exhaustiveness and operator-visible logging.
                 }
                 TmcRequest {
                     kind:
@@ -566,8 +566,35 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                         accel_gain_permille,
                         decel_gain_permille
                     );
-                    // OpenFFBoard is the active trace/tuning target for
-                    // this diagnostic path; keep Ouroboros exhaustive.
+                    // Acceleration feedforward atomics are set by the command handler;
+                    // this arm exists for exhaustiveness and operator-visible logging.
+                }
+                TmcRequest {
+                    kind:
+                        TmcRequestKind::SetDecouplingFeedforward {
+                            enable,
+                            r_int,
+                            l_int,
+                            pole_pairs,
+                            position_units_per_rev,
+                            f_pwm_hz,
+                            max_offset,
+                        },
+                    ..
+                } => {
+                    defmt::info!(
+                        "Decoupling feedforward: {} r_int={} l_int={} pole_pairs={} \
+                position_units_per_rev={} f_pwm_hz={} max_offset={} (via queue)",
+                        enable,
+                        r_int,
+                        l_int,
+                        pole_pairs,
+                        position_units_per_rev,
+                        f_pwm_hz,
+                        max_offset
+                    );
+                    // Feedforward atomics are set by the command handler; this arm
+                    // exists for request-shell parity and exhaustiveness.
                 }
                 TmcRequest {
                     kind:
@@ -584,8 +611,8 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                         gain_permille,
                         max_counts
                     );
-                    // OpenFFBoard owns this diagnostic implementation;
-                    // keep Ouroboros exhaustive for shared enum growth.
+                    // Position-lead atomics are set by the command handler; this arm
+                    // exists for exhaustiveness and operator-visible logging.
                 }
                 TmcRequest {
                     kind:
@@ -605,8 +632,8 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                         max_counts,
                         deadband
                     );
-                    // OpenFFBoard owns this diagnostic implementation;
-                    // keep Ouroboros exhaustive for shared enum growth.
+                    // Phase-advance atomics are set by the command handler; this arm
+                    // exists for exhaustiveness and operator-visible logging.
                 }
                 TmcRequest {
                     kind: TmcRequestKind::Commission { oid, profile },
