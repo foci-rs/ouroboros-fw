@@ -25,6 +25,7 @@ mod state;
 mod stepper_pins;
 mod tmc_control;
 mod tmc_control_glue;
+mod tmc_diagnostics;
 mod tmc_dispatch;
 mod tmc_mux;
 mod transport;
