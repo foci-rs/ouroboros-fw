@@ -1,4 +1,4 @@
-//! Ouroboros glue for applying shared TMC control runtime actions.
+//! Ouroboros effects for shared TMC control runtime actions.
 
 use foci_firmware::commission_dispatch::ReplyPayload;
 use foci_firmware::state::tmc::TMC_DISABLE_SIGNAL;

@@ -17,7 +17,7 @@ use crate::tmc_control::board::{
     TmcEnablePins, TmcRuntimes, enable_pin, next_commission_trace_seq, ouroboros_backend,
     stepper_state, tmc_state,
 };
-use crate::tmc_control_glue::ActionDisposition;
+use crate::tmc_control::effects::ActionDisposition;
 use crate::tmc_dispatch::handle_tmc_request;
 
 pub(crate) struct TmcControlRequestContext<'a, 'spi> {
@@ -148,11 +148,12 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
                         }
                     } else {
                         // Disable: stop stepping first, then kill motor electrically.
-                        let stop_disposition = crate::tmc_control_glue::apply_pre_request_actions(
-                            channel,
-                            runtime.prepare_disable_request(),
-                            |_| {},
-                        );
+                        let stop_disposition =
+                            crate::tmc_control::effects::apply_pre_request_actions(
+                                channel,
+                                runtime.prepare_disable_request(),
+                                |_| {},
+                            );
                         debug_assert_eq!(stop_disposition, ActionDisposition::ContinueRequest);
 
                         let phase_advance_restored = runtime.restore_phase_advance_now(tmc).await;

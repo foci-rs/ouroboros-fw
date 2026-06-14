@@ -24,7 +24,6 @@ mod platform_impl;
 mod state;
 mod stepper_pins;
 mod tmc_control;
-mod tmc_control_glue;
 mod tmc_diagnostics;
 mod tmc_dispatch;
 mod tmc_mux;
@@ -954,13 +953,13 @@ mod app {
                     };
                     let mut tmc = Tmc4671Spi::new(device);
                     let actions = runtimes[channel as usize].classify_request(req.clone());
-                    let disposition = crate::tmc_control_glue::apply_pre_request_actions(
+                    let disposition = crate::tmc_control::effects::apply_pre_request_actions(
                         channel,
                         actions,
                         |reason| {
                             ctx.shared.app_state.lock(|state| {
                                 if crate::firmware_ctx::enter_shutdown(state) {
-                                    crate::tmc_control_glue::emit_shutdown(reason);
+                                    crate::tmc_control::effects::emit_shutdown(reason);
                                 }
                             });
                         },
@@ -996,7 +995,7 @@ mod app {
                     if let Some(reason) = outcome.shutdown {
                         ctx.shared.app_state.lock(|state| {
                             if crate::firmware_ctx::enter_shutdown(state) {
-                                crate::tmc_control_glue::emit_shutdown(reason);
+                                crate::tmc_control::effects::emit_shutdown(reason);
                             }
                         });
                     }
