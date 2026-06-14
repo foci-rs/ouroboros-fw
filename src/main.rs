@@ -1162,14 +1162,13 @@ mod app {
                     }
                 }
 
-                runtime.apply_pid_error_settle_tick(&mut tmc, refs).await;
-
-                if runtime.is_motor_enabled() {
-                    let homing_result = runtime
-                        .apply_homing_channel_tick(&mut tmc, refs, homing)
-                        .await;
-                    all_channels_ready_for_homing_advance &=
-                        matches!(homing_result, HomingMaintenanceResult::ReadyToAdvance);
+                let homing_result = runtime
+                    .apply_slow_channel_maintenance_tick(&mut tmc, refs, homing)
+                    .await;
+                let homing_ready = matches!(homing_result, HomingMaintenanceResult::ReadyToAdvance);
+                all_channels_ready_for_homing_advance &= homing_ready;
+                if !homing_ready {
+                    continue;
                 }
 
                 // TrSync and endstop polling have been replaced by the TIM5 CC2
