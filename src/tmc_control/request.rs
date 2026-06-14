@@ -69,7 +69,7 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
     }
 
     fn normal_tail(&self) -> TmcControlRequestTail {
-        TmcControlRequestTail::FallThrough
+        TmcControlRequestTail::SkipTickTail
     }
 
     fn emit_reply(&mut self, payload: ReplyPayload) {

@@ -68,6 +68,7 @@ mod app {
     use foci_firmware::state::lifecycle::*;
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
     use foci_firmware::state::trsync::*;
+    use foci_firmware::tmc_control::request::TmcPreRequestDisposition;
     use foci_firmware::tmc_control::{
         BoardAction, BoardActions, HomingMaintenanceResult, StepperAction, TmcControlHomingRefs,
         TmcControlRuntime, TmcControlStateRefs,
@@ -942,18 +943,6 @@ mod app {
                         continue;
                     };
                     let mut tmc = Tmc4671Spi::new(device);
-                    let actions = runtimes[channel as usize].classify_request(req.clone());
-                    let disposition = crate::tmc_control::effects::apply_pre_request_actions(
-                        channel,
-                        actions,
-                        |reason| {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    crate::tmc_control::effects::emit_shutdown(reason);
-                                }
-                            });
-                        },
-                    );
 
                     let commissioning_blocked = match &req.kind {
                         TmcRequestKind::SetEnable(true) => {
@@ -970,7 +959,7 @@ mod app {
                     };
                     let outcome = crate::tmc_control::request::handle_tmc_control_request(
                         req,
-                        disposition,
+                        TmcPreRequestDisposition::ContinueRequest,
                         crate::tmc_control::request::TmcControlRequestContext {
                             channel,
                             commissioning_blocked,
