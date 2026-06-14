@@ -689,26 +689,16 @@ mod app {
                         .await;
                     }
                     runtimes[channel as usize].reset_runtime_state();
+                    foci_firmware::tmc_control::TmcControlRuntime::reset_channel_state(
+                        tmc_state(channel),
+                        stepper_state(channel),
+                    );
                     tmc_state(channel)
                         .commission_in_flight
                         .store(false, core::sync::atomic::Ordering::Relaxed);
-                    // Clear commissioned outer configuration so the next closed-
-                    // loop entry uses defaults, not stale commissioned values.
-                    use core::sync::atomic::Ordering::Relaxed as R;
-                    tmc_state(channel).velocity_limit_cfg.store(500_000, R);
-                    tmc_state(channel).position_p_value.store(640, R);
-                    tmc_state(channel).position_i_value.store(0, R);
-                    tmc_state(channel).velocity_p_value.store(1152, R);
-                    tmc_state(channel).velocity_i_value.store(0, R);
-                    tmc_state(channel).velocity_filter_hz.store(0, R);
-                    tmc_state(channel).position_filter_hz.store(0, R);
-                    tmc_state(channel).flux_filter_hz.store(0, R);
-                    tmc_state(channel).torque_filter_hz.store(0, R);
-                    stepper_state(channel)
-                        .position
-                        .store(0, core::sync::atomic::Ordering::Relaxed);
                 }
                 FAULT_ACTIVE.store(false, core::sync::atomic::Ordering::Relaxed);
+                status_poll_counters.fill(0);
                 defmt::info!("TMC request queue flushed after config_reset");
             }
 
