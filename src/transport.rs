@@ -1,30 +1,34 @@
-//! Ankyra transport glue: shepherds wire-format frames into the USB TX
-//! buffer and wakes the USB task when new data is pending.
+//! Ankyra transport glue: shepherds wire-format frames into the USB TX buffer
+//! and wakes the USB task when new data is pending.
 
-use ankyra::{ScratchOutput, TransportOutput};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
+use foci_firmware::transport::{AnkyraUsbTransport, UsbTx, UsbWake};
 
-/// USB wake signal. The OTG_HS ISR and any frame-producing task
-/// signals this to wake `usb_task`, which drains the TX buffer.
+/// USB wake signal. The USB ISR and any frame-producing task signals this to
+/// wake `usb_task`, which drains the TX buffer.
 pub static USB_WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-/// Ankyra `TransportOutput` that writes each encoded frame to the USB
-/// TX buffer and signals [`USB_WAKE`] so `usb_task` can flush it.
-pub struct BufferTransportOutput;
+/// Board-local USB transmit hook for the shared Ankyra transport.
+pub struct BoardUsbTx;
 
-/// Static instance consumed by `ankyra_config!`.
-pub const TRANSPORT_OUTPUT: BufferTransportOutput = BufferTransportOutput;
+impl UsbTx for BoardUsbTx {
+    fn write(data: &[u8]) {
+        foci_usb_stm32::tx_write(data);
+    }
+}
 
-impl TransportOutput for BufferTransportOutput {
-    type Output = ScratchOutput;
-    fn output(&self, f: impl FnOnce(&mut Self::Output)) {
-        let mut scratch = ScratchOutput::new();
-        f(&mut scratch);
-        let output = scratch.result();
-        foci_usb_stm32::tx_write(output);
-        // Wake usb_task to drain TX buffer. Critical for data
-        // generated outside usb_task (stats output from P1).
+/// Board-local USB wake hook for the shared Ankyra transport.
+pub struct BoardUsbWake;
+
+impl UsbWake for BoardUsbWake {
+    fn wake() {
         USB_WAKE.signal(());
     }
 }
+
+/// Ankyra transport output backed by the board USB CDC transport.
+pub type BufferTransportOutput = AnkyraUsbTransport<BoardUsbTx, BoardUsbWake>;
+
+/// Static instance consumed by `ankyra_config!`.
+pub const TRANSPORT_OUTPUT: BufferTransportOutput = BufferTransportOutput::new();
