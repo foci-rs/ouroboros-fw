@@ -18,10 +18,12 @@ pub fn otg_fs_irq() {
 
 /// TMC4671 STATUS pin (PE2 / EXTI line 2) interrupt.
 ///
-/// Fires when any `STATUS_MASK`-enabled flag is asserted
-/// (`not_PLL_locked`, `adc_i_clipped`, …). Quiesces step generation
-/// immediately and signals `tmc_disable_signal` so `tmc_control` can
-/// read `STATUS_FLAGS` on its next tick and log the cause.
+/// Fires when `STATUS_MASK`-enabled `adc_i_clipped` is asserted.
+///
+/// TMC4671-LA Rev 1, 02/2024 Table 30 marks bit 19 as reserved, so it is not
+/// treated as a PLL-lock fault. Quiesces step generation immediately and
+/// signals `tmc_disable_signal` so `tmc_control` can read `STATUS_FLAGS` on its
+/// next tick and log the cause.
 pub fn tmc_status_irq(
     fault_active: &core::sync::atomic::AtomicBool,
     tmc_disable_signal: &embassy_sync::signal::Signal<

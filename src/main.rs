@@ -96,9 +96,10 @@ mod app {
     use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
     use crate::helpers::stepper_diag::{UNKNOWN_QUEUE_LEN, record_stepper_event};
 
-    const STATUS_NOT_PLL_LOCKED: u32 = 1 << 19;
     const STATUS_ADC_I_CLIPPED: u32 = 1 << 26;
-    const STATUS_CRITICAL_FAULT_MASK: u32 = STATUS_NOT_PLL_LOCKED | STATUS_ADC_I_CLIPPED;
+    // TMC4671-LA Rev 1, 02/2024 Table 30 marks STATUS_FLAGS[19] reserved.
+    // Only ADC current clipping is routed as a STATUS critical fault.
+    const STATUS_CRITICAL_FAULT_MASK: u32 = STATUS_ADC_I_CLIPPED;
     const CHANNEL1_STATUS_FALLBACK: u8 = 1;
 
     fn lower_all_enable_pins(enable_pins: &mut TmcEnablePins) {
@@ -425,10 +426,10 @@ mod app {
                 let _ = tmc.write_register(ADC_VM_LIMITS, 0xFFFF_FFFF).await;
             }
 
-            // Configure STATUS_MASK: route critical fault flags to the channel-local
+            // Configure STATUS_MASK: route ADC current clipping to the channel-local
             // STATUS pin. PE2/channel 0 is routed to EXTI2 below. PA2/channel 1
             // shares EXTI line 2 with PE2, and SYSCFG can select only one port for
-            // a given EXTI line, so channel 1 critical flags are polled every tick
+            // a given EXTI line, so channel 1 clipping is polled every tick
             // while the channel may be energized.
             {
                 use foci_tmc4671::registers::*;
@@ -520,18 +521,7 @@ mod app {
                             report_flags,
                             0,
                         );
-                        if report_flags & STATUS_NOT_PLL_LOCKED != 0 {
-                            reported_shutdown = true;
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "TMC4671: PLL not locked (clock lost)",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                        } else if report_flags & STATUS_ADC_I_CLIPPED != 0 {
+                        if report_flags & STATUS_ADC_I_CLIPPED != 0 {
                             reported_shutdown = true;
                             ctx.shared.app_state.lock(|state| {
                                 if crate::firmware_ctx::enter_shutdown(state) {
@@ -1224,7 +1214,7 @@ mod app {
                     // Warning flags: PID output limits (position, velocity, current)
                     const PID_LIMIT_MASK: u32 = 0x0000_FFFF; // bits 0-15
                     const PWM_LIMIT_MASK: u32 = (1 << 24) | (1 << 25); // pwm_min, pwm_max
-                    const FAULT_MASK: u32 = (1 << 19) | (1 << 26); // not_PLL_locked, adc_i_clipped
+                    const FAULT_MASK: u32 = STATUS_ADC_I_CLIPPED;
 
                     if flags & FAULT_MASK != 0 {
                         defmt::error!("TMC4671 channel {} STATUS fault: {:#010x}", channel, flags);
@@ -1935,8 +1925,8 @@ mod app {
 
     /// TMC4671 STATUS pin interrupt (PE2, EXTI line 2).
     ///
-    /// Fires when any STATUS_MASK-enabled flag is asserted (not_PLL_locked,
-    /// adc_i_clipped). Signals immediate motor disable; tmc_control reads
+    /// Fires when any STATUS_MASK-enabled flag is asserted (`adc_i_clipped`).
+    /// Signals immediate motor disable; tmc_control reads
     /// STATUS_FLAGS on next tick to log the cause.
     #[task(binds = EXTI2, priority = 3)]
     fn tmc_status_irq(_ctx: tmc_status_irq::Context) {
