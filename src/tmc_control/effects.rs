@@ -2,38 +2,27 @@
 
 use foci_firmware::commission_dispatch::ReplyPayload;
 use foci_firmware::state::tmc::TMC_DISABLE_SIGNAL;
-use foci_firmware::tmc::TmcRequest;
+use foci_firmware::tmc_control::request::TmcPreRequestDisposition;
 use foci_firmware::tmc_control::{BoardAction, BoardActions, ShutdownReason, StepperAction};
 
 use crate::helpers::lifecycle::read_tim5;
 use crate::helpers::stepper::stepper_stop_from_p1;
 
-/// Result of applying pre-request runtime actions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ActionDisposition {
-    /// No terminal action was applied; continue the existing request match.
-    ContinueRequest,
-    /// A terminal action consumed the request.
-    RequestHandled,
-    /// Run this active diagnostic in the board main loop.
-    RunDiagnostic(TmcRequest),
-}
-
 /// Apply runtime actions emitted before SPI-heavy request handling.
 ///
-/// Returns [`ActionDisposition::RequestHandled`] if a terminal action was
-/// observed, or [`ActionDisposition::RunDiagnostic`] if an active diagnostic
+/// Returns [`TmcPreRequestDisposition::RequestHandled`] if a terminal action was
+/// observed, or [`TmcPreRequestDisposition::RunDiagnostic`] if an active diagnostic
 /// should run in the board main loop. Stepper-only action lists apply their
-/// non-terminal effects and return [`ActionDisposition::ContinueRequest`].
+/// non-terminal effects and return [`TmcPreRequestDisposition::ContinueRequest`].
 pub(crate) fn apply_pre_request_actions<F>(
     channel: u8,
     actions: BoardActions,
     mut enter_shutdown: F,
-) -> ActionDisposition
+) -> TmcPreRequestDisposition
 where
     F: FnMut(ShutdownReason),
 {
-    let mut disposition = ActionDisposition::ContinueRequest;
+    let mut disposition = TmcPreRequestDisposition::ContinueRequest;
 
     for action in actions {
         if let Some(next) = apply_action(channel, action, &mut enter_shutdown) {
@@ -48,18 +37,18 @@ fn apply_action<F>(
     channel: u8,
     action: BoardAction,
     enter_shutdown: &mut F,
-) -> Option<ActionDisposition>
+) -> Option<TmcPreRequestDisposition>
 where
     F: FnMut(ShutdownReason),
 {
     match action {
         BoardAction::Shutdown(reason) => {
             enter_shutdown(reason);
-            Some(ActionDisposition::RequestHandled)
+            Some(TmcPreRequestDisposition::RequestHandled)
         }
         BoardAction::SignalEmergencyDisable => {
             TMC_DISABLE_SIGNAL.signal(());
-            Some(ActionDisposition::RequestHandled)
+            Some(TmcPreRequestDisposition::RequestHandled)
         }
         BoardAction::Stepper(StepperAction::None) => None,
         BoardAction::Stepper(StepperAction::StopNow) => {
@@ -75,10 +64,10 @@ where
         }
         BoardAction::Reply(reply) => {
             emit_reply(reply);
-            Some(ActionDisposition::RequestHandled)
+            Some(TmcPreRequestDisposition::RequestHandled)
         }
         BoardAction::DelegatedDiagnostic(delegated) => {
-            Some(ActionDisposition::RunDiagnostic(delegated.request))
+            Some(TmcPreRequestDisposition::RunDiagnostic(delegated.request))
         }
     }
 }
