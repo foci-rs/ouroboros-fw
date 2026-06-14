@@ -611,6 +611,7 @@ mod app {
                     quiesce_all_channels(&mut runtimes, enable_pins);
                     #[cfg(feature = "trace")]
                     commission_trace_phase.fill(None);
+                    let mut all_shutdown_safe_state_complete = true;
                     for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -628,20 +629,19 @@ mod app {
                         let runtime = &mut runtimes[channel as usize];
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        let mut state =
-                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
-                        // disarm_motor clears tmc_state().motor_armed, motor_enabled, calibrated,
-                        // and runs restore_safe_state_via_backend (best-effort SPI writes).
-                        foci_firmware::tmc_control::lifecycle::disarm_motor(
-                            &mut backend,
-                            &mut state,
-                        )
-                        .await;
+                        all_shutdown_safe_state_complete &=
+                            foci_firmware::tmc_control::lifecycle::apply_shutdown_safe_state(
+                                runtime,
+                                &mut backend,
+                                tmc_state(channel),
+                                stepper_state(channel),
+                            )
+                            .await;
                         tmc_state(channel)
                             .commission_in_flight
                             .store(false, core::sync::atomic::Ordering::Relaxed);
                     }
-                    shutdown_handled = true;
+                    shutdown_handled = all_shutdown_safe_state_complete;
                 }
                 Mono::delay(1.millis()).await;
                 continue;
