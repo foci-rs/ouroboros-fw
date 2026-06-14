@@ -268,8 +268,9 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize, reason: StepperE
         tim5.dier().modify(|w| w.set_ccie(0, false));
         tim5.sr().modify(|w| w.set_ccif(0, false));
     }
-    // 2. Clear channel-local TMC/stepper atomics.
-    tmc_state.motor_armed.store(false, Relaxed);
+    // 2. Clear channel-local stepper atomics. Trigger-domain stops preserve
+    // the electrical armed state; explicit P1 stop/disable paths clear
+    // `motor_armed` before calling this helper.
     channel_stepper_state.interval.store(0, Relaxed);
     channel_stepper_state
         .timer_active_mirror
@@ -287,8 +288,9 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize, reason: StepperE
     };
     // 3. Reset ISR stepper engine state (clear stale partial segment)
     // SAFETY: ISR stepper state is exclusively touched by the P3 step-timer
-    // IRQ. If another channel is still active, the stopped channel is first
-    // gated by `motor_armed=false`, so the ISR will skip this channel.
+    // IRQ. This helper clears the stopped channel's `timer_active_mirror`, so
+    // the ISR's channel-ready gate skips it even when another channel keeps
+    // the shared CC1 timer active.
     unsafe {
         if let Some(stepper) = isr_stepper(channel) {
             stepper.reset();
@@ -298,10 +300,10 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize, reason: StepperE
     //
     // SAFETY: The step queue is a `heapless::spsc::Queue` — single-producer
     // (P2 `queue_step_move`), single-consumer (P3 step-timer IRQ). The P3
-    // consumer is gated from this channel by `motor_armed=false`; here we act
-    // as the channel's consumer and call `dequeue()`. The SPSC implementation
-    // supports concurrent producer/consumer access without a lock, so a P2
-    // enqueue that races this drain is well-defined.
+    // consumer is gated from this channel by `timer_active_mirror=false`; here
+    // we act as the channel's consumer and call `dequeue()`. The SPSC
+    // implementation supports concurrent producer/consumer access without a
+    // lock, so a P2 enqueue that races this drain is well-defined.
     //
     // Caller invariants for entries that survive the drain (i.e. P2
     // enqueues completing after the loop exits):
