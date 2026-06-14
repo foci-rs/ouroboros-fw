@@ -39,12 +39,7 @@ pub(crate) fn ouroboros_backend<'a, 'spi>(
     tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     enable_pin: &'a mut Output<'static>,
 ) -> OuroborosBackend<'a, 'spi> {
-    OuroborosBackend {
-        channel,
-        tmc,
-        enable_pin,
-        tmc_state: tmc_state(channel),
-    }
+    OuroborosBackend::new(channel, tmc, enable_pin, tmc_state(channel))
 }
 
 pub(crate) fn enable_pin(enable_pins: &mut TmcEnablePins, channel: u8) -> &mut Output<'static> {
