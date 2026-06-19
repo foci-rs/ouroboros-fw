@@ -43,13 +43,17 @@ pub(crate) fn enable_pin_channel(pin: u32) -> Option<u8> {
 /// Initial values borrow existing regression-board defaults except for the
 /// current scale. They are compile-only defaults until hardware bring-up
 /// confirms production-v1 current sensing and power-stage timing.
+const OUROBOROS_PROD_V1_PWM_MAXCNT: u16 = 3999;
+const OUROBOROS_PROD_V1_DSADC_MDEC: u16 =
+    foci_firmware::config::dsadc_mdec_from_pwm_maxcnt(OUROBOROS_PROD_V1_PWM_MAXCNT);
+
 pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::config::TmcConfig {
-    pwm_maxcnt: 3999,
+    pwm_maxcnt: OUROBOROS_PROD_V1_PWM_MAXCNT,
     tmc_clock_hz: 25_000_000,
     bbm_h: 10,
     bbm_l: 10,
-    dsadc_mdec_a: 331,
-    dsadc_mdec_b: 331,
+    dsadc_mdec_a: OUROBOROS_PROD_V1_DSADC_MDEC,
+    dsadc_mdec_b: OUROBOROS_PROD_V1_DSADC_MDEC,
     // Preserve the pre-bringup routing until Ouroboros current sense is verified.
     adc_i_select: 0x1000_0100,
     excitation_voltage: 512,
