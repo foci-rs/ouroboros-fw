@@ -59,4 +59,6 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     excitation_voltage: 512,
     didt_cycles: 5000,
     bandwidth_hz: 150.0,
+    resistance_max_expected_current_count: 1600,
+    resistance_scale_metadata_validated: false,
 };
