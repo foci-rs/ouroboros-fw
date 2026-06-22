@@ -70,6 +70,47 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_resistance_run(&mut self, report: foci_firmware::tmc_diagnostics::ResistanceRunReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociResistanceRun,
+            oid: u8 = report.oid,
+            status: u8 = report.status,
+            profile_version: u16 = report.profile_version,
+            selected_r_count_slope_milli: i32 = report.selected_r_count_slope_milli,
+            gain_path_count_slope_milli: i32 = report.gain_path_count_slope_milli,
+            warning_flags: u32 = report.warning_flags,
+            status_flags_or: u32 = report.status_flags_or,
+            pwm_maxcnt_readback: u16 = report.pwm_maxcnt_readback,
+            bbm_readback: u16 = report.bbm_readback,
+            dsadc_mdec_readback: u32 = report.dsadc_mdec_readback,
+            pwm_sv_chop_readback: u32 = report.pwm_sv_chop_readback,
+        );
+    }
+
+    fn foci_resistance_axis(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::ResistanceAxisReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociResistanceAxis,
+            oid: u8 = report.oid,
+            electrical_axis: u8 = report.electrical_axis,
+            phi_e_ext: u16 = report.phi_e_ext,
+            r_count_slope_milli: i32 = report.r_count_slope_milli,
+            intercept_count: i32 = report.intercept_count,
+            rmse_permille: u16 = report.rmse_permille,
+            selected_mask: u16 = report.selected_mask,
+            excluded_point_mask: u16 = report.excluded_point_mask,
+            selected_count: u8 = report.selected_count,
+            signed_count_slope_milli: i32 = report.signed_count_slope_milli,
+            signed_asymmetry_permille: u16 = report.signed_asymmetry_permille,
+            drift_permille: u16 = report.drift_permille,
+            warning_flags: u32 = report.warning_flags,
+        );
+    }
+
     fn foci_tune_result(
         &mut self,
         oid: u8,
