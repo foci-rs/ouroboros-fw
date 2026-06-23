@@ -3,6 +3,51 @@
 //! The semantic `ReplyPayload` mapping lives in `foci_firmware`; this module
 //! keeps only the board-generated ankyra sender calls.
 
+use ankyra::prelude::klipper_reply;
+
+/// `foci_impedance_profile` reply - impedance profile constants for display.
+#[klipper_reply]
+pub struct FociImpedanceProfile {
+    pub oid: u8,
+    pub profile_version: u16,
+    pub point_count: u8,
+    pub sample_count: u16,
+    pub sample_interval_us: u16,
+    pub max_ud: u16,
+    pub status_flags_fail_mask: u32,
+    pub status_flags_warn_mask: u32,
+    pub scale_metadata_validated: u8,
+}
+
+/// `foci_impedance_run` reply - impedance run status and aggregate fit result.
+#[klipper_reply]
+pub struct FociImpedanceRun {
+    pub oid: u8,
+    pub status: u8,
+    pub profile_version: u16,
+    pub selected_axis_max_count_per_ud_milli: u32,
+    pub selected_axis_min_count_per_ud_milli: u32,
+    pub repeatability_permille: u16,
+    pub warning_flags: u32,
+    pub status_flags_or: u32,
+}
+
+/// `foci_impedance_fit` reply - per-injection impedance fit result.
+#[klipper_reply]
+pub struct FociImpedanceFit {
+    pub oid: u8,
+    pub point_index: u8,
+    pub frequency_millihz: u32,
+    pub ud_abs: u16,
+    pub axis_max_count_per_ud_milli: u32,
+    pub axis_min_count_per_ud_milli: u32,
+    pub axis_angle_electrical_counts: u16,
+    pub residual_permille: u16,
+    pub coverage_permille: u16,
+    pub scalar_2f_mismatch_permille: u16,
+    pub warning_flags: u32,
+}
+
 struct BoardCommissionReplySink;
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {

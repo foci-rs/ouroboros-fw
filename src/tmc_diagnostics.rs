@@ -10,8 +10,8 @@ use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
-    DiagnosticReadiness, ResistanceAxisReport, ResistanceProfileReport, ResistanceRunReport,
-    VoltageStepReport,
+    DiagnosticReadiness, ImpedanceFitReport, ImpedanceProfileReport, ImpedanceRunReport,
+    ResistanceAxisReport, ResistanceProfileReport, ResistanceRunReport, VoltageStepReport,
 };
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::{Monotonic, fugit::ExtU64};
@@ -187,6 +187,40 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
+    fn foci_impedance_profile(&mut self, report: ImpedanceProfileReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceProfile,
+            oid: u8 = report.oid,
+            profile_version: u16 = report.profile_version,
+            point_count: u8 = report.point_count,
+            sample_count: u16 = report.sample_count,
+            sample_interval_us: u16 = report.sample_interval_us,
+            max_ud: u16 = report.max_ud,
+            status_flags_fail_mask: u32 = report.status_flags_fail_mask,
+            status_flags_warn_mask: u32 = report.status_flags_warn_mask,
+            scale_metadata_validated: u8 = u8::from(report.scale_metadata_validated),
+        );
+    }
+
+    fn foci_impedance_fit(&mut self, report: ImpedanceFitReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceFit,
+            oid: u8 = report.oid,
+            point_index: u8 = report.point_index,
+            frequency_millihz: u32 = report.frequency_millihz,
+            ud_abs: u16 = report.ud_abs,
+            axis_max_count_per_ud_milli: u32 = report.axis_max_count_per_ud_milli,
+            axis_min_count_per_ud_milli: u32 = report.axis_min_count_per_ud_milli,
+            axis_angle_electrical_counts: u16 = report.axis_angle_electrical_counts,
+            residual_permille: u16 = report.residual_permille,
+            coverage_permille: u16 = report.coverage_permille,
+            scalar_2f_mismatch_permille: u16 = report.scalar_2f_mismatch_permille,
+            warning_flags: u32 = report.warning_flags,
+        );
+    }
+
     fn foci_resistance_axis(&mut self, report: ResistanceAxisReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
@@ -204,6 +238,23 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             signed_asymmetry_permille: u16 = report.signed_asymmetry_permille,
             drift_permille: u16 = report.drift_permille,
             warning_flags: u32 = report.warning_flags,
+        );
+    }
+
+    fn foci_impedance_run(&mut self, report: ImpedanceRunReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceRun,
+            oid: u8 = report.oid,
+            status: u8 = report.status,
+            profile_version: u16 = report.profile_version,
+            selected_axis_max_count_per_ud_milli: u32 = report
+                .selected_axis_max_count_per_ud_milli,
+            selected_axis_min_count_per_ud_milli: u32 = report
+                .selected_axis_min_count_per_ud_milli,
+            repeatability_permille: u16 = report.repeatability_permille,
+            warning_flags: u32 = report.warning_flags,
+            status_flags_or: u32 = report.status_flags_or,
         );
     }
 
