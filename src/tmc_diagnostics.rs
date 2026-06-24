@@ -26,6 +26,10 @@ impl DiagnosticDelay for MonoDiagnosticDelay {
     async fn delay_ms(&mut self, ms: u64) {
         Mono::delay(ms.millis()).await;
     }
+
+    fn now_us(&self) -> u64 {
+        Mono::now().duration_since_epoch().to_micros()
+    }
 }
 
 struct BoardDiagnosticReplySink;
