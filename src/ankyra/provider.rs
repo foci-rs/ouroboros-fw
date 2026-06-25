@@ -28,7 +28,9 @@ ankyra::ankyra_provider! {
         crate::ankyra::handlers::foci::foci_tune,
     ],
     replies: [
+        crate::ankyra::replies::FociImpedanceBaseline,
         crate::ankyra::replies::FociImpedanceFit,
+        crate::ankyra::replies::FociImpedanceObservation,
         crate::ankyra::replies::FociImpedanceProfile,
         crate::ankyra::replies::FociImpedanceRun,
     ],

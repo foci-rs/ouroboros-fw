@@ -10,8 +10,9 @@ use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
-    DiagnosticReadiness, ImpedanceFitReport, ImpedanceProfileReport, ImpedanceRunReport,
-    ResistanceAxisReport, ResistanceProfileReport, ResistanceRunReport, VoltageStepReport,
+    DiagnosticReadiness, ImpedanceBaselineReport, ImpedanceFitReport, ImpedanceObservationReport,
+    ImpedanceProfileReport, ImpedanceRunReport, ResistanceAxisReport, ResistanceProfileReport,
+    ResistanceRunReport, VoltageStepReport,
 };
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::{Monotonic, fugit::ExtU64};
@@ -221,7 +222,52 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             residual_permille: u16 = report.residual_permille,
             coverage_permille: u16 = report.coverage_permille,
             scalar_2f_mismatch_permille: u16 = report.scalar_2f_mismatch_permille,
+            magnitude_mean_count_per_ud_milli: u32 = report.magnitude_mean_count_per_ud_milli,
+            magnitude_2f_count_per_ud_milli: u32 = report.magnitude_2f_count_per_ud_milli,
+            magnitude_2f_residual_permille: u16 = report.magnitude_2f_residual_permille,
+            magnitude_2f_coverage_permille: u16 = report.magnitude_2f_coverage_permille,
             warning_flags: u32 = report.warning_flags,
+        );
+    }
+
+    fn foci_impedance_observation(&mut self, report: ImpedanceObservationReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceObservation,
+            oid: u8 = report.oid,
+            point_index: u8 = report.point_index,
+            frequency_millihz: u32 = report.frequency_millihz,
+            ud_abs: u16 = report.ud_abs,
+            status_flags_or: u32 = report.status_flags_or,
+            openloop_phi_sample: u16 = report.openloop_phi_sample,
+            openloop_velocity_actual: i32 = report.openloop_velocity_actual,
+            adc_iux_sample: i16 = report.adc_iux_sample,
+            adc_iwy_sample: i16 = report.adc_iwy_sample,
+            foc_iux_sample: i16 = report.foc_iux_sample,
+            foc_iwy_sample: i16 = report.foc_iwy_sample,
+            foc_uq_sample: i16 = report.foc_uq_sample,
+            foc_ud_sample: i16 = report.foc_ud_sample,
+            foc_uq_limited_sample: i16 = report.foc_uq_limited_sample,
+            foc_ud_limited_sample: i16 = report.foc_ud_limited_sample,
+            foc_iq_sample: i16 = report.foc_iq_sample,
+            foc_id_sample: i16 = report.foc_id_sample,
+        );
+    }
+
+    fn foci_impedance_baseline(&mut self, report: ImpedanceBaselineReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceBaseline,
+            oid: u8 = report.oid,
+            point_index: u8 = report.point_index,
+            frequency_millihz: u32 = report.frequency_millihz,
+            ud_abs: u16 = report.ud_abs,
+            dc_adc_iux_sample: i16 = report.dc_adc_iux_sample,
+            dc_adc_iwy_sample: i16 = report.dc_adc_iwy_sample,
+            dc_foc_iux_sample: i16 = report.dc_foc_iux_sample,
+            dc_foc_iwy_sample: i16 = report.dc_foc_iwy_sample,
+            dc_foc_iq_sample: i16 = report.dc_foc_iq_sample,
+            dc_foc_id_sample: i16 = report.dc_foc_id_sample,
         );
     }
 
@@ -259,6 +305,9 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             repeatability_permille: u16 = report.repeatability_permille,
             warning_flags: u32 = report.warning_flags,
             status_flags_or: u32 = report.status_flags_or,
+            readback_mismatch_addr: u8 = report.readback_mismatch_addr,
+            readback_expected: u32 = report.readback_expected,
+            readback_actual: u32 = report.readback_actual,
         );
     }
 

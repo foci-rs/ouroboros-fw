@@ -30,6 +30,9 @@ pub struct FociImpedanceRun {
     pub repeatability_permille: u16,
     pub warning_flags: u32,
     pub status_flags_or: u32,
+    pub readback_mismatch_addr: u8,
+    pub readback_expected: u32,
+    pub readback_actual: u32,
 }
 
 /// `foci_impedance_fit` reply - per-injection impedance fit result.
@@ -45,7 +48,47 @@ pub struct FociImpedanceFit {
     pub residual_permille: u16,
     pub coverage_permille: u16,
     pub scalar_2f_mismatch_permille: u16,
+    pub magnitude_mean_count_per_ud_milli: u32,
+    pub magnitude_2f_count_per_ud_milli: u32,
+    pub magnitude_2f_residual_permille: u16,
+    pub magnitude_2f_coverage_permille: u16,
     pub warning_flags: u32,
+}
+
+/// `foci_impedance_observation` reply - per-injection live chip observation.
+#[klipper_reply]
+pub struct FociImpedanceObservation {
+    pub oid: u8,
+    pub point_index: u8,
+    pub frequency_millihz: u32,
+    pub ud_abs: u16,
+    pub status_flags_or: u32,
+    pub openloop_phi_sample: u16,
+    pub openloop_velocity_actual: i32,
+    pub adc_iux_sample: i16,
+    pub adc_iwy_sample: i16,
+    pub foc_iux_sample: i16,
+    pub foc_iwy_sample: i16,
+    pub foc_uq_sample: i16,
+    pub foc_ud_sample: i16,
+    pub foc_uq_limited_sample: i16,
+    pub foc_ud_limited_sample: i16,
+    pub foc_iq_sample: i16,
+    pub foc_id_sample: i16,
+}
+
+#[klipper_reply]
+pub struct FociImpedanceBaseline {
+    pub oid: u8,
+    pub point_index: u8,
+    pub frequency_millihz: u32,
+    pub ud_abs: u16,
+    pub dc_adc_iux_sample: i16,
+    pub dc_adc_iwy_sample: i16,
+    pub dc_foc_iux_sample: i16,
+    pub dc_foc_iwy_sample: i16,
+    pub dc_foc_iq_sample: i16,
+    pub dc_foc_id_sample: i16,
 }
 
 struct BoardCommissionReplySink;
