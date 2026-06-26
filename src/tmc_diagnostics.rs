@@ -197,7 +197,6 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             &mut crate::_ankyra_config::Sender,
             crate::ankyra::replies::FociImpedanceProfile,
             oid: u8 = report.oid,
-            profile_version: u16 = report.profile_version,
             point_count: u8 = report.point_count,
             sample_count: u16 = report.sample_count,
             sample_interval_us: u16 = report.sample_interval_us,
@@ -205,6 +204,8 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             samples_per_cycle: u16 = report.samples_per_cycle,
             cycles_per_angle: u16 = report.cycles_per_angle,
             max_ud: u16 = report.max_ud,
+            hold_ud: u16 = report.hold_ud,
+            carrier_ud: u16 = report.carrier_ud,
             status_flags_fail_mask: u32 = report.status_flags_fail_mask,
             status_flags_warn_mask: u32 = report.status_flags_warn_mask,
             scale_metadata_validated: u8 = u8::from(report.scale_metadata_validated),
@@ -244,6 +245,10 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             saliency_determinable: u8 = report.saliency_determinable,
             angle_coverage_permille: u16 = report.angle_coverage_permille,
             axis_deviation_counts: u16 = report.axis_deviation_counts,
+            inductive_response_count_per_ud_milli: u32 = report
+                .inductive_response_count_per_ud_milli,
+            in_phase_response_count_per_ud_milli: u32 = report
+                .in_phase_response_count_per_ud_milli,
             secondary_adc_response_count_per_ud_milli: u32 = report
                 .secondary_adc_response_count_per_ud_milli,
         );
@@ -286,6 +291,10 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             encoder_max: u32 = report.encoder_max,
             encoder_peak_counts: u16 = report.encoder_peak_counts,
             angle_valid: u8 = report.angle_valid,
+            inductive_response_count_per_ud_milli: u32 = report
+                .inductive_response_count_per_ud_milli,
+            in_phase_response_count_per_ud_milli: u32 = report
+                .in_phase_response_count_per_ud_milli,
         );
     }
 
@@ -332,7 +341,6 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             crate::ankyra::replies::FociImpedanceRun,
             oid: u8 = report.oid,
             status: u8 = report.status,
-            profile_version: u16 = report.profile_version,
             selected_axis_max_count_per_ud_milli: u32 = report
                 .selected_axis_max_count_per_ud_milli,
             selected_axis_min_count_per_ud_milli: u32 = report
@@ -347,6 +355,8 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             filter_flux_enable_before: u8 = report.filter_flux_enable_before,
             filter_torque_enable_during: u8 = report.filter_torque_enable_during,
             filter_flux_enable_during: u8 = report.filter_flux_enable_during,
+            duplicate_zero_encoder_drift_counts: u32 = report
+                .duplicate_zero_encoder_drift_counts,
         );
     }
 

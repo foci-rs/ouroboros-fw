@@ -9,7 +9,6 @@ use ankyra::prelude::klipper_reply;
 #[klipper_reply]
 pub struct FociImpedanceProfile {
     pub oid: u8,
-    pub profile_version: u16,
     pub point_count: u8,
     pub sample_count: u16,
     pub sample_interval_us: u16,
@@ -17,6 +16,8 @@ pub struct FociImpedanceProfile {
     pub samples_per_cycle: u16,
     pub cycles_per_angle: u16,
     pub max_ud: u16,
+    pub hold_ud: u16,
+    pub carrier_ud: u16,
     pub status_flags_fail_mask: u32,
     pub status_flags_warn_mask: u32,
     pub scale_metadata_validated: u8,
@@ -27,7 +28,6 @@ pub struct FociImpedanceProfile {
 pub struct FociImpedanceRun {
     pub oid: u8,
     pub status: u8,
-    pub profile_version: u16,
     pub selected_axis_max_count_per_ud_milli: u32,
     pub selected_axis_min_count_per_ud_milli: u32,
     pub repeatability_permille: u16,
@@ -40,6 +40,7 @@ pub struct FociImpedanceRun {
     pub filter_flux_enable_before: u8,
     pub filter_torque_enable_during: u8,
     pub filter_flux_enable_during: u8,
+    pub duplicate_zero_encoder_drift_counts: u32,
 }
 
 /// `foci_impedance_fit` reply - per-injection impedance fit result.
@@ -72,6 +73,8 @@ pub struct FociImpedanceFitV2 {
     pub saliency_determinable: u8,
     pub angle_coverage_permille: u16,
     pub axis_deviation_counts: u16,
+    pub inductive_response_count_per_ud_milli: u32,
+    pub in_phase_response_count_per_ud_milli: u32,
     pub secondary_adc_response_count_per_ud_milli: u32,
 }
 
@@ -109,6 +112,8 @@ pub struct FociImpedanceObservationV2 {
     pub encoder_max: u32,
     pub encoder_peak_counts: u16,
     pub angle_valid: u8,
+    pub inductive_response_count_per_ud_milli: u32,
+    pub in_phase_response_count_per_ud_milli: u32,
 }
 
 #[klipper_reply]
