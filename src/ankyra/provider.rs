@@ -30,7 +30,9 @@ ankyra::ankyra_provider! {
     replies: [
         crate::ankyra::replies::FociImpedanceBaseline,
         crate::ankyra::replies::FociImpedanceFit,
+        crate::ankyra::replies::FociImpedanceFitV2,
         crate::ankyra::replies::FociImpedanceObservation,
+        crate::ankyra::replies::FociImpedanceObservationV2,
         crate::ankyra::replies::FociImpedanceProfile,
         crate::ankyra::replies::FociImpedanceRun,
     ],

@@ -13,6 +13,9 @@ pub struct FociImpedanceProfile {
     pub point_count: u8,
     pub sample_count: u16,
     pub sample_interval_us: u16,
+    pub carrier_frequency_millihz: u32,
+    pub samples_per_cycle: u16,
+    pub cycles_per_angle: u16,
     pub max_ud: u16,
     pub status_flags_fail_mask: u32,
     pub status_flags_warn_mask: u32,
@@ -33,6 +36,10 @@ pub struct FociImpedanceRun {
     pub readback_mismatch_addr: u8,
     pub readback_expected: u32,
     pub readback_actual: u32,
+    pub filter_torque_enable_before: u8,
+    pub filter_flux_enable_before: u8,
+    pub filter_torque_enable_during: u8,
+    pub filter_flux_enable_during: u8,
 }
 
 /// `foci_impedance_fit` reply - per-injection impedance fit result.
@@ -55,6 +62,19 @@ pub struct FociImpedanceFit {
     pub warning_flags: u32,
 }
 
+/// `foci_impedance_fit_v2` reply - supplemental fixed-angle impedance fit evidence.
+#[klipper_reply]
+pub struct FociImpedanceFitV2 {
+    pub oid: u8,
+    pub point_index: u8,
+    pub mean_response_count_per_ud_milli: u32,
+    pub saliency_permille: u16,
+    pub saliency_determinable: u8,
+    pub angle_coverage_permille: u16,
+    pub axis_deviation_counts: u16,
+    pub secondary_adc_response_count_per_ud_milli: u32,
+}
+
 /// `foci_impedance_observation` reply - per-injection live chip observation.
 #[klipper_reply]
 pub struct FociImpedanceObservation {
@@ -75,6 +95,20 @@ pub struct FociImpedanceObservation {
     pub foc_ud_limited_sample: i16,
     pub foc_iq_sample: i16,
     pub foc_id_sample: i16,
+}
+
+/// `foci_impedance_observation_v2` reply - supplemental fixed-angle observation evidence.
+#[klipper_reply]
+pub struct FociImpedanceObservationV2 {
+    pub oid: u8,
+    pub point_index: u8,
+    pub angle_electrical_counts: u16,
+    pub encoder_before: u32,
+    pub encoder_after: u32,
+    pub encoder_min: u32,
+    pub encoder_max: u32,
+    pub encoder_peak_counts: u16,
+    pub angle_valid: u8,
 }
 
 #[klipper_reply]

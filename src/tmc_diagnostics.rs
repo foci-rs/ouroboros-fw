@@ -201,6 +201,9 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             point_count: u8 = report.point_count,
             sample_count: u16 = report.sample_count,
             sample_interval_us: u16 = report.sample_interval_us,
+            carrier_frequency_millihz: u32 = report.carrier_frequency_millihz,
+            samples_per_cycle: u16 = report.samples_per_cycle,
+            cycles_per_angle: u16 = report.cycles_per_angle,
             max_ud: u16 = report.max_ud,
             status_flags_fail_mask: u32 = report.status_flags_fail_mask,
             status_flags_warn_mask: u32 = report.status_flags_warn_mask,
@@ -230,6 +233,22 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
+    fn foci_impedance_fit_v2(&mut self, report: ImpedanceFitReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceFitV2,
+            oid: u8 = report.oid,
+            point_index: u8 = report.point_index,
+            mean_response_count_per_ud_milli: u32 = report.mean_response_count_per_ud_milli,
+            saliency_permille: u16 = report.saliency_permille,
+            saliency_determinable: u8 = report.saliency_determinable,
+            angle_coverage_permille: u16 = report.angle_coverage_permille,
+            axis_deviation_counts: u16 = report.axis_deviation_counts,
+            secondary_adc_response_count_per_ud_milli: u32 = report
+                .secondary_adc_response_count_per_ud_milli,
+        );
+    }
+
     fn foci_impedance_observation(&mut self, report: ImpedanceObservationReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
@@ -251,6 +270,22 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             foc_ud_limited_sample: i16 = report.foc_ud_limited_sample,
             foc_iq_sample: i16 = report.foc_iq_sample,
             foc_id_sample: i16 = report.foc_id_sample,
+        );
+    }
+
+    fn foci_impedance_observation_v2(&mut self, report: ImpedanceObservationReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            crate::ankyra::replies::FociImpedanceObservationV2,
+            oid: u8 = report.oid,
+            point_index: u8 = report.point_index,
+            angle_electrical_counts: u16 = report.angle_electrical_counts,
+            encoder_before: u32 = report.encoder_before,
+            encoder_after: u32 = report.encoder_after,
+            encoder_min: u32 = report.encoder_min,
+            encoder_max: u32 = report.encoder_max,
+            encoder_peak_counts: u16 = report.encoder_peak_counts,
+            angle_valid: u8 = report.angle_valid,
         );
     }
 
@@ -308,6 +343,10 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             readback_mismatch_addr: u8 = report.readback_mismatch_addr,
             readback_expected: u32 = report.readback_expected,
             readback_actual: u32 = report.readback_actual,
+            filter_torque_enable_before: u8 = report.filter_torque_enable_before,
+            filter_flux_enable_before: u8 = report.filter_flux_enable_before,
+            filter_torque_enable_during: u8 = report.filter_torque_enable_during,
+            filter_flux_enable_during: u8 = report.filter_flux_enable_during,
         );
     }
 
