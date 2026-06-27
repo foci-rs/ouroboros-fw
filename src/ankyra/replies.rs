@@ -238,6 +238,52 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_current_loop_run(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CurrentLoopRunReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentLoopRun,
+            oid: u8 = report.oid,
+            status: u8 = report.status,
+            gains_source: u8 = report.gains_source,
+            axis_split_source: u8 = report.axis_split_source,
+            gains_tier: u8 = report.gains_tier,
+            measured_axis_split_permille: u16 = report.measured_axis_split_permille,
+            applied_axis_split_permille: u16 = report.applied_axis_split_permille,
+            axis_split_clamped: u8 = report.axis_split_clamped,
+            current_validation_axes: u8 = report.current_validation_axes,
+            flux_validation_sample_count: u8 = report.flux_validation_sample_count,
+            torque_validation_sample_count: u8 = report.torque_validation_sample_count,
+            retry_budget_exhausted: u8 = report.retry_budget_exhausted,
+            failure_reason: u8 = report.failure_reason,
+        );
+    }
+
+    fn foci_current_validation_axis(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CurrentValidationAxisReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentValidationAxis,
+            oid: u8 = report.oid,
+            axis: u8 = report.axis,
+            sample_index: u8 = report.sample_index,
+            status: u8 = report.status,
+            attempt: u8 = report.attempt,
+            target: i16 = report.target,
+            sample_delay_ms: u16 = report.sample_delay_ms,
+            positive_response_permille: u16 = report.positive_response_permille,
+            negative_response_permille: u16 = report.negative_response_permille,
+            cross_axis_permille: u16 = report.cross_axis_permille,
+            voltage_output_permille: u16 = report.voltage_output_permille,
+            encoder_delta_counts: u16 = report.encoder_delta_counts,
+            status_flags_or: u32 = report.status_flags_or,
+        );
+    }
+
     fn foci_tune_result(
         &mut self,
         oid: u8,
