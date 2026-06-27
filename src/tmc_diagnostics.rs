@@ -28,6 +28,10 @@ impl DiagnosticDelay for MonoDiagnosticDelay {
         Mono::delay(ms.millis()).await;
     }
 
+    async fn delay_us(&mut self, us: u32) {
+        Mono::delay(u64::from(us).micros()).await;
+    }
+
     fn now_us(&self) -> u64 {
         Mono::now().duration_since_epoch().to_micros()
     }
