@@ -293,6 +293,8 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             cross_axis_permille: u16 = report.cross_axis_permille,
             voltage_output_permille: u16 = report.voltage_output_permille,
             encoder_delta_counts: u16 = report.encoder_delta_counts,
+            positive_encoder_delta_counts: i32 = report.positive_encoder_delta_counts,
+            negative_encoder_delta_counts: i32 = report.negative_encoder_delta_counts,
             status_flags_or: u32 = report.status_flags_or,
         );
     }
