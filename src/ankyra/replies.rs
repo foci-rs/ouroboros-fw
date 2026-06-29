@@ -238,6 +238,23 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_encoder_alignment(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::EncoderAlignmentReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociEncoderAlignment,
+            oid: u8 = report.oid,
+            encoder_count: u32 = report.encoder_count,
+            electrical_residual_counts: u16 = report.electrical_residual_counts,
+            stability_counts: u16 = report.stability_counts,
+            movement_counts: u16 = report.movement_counts,
+            min_movement_counts: u16 = report.min_movement_counts,
+            counts_per_electrical_rev: u16 = report.counts_per_electrical_rev,
+        );
+    }
+
     fn foci_current_loop_run(
         &mut self,
         report: foci_firmware::tmc_diagnostics::CurrentLoopRunReport,
