@@ -255,6 +255,43 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_inductance_fit(&mut self, report: foci_firmware::tmc_diagnostics::InductanceFitReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociInductanceFit,
+            oid: u8 = report.oid,
+            coil: u8 = report.coil,
+            tau_us: u32 = report.tau_us,
+            old_tau_us: u32 = report.old_tau_us,
+            slope_delta_per_ud_milli: u32 = report.slope_delta_per_ud_milli,
+            intercept_delta_milli: i32 = report.intercept_delta_milli,
+            deadtime_ud: i16 = report.deadtime_ud,
+            residual_permille: u16 = report.residual_permille,
+            usable_points: u8 = report.usable_points,
+            selected_mask: u16 = report.selected_mask,
+        );
+    }
+
+    fn foci_inductance_point(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::InductancePointReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociInductancePoint,
+            oid: u8 = report.oid,
+            coil: u8 = report.coil,
+            point: u8 = report.point,
+            ud: u16 = report.ud,
+            avg_delta: u32 = report.avg_delta,
+            avg_current_count: i32 = report.avg_current_count,
+            r_drop_ud: i32 = report.r_drop_ud,
+            effective_ud: i32 = report.effective_ud,
+            sample_count: u32 = report.sample_count,
+            elapsed_us: u32 = report.elapsed_us,
+        );
+    }
+
     fn foci_current_loop_run(
         &mut self,
         report: foci_firmware::tmc_diagnostics::CurrentLoopRunReport,
