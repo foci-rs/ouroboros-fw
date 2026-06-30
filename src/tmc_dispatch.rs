@@ -117,7 +117,7 @@ pub(crate) async fn handle_tmc_request(
                     value: u32 = value,
                 );
             }
-            // Sub-registers (INTERIM, PID_ERROR) use synthetic addrs 0x80+.
+            // Sub-registers use synthetic addrs 0x80+.
             for &(synthetic_addr, sub_reg) in foci_firmware::dump::DUMP_SUB_REGISTERS {
                 Mono::delay(1.millis()).await;
 
