@@ -34,8 +34,6 @@ pub(crate) struct FociTuneParams {
     pub(crate) current_ringing: u8,
     pub(crate) current_bw: u32,
     pub(crate) tau_e_us: u32,
-    pub(crate) tau_e_crosscheck_us: u32,
-    pub(crate) tau_residual_permille: u16,
     pub(crate) inner_warning_flags: u8,
 }
 
@@ -64,8 +62,6 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         current_ringing,
         current_bw,
         tau_e_us,
-        tau_e_crosscheck_us,
-        tau_residual_permille,
         inner_warning_flags,
         channel,
     } = params;
@@ -93,8 +89,6 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         current_ringing,
         current_bw,
         tau_e_us,
-        tau_e_crosscheck_us,
-        tau_residual_permille,
         inner_warning_flags,
     )) {
         tmc_state.commission_in_flight.store(false, Relaxed);

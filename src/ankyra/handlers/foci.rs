@@ -44,8 +44,6 @@ pub fn foci_tune(
     current_ringing: u8,
     current_bw: u32,
     tau_e_us: u32,
-    tau_e_crosscheck_us: u32,
-    tau_residual_permille: u16,
     inner_warning_flags: u8,
 ) {
     let channel = match ctx.state().stepper_channel(oid) {
@@ -68,8 +66,6 @@ pub fn foci_tune(
         current_ringing,
         current_bw,
         tau_e_us,
-        tau_e_crosscheck_us,
-        tau_residual_permille,
         inner_warning_flags,
     });
 }
