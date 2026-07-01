@@ -262,7 +262,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             oid: u8 = report.oid,
             coil: u8 = report.coil,
             tau_us: u32 = report.tau_us,
-            old_tau_us: u32 = report.old_tau_us,
             slope_delta_per_ud_milli: u32 = report.slope_delta_per_ud_milli,
             intercept_delta_milli: i32 = report.intercept_delta_milli,
             deadtime_ud: i16 = report.deadtime_ud,
