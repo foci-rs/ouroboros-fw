@@ -8,9 +8,6 @@
 //! - `foci_tune` — emits replies through the board-local ankyra sender
 //!   (`crate::_ankyra_config::Sender`) directly; cannot be dispatched
 //!   through a capability trait.
-//! - `tmc_impedance_test` plus its replies — the shared diagnostic runner is
-//!   surfaced through board-local ankyra shim modules in this task, so the
-//!   board provider owns the exposed command/reply registration.
 //! - `Pins` enumeration — the physical pin set depends on the MCU / PCB.
 //! - Board-specific constants: `CLOCK_FREQ`, `MCU`, and the
 //!   `RESERVE_PINS_*` family describing which physical pins are
@@ -24,18 +21,9 @@ ankyra::ankyra_provider! {
         crate::ankyra::handlers::foci::foci_stepper_stats,
         crate::ankyra::handlers::foci::foci_stepper_stop_stats,
         crate::ankyra::handlers::foci::foci_stepper_timing_stats,
-        crate::ankyra::handlers::tmc::tmc_impedance_test,
         crate::ankyra::handlers::foci::foci_tune,
     ],
-    replies: [
-        crate::ankyra::replies::FociImpedanceBaseline,
-        crate::ankyra::replies::FociImpedanceFit,
-        crate::ankyra::replies::FociImpedanceFitV2,
-        crate::ankyra::replies::FociImpedanceObservation,
-        crate::ankyra::replies::FociImpedanceObservationV2,
-        crate::ankyra::replies::FociImpedanceProfile,
-        crate::ankyra::replies::FociImpedanceRun,
-    ],
+    replies: [],
     outputs: [],
     enumerations: [
         crate::ankyra::enumerations::Pins,
