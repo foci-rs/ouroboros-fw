@@ -2,15 +2,17 @@
 
 use foci_firmware::autotune::CommissionError;
 use foci_firmware::commission_dispatch::{ReplyPayload, StepperPostAction};
+use foci_firmware::commissioning::backend::CommissionRegisterIo;
 use foci_firmware::state::stepper::StepperChannelState;
 use foci_firmware::state::tmc::TmcChannelState;
-use foci_firmware::tmc::TmcRequest;
+use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 use foci_firmware::tmc_control::request::{
     TmcPreRequestDisposition, TmcRequestBoard, handle_tmc_control_request as handle_shared_request,
 };
 use foci_firmware::tmc_control::{
     BoardActions, TmcControlRequestOutcome, TmcControlRequestTail, TmcControlRuntime,
 };
+use foci_tmc4671::registers::PIDOUT_UQ_UD_LIMITS;
 use foci_tmc4671::spi::Tmc4671Spi;
 
 use crate::app_types::TmcSpiDevice;
@@ -101,6 +103,30 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         Ok(())
     }
 
+    async fn arm_motor_for_voltage_vectors(
+        &mut self,
+        runtime: &mut TmcControlRuntime,
+        tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
+        voltage_limit: u16,
+    ) -> Result<(), CommissionError> {
+        let mut backend = ouroboros_backend(
+            self.channel,
+            tmc,
+            enable_pin(self.enable_pins, self.channel),
+        );
+        backend
+            .write_register(PIDOUT_UQ_UD_LIMITS, u32::from(voltage_limit))
+            .await
+            .map_err(|_| CommissionError::Spi)?;
+        let mut state =
+            runtime.dispatch_state(tmc_state(self.channel), stepper_state(self.channel));
+        foci_firmware::tmc_control::lifecycle::arm_motor_for_voltage_vectors(
+            &mut backend,
+            &mut state,
+        )
+        .await
+    }
+
     async fn disarm_motor(
         &mut self,
         runtime: &mut TmcControlRuntime,
@@ -133,6 +159,39 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         runtime: &mut TmcControlRuntime,
         tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     ) {
+        if matches!(&req.kind, TmcRequestKind::HighRateCaptureTest { .. }) {
+            let voltage_limit = foci_firmware::tmc_diagnostics::high_rate_capture_voltage_limit();
+            let phase_advance_restored = runtime.restore_phase_advance_now(tmc).await;
+            let arm_result = if phase_advance_restored {
+                self.arm_motor_for_voltage_vectors(runtime, tmc, voltage_limit)
+                    .await
+            } else {
+                Err(CommissionError::Spi)
+            };
+
+            if arm_result.is_ok() {
+                let mut delay = crate::tmc_diagnostics::MonoDiagnosticDelay;
+                let context = foci_firmware::tmc_diagnostics::DiagnosticContext {
+                    tmc,
+                    runtime,
+                    delay: &mut delay,
+                    readiness: crate::tmc_diagnostics::diagnostic_readiness(self.channel),
+                    tmc_config: &crate::board_config::TMC_CONFIG,
+                };
+                let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
+                foci_firmware::tmc_diagnostics::run_high_rate_capture_request(
+                    req, context, &mut sink,
+                )
+                .await;
+                self.disarm_motor(runtime, tmc).await;
+            } else {
+                self.disarm_motor(runtime, tmc).await;
+                let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
+                foci_firmware::tmc_diagnostics::emit_high_rate_capture_not_ready(req, &mut sink);
+            }
+            return;
+        }
+
         crate::tmc_diagnostics::run_diagnostic_request(req, self.channel, runtime, tmc).await;
     }
 
