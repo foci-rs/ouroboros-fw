@@ -163,7 +163,13 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
             let readiness = crate::tmc_diagnostics::diagnostic_readiness(self.channel);
             let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
             let Ok(req) = foci_firmware::tmc_diagnostics::preflight_high_rate_capture_request(
-                req, readiness, &mut sink,
+                req,
+                foci_firmware::tmc_diagnostics::HighRateCapturePreflightState {
+                    readiness,
+                    runtime_calibrated: runtime.is_calibrated(),
+                    motor_enabled: runtime.is_motor_enabled(),
+                },
+                &mut sink,
             ) else {
                 return;
             };
