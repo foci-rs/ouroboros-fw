@@ -22,6 +22,7 @@ ankyra::ankyra_provider! {
         crate::ankyra::handlers::foci::foci_stepper_stop_stats,
         crate::ankyra::handlers::foci::foci_stepper_timing_stats,
         crate::ankyra::handlers::foci::foci_tune,
+        crate::ankyra::handlers::foci::tmc_high_rate_capture_test,
     ],
     replies: [],
     outputs: [],
