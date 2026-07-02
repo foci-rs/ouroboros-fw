@@ -160,6 +160,14 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     ) {
         if matches!(&req.kind, TmcRequestKind::HighRateCaptureTest { .. }) {
+            let readiness = crate::tmc_diagnostics::diagnostic_readiness(self.channel);
+            let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
+            let Ok(req) = foci_firmware::tmc_diagnostics::preflight_high_rate_capture_request(
+                req, readiness, &mut sink,
+            ) else {
+                return;
+            };
+
             let voltage_limit = foci_firmware::tmc_diagnostics::high_rate_capture_voltage_limit();
             let phase_advance_restored = runtime.restore_phase_advance_now(tmc).await;
             let arm_result = if phase_advance_restored {
@@ -175,10 +183,9 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
                     tmc,
                     runtime,
                     delay: &mut delay,
-                    readiness: crate::tmc_diagnostics::diagnostic_readiness(self.channel),
+                    readiness,
                     tmc_config: &crate::board_config::TMC_CONFIG,
                 };
-                let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
                 foci_firmware::tmc_diagnostics::run_high_rate_capture_request(
                     req, context, &mut sink,
                 )
@@ -186,7 +193,6 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
                 self.disarm_motor(runtime, tmc).await;
             } else {
                 self.disarm_motor(runtime, tmc).await;
-                let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
                 foci_firmware::tmc_diagnostics::emit_high_rate_capture_not_ready(req, &mut sink);
             }
             return;
