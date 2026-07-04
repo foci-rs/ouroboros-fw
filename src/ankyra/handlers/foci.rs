@@ -70,39 +70,6 @@ pub fn foci_tune(
     });
 }
 
-/// Enqueue the high-rate electrical capture validation request.
-#[klipper_command]
-pub fn tmc_high_rate_capture_test(
-    ctx: &mut FirmwareCtx<'_>,
-    oid: u8,
-    profile: u8,
-    detail: u8,
-    r_count_slope_milli: i32,
-) {
-    let channel = match ctx.state().stepper_channel(oid) {
-        Some(channel) => channel,
-        None => {
-            if ctx.enter_shutdown() {
-                let clock = ctx.now();
-                ctx.send_shutdown(ShutdownReason::InvalidTmcChannel, clock);
-            }
-            return;
-        }
-    };
-    let req = foci_firmware::tmc::tmc_high_rate_capture_test(
-        channel,
-        oid,
-        profile,
-        detail,
-        r_count_slope_milli,
-    );
-    if !crate::helpers::tmc::tmc_send(req.clone()) {
-        defmt::warn!("tmc_high_rate_capture_test dropped");
-        let mut sink = crate::tmc_diagnostics::BoardDiagnosticReplySink;
-        foci_firmware::tmc_diagnostics::emit_high_rate_capture_not_ready(req, &mut sink);
-    }
-}
-
 fn stepper_execution_snapshot(
     ctx: &mut FirmwareCtx<'_>,
     oid: u8,
