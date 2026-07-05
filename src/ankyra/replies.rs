@@ -74,7 +74,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             foci_firmware::ankyra::replies::FociResistanceRun,
             oid: u8 = report.oid,
             status: u8 = report.status,
-            profile_version: u16 = report.profile_version,
             selected_r_count_slope_milli: i32 = report.selected_r_count_slope_milli,
             gain_path_count_slope_milli: i32 = report.gain_path_count_slope_milli,
             warning_flags: u32 = report.warning_flags,
