@@ -10,6 +10,24 @@ pub(crate) const TMC_CHANNEL_COUNT: u8 = 2;
 /// Maker-confirmed production-v1 current scale.
 pub(crate) const CURRENT_SCALE_MA_PER_LSB: f32 = 1.272;
 
+/// Ouroboros production-v1 VM sense divider high-side resistor.
+///
+/// Cached schematic excerpt `docs/datasheets/Ouroboros-schematic-2025-01-26.pdf`
+/// shows R13/R46 = 71.5 kOhm for the two TMC4671 ADC_VM channels.
+pub(crate) const VM_DIVIDER_HIGH_OHMS: u32 = 71_500;
+
+/// Ouroboros production-v1 VM sense divider low-side resistor.
+///
+/// Cached schematic excerpt shows R14/R47 = 1.5 kOhm for the two TMC4671
+/// ADC_VM channels.
+pub(crate) const VM_DIVIDER_LOW_OHMS: u32 = 1_500;
+
+/// TMC4671 ADC_VM reference span in millivolts.
+pub(crate) const VM_ADC_REFERENCE_MILLIVOLTS: u32 = 2_500;
+
+/// Centered positive ADC_VM count span for the TMC4671 16-bit raw ADC.
+pub(crate) const VM_ADC_CENTER_COUNTS: u32 = 32_767;
+
 /// Return the motor channel represented by a virtual STEP pin.
 pub(crate) fn step_pin_channel(pin: u8) -> Option<u8> {
     match Pins::try_from(pin) {

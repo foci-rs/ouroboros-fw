@@ -12,6 +12,8 @@
 
 use ankyra::klipper_constant;
 
+use crate::board_config;
+
 #[klipper_constant]
 pub const CLOCK_FREQ: u32 = 260_000_000;
 
@@ -51,3 +53,20 @@ pub const RESERVE_PINS_DRV: &str = "";
 #[allow(dead_code)]
 #[klipper_constant]
 pub const RESERVE_PINS_STEP: &str = "PD4,PD3,PC12,PC11";
+
+#[klipper_constant]
+pub const FOCI_VM_DIVIDER_HIGH_OHMS: u32 = 71_500;
+const _: () = assert!(FOCI_VM_DIVIDER_HIGH_OHMS == board_config::VM_DIVIDER_HIGH_OHMS);
+
+#[klipper_constant]
+pub const FOCI_VM_DIVIDER_LOW_OHMS: u32 = 1_500;
+const _: () = assert!(FOCI_VM_DIVIDER_LOW_OHMS == board_config::VM_DIVIDER_LOW_OHMS);
+
+#[klipper_constant]
+pub const FOCI_VM_ADC_REFERENCE_MILLIVOLTS: u32 = 2_500;
+const _: () =
+    assert!(FOCI_VM_ADC_REFERENCE_MILLIVOLTS == board_config::VM_ADC_REFERENCE_MILLIVOLTS);
+
+#[klipper_constant]
+pub const FOCI_VM_ADC_CENTER_COUNTS: u32 = 32_767;
+const _: () = assert!(FOCI_VM_ADC_CENTER_COUNTS == board_config::VM_ADC_CENTER_COUNTS);

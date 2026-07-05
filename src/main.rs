@@ -392,6 +392,26 @@ mod app {
                 }
             }
 
+            match foci_firmware::adc_vm::capture_adc_vm_offset(&mut tmc).await {
+                Ok(capture) => {
+                    if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
+                        tmc_state.store_adc_vm_offset(capture.offset_raw, capture.sample_count);
+                    }
+                    defmt::info!(
+                        "TMC4671 channel {} ADC_VM offset cached: raw={} samples={}",
+                        channel,
+                        capture.offset_raw,
+                        capture.sample_count
+                    );
+                }
+                Err(_) => {
+                    defmt::warn!(
+                        "TMC4671 ch {} ADC_VM offset failed; host rejects VM decode",
+                        channel
+                    );
+                }
+            }
+
             // Disable TMC4671 brake chopper unconditionally.
             //
             // Write both ADC_VM_LIMIT_HIGH and ADC_VM_LIMIT_LOW to u16::MAX

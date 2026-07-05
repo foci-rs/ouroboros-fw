@@ -30,6 +30,10 @@ ankyra::ankyra_provider! {
     ],
     constants: [
         crate::ankyra::constants::CLOCK_FREQ,
+        crate::ankyra::constants::FOCI_VM_ADC_CENTER_COUNTS,
+        crate::ankyra::constants::FOCI_VM_ADC_REFERENCE_MILLIVOLTS,
+        crate::ankyra::constants::FOCI_VM_DIVIDER_HIGH_OHMS,
+        crate::ankyra::constants::FOCI_VM_DIVIDER_LOW_OHMS,
         crate::ankyra::constants::MCU,
         crate::ankyra::constants::RESERVE_PINS_DRV,
         crate::ankyra::constants::RESERVE_PINS_LED,
