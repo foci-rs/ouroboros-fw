@@ -7,9 +7,7 @@ fn main() {
     // Default: Katapult bootloader offset (0x08008000).
     // With --features dev-flash: direct flash at 0x08000000 for probe-rs.
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    // Default: Katapult bootloader offset (0x08008000).
-    // With --features dev: direct flash at 0x08000000 for probe-rs + dev commands.
-    let memory_x = if env::var("CARGO_FEATURE_DEV").is_ok() {
+    let memory_x = if env::var("CARGO_FEATURE_DEV_FLASH").is_ok() {
         "memory-dev.x"
     } else {
         "memory.x"
