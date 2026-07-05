@@ -16,7 +16,7 @@ use rtic_monotonics::fugit::ExtU64;
 
 use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
-use crate::board_config::CURRENT_SCALE_MA_PER_LSB;
+use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
 
 fn report_invalid_channel(channel: u8) {
     ::ankyra::klipper_reply_from!(
@@ -47,7 +47,15 @@ pub(crate) async fn handle_tmc_request(
     };
 
     let kind = req.kind;
-    match apply_shared_tmc_request(&kind, tmc, tmc_state, CURRENT_SCALE_MA_PER_LSB).await? {
+    match apply_shared_tmc_request(
+        &kind,
+        tmc,
+        tmc_state,
+        CURRENT_SCALE_MA_PER_LSB,
+        TMC_CONFIG.pwm_maxcnt,
+    )
+    .await?
+    {
         SharedTmcDispatch::Handled => return Ok(()),
         SharedTmcDispatch::Unhandled => {}
     }
