@@ -209,6 +209,21 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_current_loop_filters(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CurrentLoopFiltersReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentLoopFilters,
+            oid: u8 = report.oid,
+            velocity_filter_hz: u16 = report.velocity_filter_hz,
+            torque_filter_hz: u16 = report.torque_filter_hz,
+            position_filter_hz: u16 = report.position_filter_hz,
+            flux_filter_hz: u16 = report.flux_filter_hz,
+        );
+    }
+
     fn foci_current_loop_run(
         &mut self,
         report: foci_firmware::tmc_diagnostics::CurrentLoopRunReport,
