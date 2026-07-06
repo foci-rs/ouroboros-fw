@@ -181,6 +181,34 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_current_loop_hold(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CurrentLoopHoldReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentLoopHold,
+            oid: u8 = report.oid,
+            hold_status: u8 = report.hold_status,
+            warning_flags: u16 = report.warning_flags,
+            elapsed_us: u32 = report.elapsed_us,
+            requested_sample_period_us: u16 = report.requested_sample_period_us,
+            sample_count: u8 = report.sample_count,
+            position_span_count: u16 = report.position_span_count,
+            position_drift_count: u16 = report.position_drift_count,
+            torque_mean_count: i16 = report.torque_mean_count,
+            torque_rms_count: u16 = report.torque_rms_count,
+            torque_peak_to_peak_count: u16 = report.torque_peak_to_peak_count,
+            torque_crossing_count: u8 = report.torque_crossing_count,
+            flux_mean_count: i16 = report.flux_mean_count,
+            flux_rms_count: u16 = report.flux_rms_count,
+            flux_peak_to_peak_count: u16 = report.flux_peak_to_peak_count,
+            flux_crossing_count: u8 = report.flux_crossing_count,
+            status_flags_or: u32 = report.status_flags_or,
+            actionable_status_count: u8 = report.actionable_status_count,
+        );
+    }
+
     fn foci_current_loop_run(
         &mut self,
         report: foci_firmware::tmc_diagnostics::CurrentLoopRunReport,
