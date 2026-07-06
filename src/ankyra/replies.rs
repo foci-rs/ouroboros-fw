@@ -303,6 +303,22 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_current_validation_envelope(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CurrentValidationEnvelopeReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentValidationEnvelope,
+            oid: u8 = report.oid,
+            step_amplitude: u16 = report.step_amplitude,
+            pidout_limit: u16 = report.pidout_limit,
+            current_limited: u16 = report.current_limited,
+            voltage_limited: u16 = report.voltage_limited,
+            max_p: u16 = report.max_p,
+        );
+    }
+
     fn foci_tune_result(
         &mut self,
         oid: u8,
