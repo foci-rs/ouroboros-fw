@@ -72,6 +72,10 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         TmcControlRequestTail::SkipTickTail
     }
 
+    fn default_current_filter_hz(&self) -> u16 {
+        crate::board_config::TMC_CONFIG.default_current_filter_hz()
+    }
+
     fn emit_reply(&mut self, payload: ReplyPayload) {
         crate::ankyra::replies::emit_terminal_reply(payload);
     }
