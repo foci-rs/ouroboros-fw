@@ -209,6 +209,23 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_closed_loop_entry(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::ClosedLoopEntryReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociClosedLoopEntry,
+            oid: u8 = report.oid,
+            entry_status: u8 = report.entry_status,
+            position_1: i32 = report.position_1,
+            position_2: i32 = report.position_2,
+            drift_count: u16 = report.drift_count,
+            threshold_count: u16 = report.threshold_count,
+            runaway: u8 = report.runaway,
+        );
+    }
+
     fn foci_current_loop_filters(
         &mut self,
         report: foci_firmware::tmc_diagnostics::CurrentLoopFiltersReport,
