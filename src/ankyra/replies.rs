@@ -303,6 +303,30 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_current_validation_settled_sample(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CurrentValidationSettledSampleReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentValidationSettledSample,
+            oid: u8 = report.oid,
+            axis: u8 = report.axis,
+            sample_index: u8 = report.sample_index,
+            direction: u8 = report.direction,
+            raw_index: u8 = report.raw_index,
+            attempt: u8 = report.attempt,
+            target: i16 = report.target,
+            sample_delay_ms: u16 = report.sample_delay_ms,
+            same_axis_count: i16 = report.same_axis_count,
+            cross_axis_count: i16 = report.cross_axis_count,
+            cross_axis_permille: u16 = report.cross_axis_permille,
+            voltage_output_permille: u16 = report.voltage_output_permille,
+            encoder_delta_counts: i32 = report.encoder_delta_counts,
+            status_flags: u32 = report.status_flags,
+        );
+    }
+
     fn foci_current_validation_envelope(
         &mut self,
         report: foci_firmware::tmc_diagnostics::CurrentValidationEnvelopeReport,
