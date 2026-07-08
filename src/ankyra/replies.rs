@@ -336,6 +336,8 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             foci_firmware::ankyra::replies::FociCurrentValidationEnvelope,
             oid: u8 = report.oid,
             step_amplitude: u16 = report.step_amplitude,
+            flux_step_amplitude: u16 = report.flux_step_amplitude,
+            torque_step_amplitude: u16 = report.torque_step_amplitude,
             pidout_limit: u16 = report.pidout_limit,
             current_limited: u16 = report.current_limited,
             voltage_limited: u16 = report.voltage_limited,
