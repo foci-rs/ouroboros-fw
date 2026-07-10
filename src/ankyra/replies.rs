@@ -397,6 +397,10 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             synth_velocity_i: u16 = result.synth_velocity_i,
             synth_position_p: u16 = result.synth_position_p,
             synth_position_i: u16 = result.synth_position_i,
+            outer_evidence_flags: u8 = result.outer_evidence_flags,
+            stiffness_timebase_ms: u16 = result.stiffness_timebase_ms,
+            velocity_search_stop_reason: u8 = result.velocity_search_stop_reason,
+            motion_budget_mrev: u16 = result.motion_budget_mrev,
         );
     }
 
