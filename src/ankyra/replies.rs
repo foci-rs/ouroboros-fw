@@ -404,6 +404,31 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_outer_safety_fault(
+        &mut self,
+        oid: u8,
+        fault: foci_firmware::commissioning::types::OuterSafetyFault,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociOuterSafetyFault,
+            oid: u8 = oid,
+            reason: u8 = fault.reason,
+            max_travel_mrev: u16 = fault.max_travel_mrev,
+            max_velocity_mrev_s: u16 = fault.max_velocity_mrev_s,
+            max_duration_ms: u16 = fault.max_duration_ms,
+            direction_mask: u8 = fault.direction_mask,
+            delta_counts: i32 = fault.delta_counts,
+            dt_us: u32 = fault.dt_us,
+            velocity_counts_per_ms: i32 = fault.velocity_counts_per_ms,
+            velocity_cap_counts_per_ms: i32 = fault.velocity_cap_counts_per_ms,
+            position_counts: i32 = fault.position_counts,
+            position_window_counts: i32 = fault.position_window_counts,
+            elapsed_us: u32 = fault.elapsed_us,
+            duration_cap_us: u32 = fault.duration_cap_us,
+        );
+    }
+
     fn foci_calibrate_result(
         &mut self,
         oid: u8,
