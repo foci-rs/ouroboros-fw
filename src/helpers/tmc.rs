@@ -35,6 +35,10 @@ pub(crate) struct FociTuneParams {
     pub(crate) current_bw: u32,
     pub(crate) tau_e_us: u32,
     pub(crate) inner_warning_flags: u8,
+    pub(crate) max_travel_mrev: u32,
+    pub(crate) max_velocity_mrev_s: u32,
+    pub(crate) max_duration_ms: u16,
+    pub(crate) direction_mask: u8,
 }
 
 /// Send a request to the tmc_control task.
@@ -63,6 +67,10 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         current_bw,
         tau_e_us,
         inner_warning_flags,
+        max_travel_mrev,
+        max_velocity_mrev_s,
+        max_duration_ms,
+        direction_mask,
         channel,
     } = params;
     let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
@@ -90,6 +98,10 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         current_bw,
         tau_e_us,
         inner_warning_flags,
+        max_travel_mrev,
+        max_velocity_mrev_s,
+        max_duration_ms,
+        direction_mask,
     )) {
         tmc_state.commission_in_flight.store(false, Relaxed);
         ::ankyra::klipper_reply_from!(

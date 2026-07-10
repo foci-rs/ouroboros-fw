@@ -45,6 +45,10 @@ pub fn foci_tune(
     current_bw: u32,
     tau_e_us: u32,
     inner_warning_flags: u8,
+    max_travel_mrev: u32,
+    max_velocity_mrev_s: u32,
+    max_duration_ms: u16,
+    direction_mask: u8,
 ) {
     let channel = match ctx.state().stepper_channel(oid) {
         Some(channel) => channel,
@@ -67,6 +71,10 @@ pub fn foci_tune(
         current_bw,
         tau_e_us,
         inner_warning_flags,
+        max_travel_mrev,
+        max_velocity_mrev_s,
+        max_duration_ms,
+        direction_mask,
     });
 }
 
