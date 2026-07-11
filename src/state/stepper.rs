@@ -223,12 +223,38 @@ pub(crate) fn step_pulse_timing() -> StepPulseTiming {
     timing
 }
 
-/// Install a freshly centered replacement without mutating state on rejection.
+/// Clear any old mapper, then install a freshly centered replacement.
+///
+/// Failure is fail-closed: the prior mapper is cleared before configuration.
 pub(crate) fn install_motion_scale_mapper(
     stepper: &mut HardwareStepper,
     config: PulseMapperConfig,
 ) -> Result<(), MotionScaleConfigError> {
+    stepper.clear_motion_scale();
     stepper.configure_motion_scale(config)
+}
+
+/// Failure to replace the board-local mapper while fail-closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MotionScaleMapperReplacementError {
+    /// A board quiescence guard rejected installation.
+    NotAdmitted,
+    /// The scheduler rejected the replacement configuration.
+    InvalidState,
+}
+
+/// Clear any prior mapper before applying board-hook admission and replacement.
+pub(crate) fn replace_motion_scale_mapper(
+    stepper: &mut HardwareStepper,
+    config: PulseMapperConfig,
+    admitted: bool,
+) -> Result<(), MotionScaleMapperReplacementError> {
+    stepper.clear_motion_scale();
+    if !admitted {
+        return Err(MotionScaleMapperReplacementError::NotAdmitted);
+    }
+    install_motion_scale_mapper(stepper, config)
+        .map_err(|_| MotionScaleMapperReplacementError::InvalidState)
 }
 
 /// Admit mapper installation only while every board quiescence guard holds.
@@ -319,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_mapper_replacement_preserves_prior_mapper_phase_and_observables() {
+    fn failed_mapper_replacement_clears_prior_mapper() {
         let mut stepper = foci_klipper::stepper::HardwareStepper::new();
         stepper
             .configure_motion_scale(PulseMapperConfig::new(3_200).unwrap())
@@ -334,11 +360,9 @@ mod tests {
             install_motion_scale_mapper(&mut stepper, PulseMapperConfig::new(4_000).unwrap())
                 .is_err()
         );
-        assert!(stepper.motion_scale_configured());
-        assert_eq!(stepper.planner_steps_per_rev(), Some(3_200));
-        assert_eq!(stepper.mapper_phase(), Some(prior_phase));
-        assert_eq!(PHYSICAL_PULSE_COUNTS[0].load(Ordering::Relaxed), 9);
-        assert_eq!(MAPPER_PHASES[0].load(Ordering::Relaxed), prior_phase as i32);
+        assert!(!stepper.motion_scale_configured());
+        assert_eq!(stepper.planner_steps_per_rev(), None);
+        assert_eq!(stepper.mapper_phase(), None);
         reset_mapper_observables(0);
     }
 
@@ -348,6 +372,26 @@ mod tests {
         assert!(!motion_scale_install_admitted(true, true, false));
         assert!(!motion_scale_install_admitted(false, false, false));
         assert!(!motion_scale_install_admitted(false, true, true));
+    }
+
+    #[test]
+    fn busy_mapper_replacement_clears_prior_mapper_for_every_hook_guard() {
+        let replacement = PulseMapperConfig::new(4_000).unwrap();
+
+        for guards in [
+            (true, true, false),
+            (false, false, false),
+            (false, true, true),
+        ] {
+            let mut stepper = foci_klipper::stepper::HardwareStepper::new();
+            stepper
+                .configure_motion_scale(PulseMapperConfig::new(3_200).unwrap())
+                .unwrap();
+            let admitted = motion_scale_install_admitted(guards.0, guards.1, guards.2);
+
+            assert!(replace_motion_scale_mapper(&mut stepper, replacement, admitted).is_err());
+            assert!(!stepper.motion_scale_configured());
+        }
     }
 
     #[test]

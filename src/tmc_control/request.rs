@@ -22,7 +22,7 @@ use crate::board_config::TMC_CHANNEL_COUNT;
 use crate::helpers::dev::{do_test_spin, tmc_enter_openloop};
 use crate::helpers::stepper::apply_stepper_post_action;
 use crate::state::stepper::{
-    install_motion_scale_mapper, isr_stepper, motion_scale_install_admitted,
+    isr_stepper, motion_scale_install_admitted, replace_motion_scale_mapper,
     reset_mapper_observables, step_queue,
 };
 use crate::tmc_control::board::{
@@ -98,19 +98,30 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
             let queue_empty =
                 unsafe { step_queue(self.channel).is_some_and(|queue| queue.is_empty()) };
             let timer_active = td.timer_active(self.channel as usize);
-            if !motion_scale_install_admitted(motor_armed, queue_empty, timer_active) {
-                return Err(MotionScaleMapperInstallError);
-            }
+            let admitted = motion_scale_install_admitted(motor_armed, queue_empty, timer_active);
 
             // SAFETY: The trigger-domain lock excludes P2/P3, and the checked
             // disarmed/empty/inactive state keeps this channel quiesced afterward.
             let stepper =
                 unsafe { isr_stepper(self.channel).ok_or(MotionScaleMapperInstallError)? };
-            install_motion_scale_mapper(stepper, mapper)
-                .map_err(|_| MotionScaleMapperInstallError)?;
             reset_mapper_observables(self.channel);
-            Ok(())
+            replace_motion_scale_mapper(stepper, mapper, admitted)
+                .map_err(|_| MotionScaleMapperInstallError)
         })
+    }
+
+    fn report_motion_scale_rejection(
+        &mut self,
+        oid: u8,
+        rejection: foci_firmware::motion_scale::MotionScaleRejection,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociMotionScaleRejected,
+            oid: u8 = oid,
+            stage: u8 = foci_firmware::motion_scale::MOTION_SCALE_REJECTION_STAGE_P1,
+            reason: u8 = rejection.code(),
+        );
     }
 
     fn emit_reply(&mut self, payload: ReplyPayload) {
