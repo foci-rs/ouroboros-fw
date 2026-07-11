@@ -284,3 +284,94 @@ pub(crate) fn reset_mapper_observables(channel: u8) {
     PHYSICAL_PULSE_COUNTS[idx].store(0, Ordering::Relaxed);
     MAPPER_PHASES[idx].store(0, Ordering::Relaxed);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use foci_klipper::pulse_mapper::PulseMapperConfig;
+    use foci_klipper::stepper::StepMove;
+
+    #[test]
+    fn ouroboros_timing_uses_provisional_wcet_and_margin() {
+        let timing = step_pulse_timing();
+        assert_eq!(timing.half_period_ticks(), 11);
+        assert_eq!(timing.dir_setup_ticks(), 22);
+        assert_eq!(timing.waveform_worst_case_ticks(), 66);
+        assert_eq!(timing.half_period_ticks(), STEP_HALF_PERIOD_TICKS);
+        assert_eq!(timing.dir_setup_ticks(), STEP_DIR_SETUP_TICKS);
+        assert_eq!(
+            timing.waveform_worst_case_ticks(),
+            STEP_WAVEFORM_WORST_CASE_TICKS
+        );
+        assert_eq!(
+            timing.total_handler_wcet_ticks(),
+            PROVISIONAL_TOTAL_HANDLER_WCET_TICKS
+        );
+        assert_eq!(timing.margin_ticks(), PROVISIONAL_HANDLER_MARGIN_TICKS);
+        assert_eq!(
+            PROVISIONAL_MAX_LOGICAL_EVENTS_PER_IRQ,
+            foci_firmware::stepper_runtime::MAX_STEP_EVENTS_PER_IRQ
+        );
+        assert_eq!(PROVISIONAL_MAX_TRIGGER_EVENTS_PER_IRQ, 13);
+        assert_eq!(
+            STEP_WAVEFORM_WORST_CASE_TICKS + PROVISIONAL_PULSE_CONTROL_TICKS,
+            1_024
+        );
+        assert_eq!(PROVISIONAL_LOGICAL_EVENT_SUBTOTAL_TICKS, 2_048);
+        assert_eq!(PROVISIONAL_LOGICAL_EVENT_TICKS, 2_048);
+        assert_eq!(PROVISIONAL_CONTROL_FLOW_SUBTOTAL_TICKS, 47_104);
+        assert!(PROVISIONAL_TOTAL_HANDLER_WCET_TICKS >= PROVISIONAL_CONTROL_FLOW_SUBTOTAL_TICKS);
+        assert_eq!(PROVISIONAL_TOTAL_HANDLER_WCET_TICKS, 65_536);
+        assert_eq!(PROVISIONAL_HANDLER_MARGIN_TICKS, 8_192);
+    }
+
+    #[test]
+    fn failed_mapper_replacement_leaves_no_prior_mapper_usable() {
+        let mut stepper = foci_klipper::stepper::HardwareStepper::new();
+        stepper
+            .configure_motion_scale(PulseMapperConfig::new(3_200).unwrap())
+            .unwrap();
+        stepper.load_move(StepMove::new(100, 1, 0));
+
+        assert!(
+            install_motion_scale_mapper(&mut stepper, PulseMapperConfig::new(4_000).unwrap())
+                .is_err()
+        );
+        assert!(!stepper.motion_scale_configured());
+    }
+
+    #[test]
+    fn mapper_install_admission_requires_every_idle_guard() {
+        assert!(motion_scale_install_admitted(false, true, false));
+        assert!(!motion_scale_install_admitted(true, true, false));
+        assert!(!motion_scale_install_admitted(false, false, false));
+        assert!(!motion_scale_install_admitted(false, true, true));
+    }
+
+    #[test]
+    fn physical_pulse_budget_accepts_zero_through_two() {
+        assert_physical_pulse_budget(0);
+        assert_physical_pulse_budget(1);
+        assert_physical_pulse_budget(2);
+    }
+
+    #[test]
+    #[should_panic(expected = "logical event exceeds two physical pulses")]
+    fn physical_pulse_budget_rejects_three_in_release_code() {
+        assert_physical_pulse_budget(3);
+    }
+
+    #[test]
+    fn queue_full_does_not_consume_pending_direction_change() {
+        let mut stepper = foci_klipper::stepper::HardwareStepper::new();
+        stepper.set_next_step_dir(false);
+        let mut queue = heapless::spsc::Queue::<StepMove, 2>::new();
+        queue.enqueue(StepMove::new(100, 1, 0)).unwrap();
+
+        assert_eq!(
+            prepare_and_enqueue(&mut stepper, &mut queue, StepMove::new(100, 1, 0)),
+            Err(1)
+        );
+        assert!(stepper.next_move_changes_direction());
+    }
+}

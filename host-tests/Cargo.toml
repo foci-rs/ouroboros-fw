@@ -1,0 +1,10 @@
+[package]
+name = "ouroboros-host-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+foci-firmware = { git = "https://github.com/foci-rs/foci-firmware" }
+foci-klipper = { git = "https://github.com/foci-rs/foci-klipper" }
+heapless = "0.9"
