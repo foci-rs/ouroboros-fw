@@ -25,7 +25,6 @@ use foci_firmware::context::{
 };
 use foci_firmware::diagnostic::StepperEventReason;
 use foci_firmware::state::trsync::ENDSTOP_PIN_IDS;
-use foci_firmware::step_pulse::StepPulseTiming;
 use foci_firmware::tmc::TmcRequest;
 use foci_klipper::commands::CommandError;
 use foci_klipper::scheduler::ScheduleResult;
@@ -36,9 +35,7 @@ use crate::helpers::stepper::arm_step_timer_if_earlier;
 use crate::helpers::stepper_diag::record_stepper_event;
 use crate::helpers::tmc::OuroborosTmcQueue;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
-use crate::state::stepper::{
-    isr_stepper, p2_stepper, prepare_and_enqueue, step_pulse_timing, step_queue,
-};
+use crate::state::stepper::{isr_stepper, p2_stepper, prepare_and_enqueue, step_queue};
 use crate::trigger_domain::{
     OuroborosDispatchBoard, PHYSICAL_STEPPER_INDICES, disarm_trigger_scheduler, reprogram_cc2,
     set_timer_active, with_trigger_domain, with_trigger_domain_site,
@@ -113,17 +110,6 @@ impl StepperQueueBoard for OuroborosStepperBoard {
             .tmc_state
             .expect("validated Ouroboros channel has TMC state")
             .motion_scale_configured())
-    }
-
-    fn move_changes_direction(&self, channel: u8) -> Result<bool, CommandError> {
-        // SAFETY: P2 stepper state is only accessed from P2 command handlers.
-        let stepper = unsafe { p2_stepper(channel).ok_or(CommandError::InvalidChannel(channel))? };
-        Ok(stepper.next_move_changes_direction())
-    }
-
-    fn step_pulse_timing(&self, channel: u8) -> Result<StepPulseTiming, CommandError> {
-        self.queue_stepper_index(channel)?;
-        Ok(step_pulse_timing())
     }
 
     fn prepare_and_enqueue(

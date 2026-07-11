@@ -24,7 +24,7 @@ use foci_firmware::shutdown::ShutdownReason;
 
 use crate::firmware_ctx::FirmwareCtx;
 use crate::helpers::tmc::{FociTuneParams, foci_tune_inner};
-use crate::state::stepper::{STEP_TIMING_PROVISIONAL, step_pulse_timing, step_queue};
+use crate::state::stepper::{step_pulse_timing, step_queue};
 use crate::tmc_control::board::{stepper_state, tmc_state};
 use crate::trigger_domain::with_trigger_domain;
 
@@ -147,7 +147,6 @@ pub fn foci_stepper_exec_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
         tmc_state(snapshot.channel),
         stepper_state(snapshot.channel),
         step_pulse_timing(),
-        STEP_TIMING_PROVISIONAL,
     );
 
     ::ankyra::klipper_reply_from!(
@@ -167,10 +166,8 @@ pub fn foci_stepper_exec_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
         motion_scale_configured: u8 = u8::from(motion.configured),
         step_half_period_ticks: u32 = motion.step_half_period_ticks,
         dir_setup_ticks: u32 = motion.dir_setup_ticks,
-        handler_wcet_ticks: u32 = motion.handler_wcet_ticks,
-        timing_provisional: u8 = u8::from(motion.timing_provisional),
-        admission_margin_ticks: u32 = motion.admission_margin_ticks,
-        required_worst_case_interval_ticks: u32 = motion.required_worst_case_interval_ticks,
+        waveform_worst_case_ticks: u32 = motion.waveform_worst_case_ticks,
+        fatal_lateness_ticks: u32 = motion.fatal_lateness_ticks,
         queue_empty_count: u32 = snapshot.queue_empty_count,
         missed_deadline_count: u32 = snapshot.missed_deadline_count,
     );

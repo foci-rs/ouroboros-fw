@@ -36,6 +36,8 @@ mod usb_trace;
 
 #[rtic::app(device = crate::pac, peripherals = true, dispatchers = [UART4, UART5, USART3])]
 mod app {
+    use core::sync::atomic::Ordering::Relaxed;
+
     use crate::ankyra::constants::CLOCK_FREQ;
     use embassy_stm32::gpio::{Level, Output, Speed};
     use embassy_stm32::spi::Spi;
@@ -67,6 +69,7 @@ mod app {
         StepperArmCheckBoard, StepperStopCheckBoard, StepperTimerStateBoard,
     };
     use foci_firmware::state::lifecycle::*;
+    use foci_firmware::state::stepper::{NO_STEPPER_CHANNEL, STEPPER_DEADLINE_MISS_CHANNEL};
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
     use foci_firmware::state::trsync::*;
     use foci_firmware::tmc_control::request::TmcPreRequestDisposition;
@@ -201,11 +204,6 @@ mod app {
         crate::usb_trace::note_trace_boot();
         crate::board_init::init_stepdir_gpio();
         defmt::info!("TIM5 enabled for Klipper clock @ 260 MHz, STEP/DIR GPIO configured");
-        defmt::info!(
-            "STEP timing PROVISIONAL: total handler WCET={} ticks margin={} ticks",
-            crate::state::stepper::PROVISIONAL_TOTAL_HANDLER_WCET_TICKS,
-            crate::state::stepper::PROVISIONAL_HANDLER_MARGIN_TICKS,
-        );
 
         // TIM2 clock: 260 MHz (APB1 timer clock, same bus as TIM5). At the
         // 1 MHz target monotonic rate, the prescaler is 260 (integer divisor).
@@ -626,7 +624,26 @@ mod app {
             }
 
             if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                quiesce_and_report_tmc_fault!();
+                let deadline_channel =
+                    STEPPER_DEADLINE_MISS_CHANNEL.swap(NO_STEPPER_CHANNEL, Relaxed);
+                if deadline_channel != NO_STEPPER_CHANNEL {
+                    quiesce_all_channels(&mut runtimes, enable_pins);
+                    #[cfg(feature = "trace")]
+                    commission_trace_phase.fill(None);
+                    let clock = read_tim5();
+                    ctx.shared.app_state.lock(|state| {
+                        if crate::firmware_ctx::enter_shutdown(state) {
+                            foci_firmware::dispatch_shutdown!(
+                                foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast,
+                                clock,
+                                &mut crate::_ankyra_config::Sender
+                            );
+                        }
+                    });
+                    FAULT_ACTIVE.store(false, Relaxed);
+                } else {
+                    quiesce_and_report_tmc_fault!();
+                }
                 continue;
             }
 
@@ -1473,7 +1490,7 @@ mod app {
                     next_event_clocks[idx] = Some(compare);
                 }
             }
-            Err(_) => {
+            Err(foci_klipper::stepper::MissedDeadline) => {
                 crate::state::stepper_diag::record_loaded_segment(channel, loaded_steps);
                 crate::state::stepper_diag::record_missed_deadline(channel);
                 record_stepper_event(
@@ -1486,6 +1503,7 @@ mod app {
                 );
                 #[cfg(feature = "trace")]
                 crate::usb_trace::note_missed_or_deferred_step();
+                STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
                 fail_step_channel_deadline(channel, next_event_clocks);
             }
         }
@@ -1551,7 +1569,7 @@ mod app {
                         let immediate = compare != clock;
                         next_event_clocks[idx] = Some(if immediate { now } else { compare });
                     }
-                    Err(_) => {
+                    Err(foci_klipper::stepper::MissedDeadline) => {
                         crate::state::stepper_diag::record_missed_deadline(channel);
                         record_stepper_event(
                             StepperEventReason::MissedDeadlineStep,
@@ -1563,6 +1581,7 @@ mod app {
                         );
                         #[cfg(feature = "trace")]
                         crate::usb_trace::note_missed_or_deferred_step();
+                        STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
                         fail_step_channel_deadline(channel, next_event_clocks);
                     }
                 }
