@@ -1537,7 +1537,12 @@ mod app {
         stepper_state
             .interval
             .store(stepper.current_interval(), Relaxed);
-        crate::state::stepper_diag::record_executed_step(channel, event.direction, now);
+        crate::state::stepper_diag::record_executed_step(
+            channel,
+            event.direction,
+            event.physical_pulses,
+            now,
+        );
 
         match result {
             StepEventResult::ScheduleNext { clock, .. } => {
