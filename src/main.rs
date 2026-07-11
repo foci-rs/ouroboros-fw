@@ -23,6 +23,7 @@ mod interrupts;
 mod platform_impl;
 mod pulse_train;
 mod state;
+mod step_dispatch;
 mod stepper_pins;
 mod tmc_control;
 mod tmc_diagnostics;
@@ -57,6 +58,7 @@ mod app {
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
     use crate::state::tmc::*;
+    use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
     use crate::tmc_control::board::{
         TmcEnablePins, TmcRuntimes, channel_may_be_energized, channel_needs_safe_state,
         commissioning_request_blocked, enable_pin, new_tmc_runtimes, ouroboros_backend,
@@ -1319,6 +1321,30 @@ mod app {
         TMC_DISABLE_SIGNAL.signal(());
     }
 
+    fn abort_step_dispatch(
+        next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    ) {
+        use core::sync::atomic::Ordering::Relaxed;
+
+        embassy_stm32::pac::TIM5
+            .dier()
+            .modify(|w| w.set_ccie(0, false));
+        for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
+            let channel = idx as u8;
+            if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
+                tmc_state.motor_armed.store(false, Relaxed);
+            }
+            clear_step_channel(channel, next_event_clocks);
+            // SAFETY: ISR stepper state is only accessed from the P3 TIM5 ISR.
+            unsafe {
+                if let Some(stepper) = crate::state::stepper::isr_stepper(channel) {
+                    stepper.reset();
+                }
+            }
+            let _ = crate::stepper_pins::reset_idle(channel);
+        }
+    }
+
     fn channel_stepper_ready(channel: u8) -> bool {
         use core::sync::atomic::Ordering::Relaxed;
 
@@ -1397,34 +1423,34 @@ mod app {
     fn load_next_step_move(
         channel: u8,
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
-    ) {
+    ) -> StepDispatchOutcome {
         use core::sync::atomic::Ordering::Relaxed;
 
         let idx = channel as usize;
         if !channel_stepper_ready(channel) {
             next_event_clocks[idx] = None;
-            return;
+            return StepDispatchOutcome::Continue;
         }
         let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Continue;
         };
         let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Continue;
         };
 
         // SAFETY: ISR stepper state is only accessed from this P3 ISR for
         // this channel. P3 tasks cannot preempt each other on Cortex-M.
         let Some(stepper) = (unsafe { crate::state::stepper::isr_stepper(channel) }) else {
             clear_step_channel(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Continue;
         };
         if stepper.has_active_segment() {
             if next_event_clocks[idx].is_none() {
                 next_event_clocks[idx] = Some(stepper.next_step_clock());
             }
-            return;
+            return StepDispatchOutcome::Continue;
         }
 
         // SAFETY: P3 is the sole consumer of this channel's queue. P3 ISRs
@@ -1444,7 +1470,7 @@ mod app {
                 );
             }
             clear_step_channel(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Continue;
         };
         let loaded_steps = u32::from(move_.count);
 
@@ -1492,44 +1518,45 @@ mod app {
                 crate::usb_trace::note_missed_or_deferred_step();
                 STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
                 fail_step_channel_deadline(channel, next_event_clocks);
+                return StepDispatchOutcome::Fatal;
             }
         }
+        StepDispatchOutcome::Continue
     }
 
     fn process_due_step_event(
         channel: u8,
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
-    ) {
+    ) -> StepDispatchOutcome {
         use core::sync::atomic::Ordering::Relaxed;
         use foci_klipper::stepper::StepEventResult;
 
         let idx = channel as usize;
         if !channel_stepper_ready(channel) {
             next_event_clocks[idx] = None;
-            return;
+            return StepDispatchOutcome::Continue;
         }
         let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Continue;
         };
 
         // SAFETY: ISR stepper state is only accessed from this P3 ISR for
         // this channel. P3 tasks cannot preempt each other on Cortex-M.
         let Some(stepper) = (unsafe { crate::state::stepper::isr_stepper(channel) }) else {
             clear_step_channel(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Continue;
         };
         if !stepper.has_active_segment() {
             next_event_clocks[idx] = None;
-            load_next_step_move(channel, next_event_clocks);
-            return;
+            return load_next_step_move(channel, next_event_clocks);
         }
 
         let result = stepper.step_event();
         let event = result.event();
         if emit_logical_step_event(channel, event).is_err() {
             fail_step_channel_deadline(channel, next_event_clocks);
-            return;
+            return StepDispatchOutcome::Fatal;
         }
 
         // STEP is low before mapper state, pulse counts, or the logical
@@ -1570,27 +1597,32 @@ mod app {
                         crate::usb_trace::note_missed_or_deferred_step();
                         STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
                         fail_step_channel_deadline(channel, next_event_clocks);
+                        return StepDispatchOutcome::Fatal;
                     }
                 }
             }
             StepEventResult::NeedMove { .. } => {
                 next_event_clocks[idx] = None;
-                load_next_step_move(channel, next_event_clocks);
+                return load_next_step_move(channel, next_event_clocks);
             }
         }
+        StepDispatchOutcome::Continue
     }
 
     fn refresh_step_channels(
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
-    ) {
+    ) -> StepDispatchOutcome {
         for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
             let channel = idx as u8;
             if !channel_stepper_ready(channel) {
                 next_event_clocks[idx] = None;
-            } else if next_event_clocks[idx].is_none() {
-                load_next_step_move(channel, next_event_clocks);
+            } else if next_event_clocks[idx].is_none()
+                && load_next_step_move(channel, next_event_clocks) == StepDispatchOutcome::Fatal
+            {
+                return StepDispatchOutcome::Fatal;
             }
         }
+        StepDispatchOutcome::Continue
     }
 
     /// P2 software task: clear TriggerDomain timer_active after P1 stop.
@@ -1946,32 +1978,34 @@ mod app {
         }
 
         let mut budget = foci_firmware::stepper_runtime::StepIrqBudget::new();
-        loop {
-            refresh_step_channels(next_event_clocks);
+        let outcome = run_step_dispatch(|| {
+            if refresh_step_channels(next_event_clocks) == StepDispatchOutcome::Fatal {
+                return StepDispatchOutcome::Fatal;
+            }
             let Some(due) = foci_firmware::stepper_runtime::earliest_due(next_event_clocks) else {
-                perf_sample.finish_dispatch();
-                program_next_step_compare(next_event_clocks);
-                return;
+                return StepDispatchOutcome::Complete;
             };
             let now = tim5.cnt().read();
             if !step_clock_is_due(due.clock, now) {
-                perf_sample.finish_dispatch();
-                program_next_step_compare(next_event_clocks);
-                return;
+                return StepDispatchOutcome::Complete;
             }
             if !budget.take() {
                 #[cfg(feature = "trace")]
                 crate::usb_trace::note_missed_or_deferred_step();
                 crate::state::stepper_diag::record_tim5_defer();
-                perf_sample.finish_dispatch();
-                program_next_step_compare(next_event_clocks);
-                return;
+                return StepDispatchOutcome::Complete;
             }
             #[cfg(feature = "trace")]
             crate::usb_trace::record_step_timing(due.clock, now);
             event_count.set(event_count.get().saturating_add(1));
-            process_due_step_event(due.channel, next_event_clocks);
+            process_due_step_event(due.channel, next_event_clocks)
+        });
+        perf_sample.finish_dispatch();
+        if outcome == StepDispatchOutcome::Fatal {
+            abort_step_dispatch(next_event_clocks);
+            return;
         }
+        program_next_step_compare(next_event_clocks);
     }
 
     /// USB OTG HS interrupt handler. Masks interrupt sources and wakes usb_task.

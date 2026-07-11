@@ -14,6 +14,9 @@ mod stepper;
 #[path = "../../src/pulse_train.rs"]
 mod pulse_train;
 
+#[path = "../../src/step_dispatch.rs"]
+mod step_dispatch;
+
 #[cfg(test)]
 mod pulse_train_tests {
     use foci_klipper::stepper::LogicalStepEvent;
@@ -167,5 +170,33 @@ mod disable_signal_tests {
                 .count(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod step_dispatch_tests {
+    use std::vec::Vec;
+
+    use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
+
+    #[test]
+    fn fatal_channel_stops_dispatch_before_later_channel_callback() {
+        let channels = [0_u8, 1];
+        let mut next_channel = 0;
+        let mut callbacks = Vec::new();
+
+        let outcome = run_step_dispatch(|| {
+            let channel = channels[next_channel];
+            next_channel += 1;
+            callbacks.push(channel);
+            if channel == 0 {
+                StepDispatchOutcome::Fatal
+            } else {
+                StepDispatchOutcome::Complete
+            }
+        });
+
+        assert_eq!(outcome, StepDispatchOutcome::Fatal);
+        assert_eq!(callbacks, [0]);
     }
 }
