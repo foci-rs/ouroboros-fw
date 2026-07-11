@@ -1,7 +1,7 @@
 # Ouroboros Host Contract Tests
 
-This durable test crate compiles the board's production
-`src/state/stepper.rs` module directly. It does not copy production logic.
+This durable test crate compiles the board's production `src/state/stepper.rs`
+and `src/pulse_train.rs` modules directly. It does not copy production logic.
 
 The firmware binary cannot use the host test harness because its RTIC and
 Cortex-M dependencies contain ARM-only inline assembly, while the thumb target

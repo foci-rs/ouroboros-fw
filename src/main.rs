@@ -21,6 +21,7 @@ mod heartbeat;
 mod helpers;
 mod interrupts;
 mod platform_impl;
+mod pulse_train;
 mod state;
 mod stepper_pins;
 mod tmc_control;
@@ -1348,6 +1349,30 @@ mod app {
         }
     }
 
+    struct OuroborosPulseTrainIo {
+        channel: u8,
+    }
+
+    impl crate::pulse_train::PulseTrainIo for OuroborosPulseTrainIo {
+        type Error = ();
+
+        #[inline(always)]
+        fn set_step(&mut self, high: bool) -> Result<(), Self::Error> {
+            crate::stepper_pins::set_step(self.channel, high)
+        }
+
+        #[inline(always)]
+        fn set_dir(&mut self, forward: bool) -> Result<(), Self::Error> {
+            crate::stepper_pins::set_dir(self.channel, forward)
+        }
+
+        #[inline(always)]
+        fn wait_ticks(&mut self, ticks: u32) {
+            let start = read_tim5();
+            spin_tim5_ticks(start, ticks);
+        }
+    }
+
     /// Emit one bounded logical event as a complete, non-preemptible pulse train.
     ///
     /// This P3 hot path performs no SPI, logging, allocation, scheduler work,
@@ -1357,23 +1382,12 @@ mod app {
         channel: u8,
         event: foci_klipper::stepper::LogicalStepEvent,
     ) -> Result<(), ()> {
-        crate::stepper_pins::set_step(channel, false)?;
-        if event.dir_setup_required {
-            crate::stepper_pins::set_dir(channel, event.direction)?;
-            let setup_start = read_tim5();
-            spin_tim5_ticks(setup_start, crate::state::stepper::STEP_DIR_SETUP_TICKS);
-        }
-
-        crate::state::stepper::assert_physical_pulse_budget(event.physical_pulses);
-        for _ in 0..event.physical_pulses {
-            crate::stepper_pins::set_step(channel, true)?;
-            let high_start = read_tim5();
-            spin_tim5_ticks(high_start, crate::state::stepper::STEP_HALF_PERIOD_TICKS);
-            crate::stepper_pins::set_step(channel, false)?;
-            let low_start = read_tim5();
-            spin_tim5_ticks(low_start, crate::state::stepper::STEP_HALF_PERIOD_TICKS);
-        }
-        Ok(())
+        crate::pulse_train::emit_logical_step_event(
+            &mut OuroborosPulseTrainIo { channel },
+            event,
+            crate::state::stepper::STEP_DIR_SETUP_TICKS,
+            crate::state::stepper::STEP_HALF_PERIOD_TICKS,
+        )
     }
 
     fn load_next_step_move(

@@ -237,14 +237,6 @@ pub(crate) const fn motion_scale_install_admitted(
     !motor_armed && queue_empty && !timer_active
 }
 
-/// Enforce the mapper's production pulse-count contract in release builds.
-pub(crate) const fn assert_physical_pulse_budget(physical_pulses: u8) {
-    assert!(
-        physical_pulses <= 2,
-        "logical event exceeds two physical pulses"
-    );
-}
-
 /// Prepare and enqueue without consuming P2 direction when the queue is full.
 pub(crate) fn prepare_and_enqueue<const N: usize>(
     stepper: &mut HardwareStepper,
@@ -352,19 +344,6 @@ mod tests {
         assert!(!motion_scale_install_admitted(true, true, false));
         assert!(!motion_scale_install_admitted(false, false, false));
         assert!(!motion_scale_install_admitted(false, true, true));
-    }
-
-    #[test]
-    fn physical_pulse_budget_accepts_zero_through_two() {
-        assert_physical_pulse_budget(0);
-        assert_physical_pulse_budget(1);
-        assert_physical_pulse_budget(2);
-    }
-
-    #[test]
-    #[should_panic(expected = "logical event exceeds two physical pulses")]
-    fn physical_pulse_budget_rejects_three_in_release_code() {
-        assert_physical_pulse_budget(3);
     }
 
     #[test]
