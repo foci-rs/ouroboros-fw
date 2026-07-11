@@ -96,6 +96,11 @@ pub(crate) fn emit_shutdown(reason: ShutdownReason) {
             "TMC request validation failed",
             clock,
         ),
+        ShutdownReason::LiveGainApplyFailed => ::ankyra::klipper_shutdown_from!(
+            &mut crate::_ankyra_config::Sender,
+            "Live gain application failed",
+            clock,
+        ),
         ShutdownReason::AdcCurrentClipped => ::ankyra::klipper_shutdown_from!(
             &mut crate::_ankyra_config::Sender,
             "TMC4671: ADC current clipped (overcurrent)",
