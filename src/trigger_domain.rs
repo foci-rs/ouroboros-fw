@@ -278,7 +278,7 @@ pub(crate) fn stop_physical_stepper_no_lock(stepper_idx: usize, reason: StepperE
     tmc_state.pid_error_sums_clear.store(true, Relaxed);
     let remaining_events = unsafe {
         isr_stepper(channel)
-            .map(|stepper| stepper.active_event_count())
+            .map(|stepper| u32::from(stepper.active_step_count()))
             .unwrap_or(0)
     };
     let queue_len = unsafe {

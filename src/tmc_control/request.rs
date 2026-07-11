@@ -1,12 +1,15 @@
 //! Ouroboros TMC control request handling.
 
+use core::sync::atomic::Ordering;
+
 use foci_firmware::autotune::CommissionError;
 use foci_firmware::commission_dispatch::{ReplyPayload, StepperPostAction};
 use foci_firmware::state::stepper::StepperChannelState;
 use foci_firmware::state::tmc::TmcChannelState;
 use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::request::{
-    TmcPreRequestDisposition, TmcRequestBoard, handle_tmc_control_request as handle_shared_request,
+    MotionScaleMapperInstallError, TmcPreRequestDisposition, TmcRequestBoard,
+    handle_tmc_control_request as handle_shared_request,
 };
 use foci_firmware::tmc_control::{
     BoardActions, TmcControlRequestOutcome, TmcControlRequestTail, TmcControlRuntime,
@@ -18,11 +21,16 @@ use crate::board_config::TMC_CHANNEL_COUNT;
 #[cfg(feature = "dev")]
 use crate::helpers::dev::{do_test_spin, tmc_enter_openloop};
 use crate::helpers::stepper::apply_stepper_post_action;
+use crate::state::stepper::{
+    install_motion_scale_mapper, isr_stepper, motion_scale_install_admitted,
+    reset_mapper_observables, step_queue,
+};
 use crate::tmc_control::board::{
     TmcEnablePins, TmcRuntimes, enable_pin, next_commission_trace_seq, ouroboros_backend,
     stepper_state, tmc_state,
 };
 use crate::tmc_dispatch::handle_tmc_request;
+use crate::trigger_domain::with_trigger_domain;
 
 struct OuroborosRequestBoard<'a> {
     channel: u8,
@@ -74,6 +82,35 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
 
     fn default_current_filter_hz(&self) -> u16 {
         crate::board_config::TMC_CONFIG.default_current_filter_hz()
+    }
+
+    fn motion_scale_queue_empty(&self) -> bool {
+        // SAFETY: The TMC request runs at P1 and only observes queue state.
+        unsafe { step_queue(self.channel).is_some_and(|queue| queue.is_empty()) }
+    }
+
+    fn install_motion_scale_mapper(
+        &mut self,
+        mapper: foci_klipper::pulse_mapper::PulseMapperConfig,
+    ) -> Result<(), MotionScaleMapperInstallError> {
+        with_trigger_domain(|td| {
+            let motor_armed = tmc_state(self.channel).motor_armed.load(Ordering::Relaxed);
+            let queue_empty =
+                unsafe { step_queue(self.channel).is_some_and(|queue| queue.is_empty()) };
+            let timer_active = td.timer_active(self.channel as usize);
+            if !motion_scale_install_admitted(motor_armed, queue_empty, timer_active) {
+                return Err(MotionScaleMapperInstallError);
+            }
+
+            // SAFETY: The trigger-domain lock excludes P2/P3, and the checked
+            // disarmed/empty/inactive state keeps this channel quiesced afterward.
+            let stepper =
+                unsafe { isr_stepper(self.channel).ok_or(MotionScaleMapperInstallError)? };
+            install_motion_scale_mapper(stepper, mapper)
+                .map_err(|_| MotionScaleMapperInstallError)?;
+            reset_mapper_observables(self.channel);
+            Ok(())
+        })
     }
 
     fn emit_reply(&mut self, payload: ReplyPayload) {

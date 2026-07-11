@@ -25,6 +25,7 @@ use foci_firmware::context::{
 };
 use foci_firmware::diagnostic::StepperEventReason;
 use foci_firmware::state::trsync::ENDSTOP_PIN_IDS;
+use foci_firmware::step_pulse::StepPulseTiming;
 use foci_firmware::tmc::TmcRequest;
 use foci_klipper::commands::CommandError;
 use foci_klipper::scheduler::ScheduleResult;
@@ -35,7 +36,9 @@ use crate::helpers::stepper::arm_step_timer_if_earlier;
 use crate::helpers::stepper_diag::record_stepper_event;
 use crate::helpers::tmc::OuroborosTmcQueue;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
-use crate::state::stepper::{isr_stepper, p2_stepper, step_queue};
+use crate::state::stepper::{
+    isr_stepper, p2_stepper, prepare_and_enqueue, step_pulse_timing, step_queue,
+};
 use crate::trigger_domain::{
     OuroborosDispatchBoard, PHYSICAL_STEPPER_INDICES, disarm_trigger_scheduler, reprogram_cc2,
     set_timer_active, with_trigger_domain, with_trigger_domain_site,
@@ -104,32 +107,37 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         Ok(queue.is_empty())
     }
 
+    fn motion_scale_configured(&self, channel: u8) -> Result<bool, CommandError> {
+        self.queue_stepper_index(channel)?;
+        Ok(self
+            .tmc_state
+            .expect("validated Ouroboros channel has TMC state")
+            .motion_scale_configured())
+    }
+
+    fn move_changes_direction(&self, channel: u8) -> Result<bool, CommandError> {
+        // SAFETY: P2 stepper state is only accessed from P2 command handlers.
+        let stepper = unsafe { p2_stepper(channel).ok_or(CommandError::InvalidChannel(channel))? };
+        Ok(stepper.next_move_changes_direction())
+    }
+
+    fn step_pulse_timing(&self, channel: u8) -> Result<StepPulseTiming, CommandError> {
+        self.queue_stepper_index(channel)?;
+        Ok(step_pulse_timing())
+    }
+
     fn prepare_and_enqueue(
         &mut self,
         channel: u8,
         move_: foci_klipper::stepper::StepMove,
-    ) -> Result<usize, StepperEnqueueError> {
-        // SAFETY: P2 stepper state is only accessed from P2 command handlers.
-        let prepared = unsafe {
-            let Some(stepper) = p2_stepper(channel) else {
-                return Err(StepperEnqueueError { queue_len: 0 });
-            };
-            stepper.prepare_move(move_)
+    ) -> Result<usize, usize> {
+        // SAFETY: P2 owns the direction state and is the sole queue producer.
+        let Some((stepper, queue)) =
+            (unsafe { p2_stepper(channel) }).zip(unsafe { step_queue(channel) })
+        else {
+            return Err(0);
         };
-
-        // SAFETY: P2 is the sole producer.
-        let queue = unsafe {
-            let Some(queue) = step_queue(channel) else {
-                return Err(StepperEnqueueError { queue_len: 0 });
-            };
-            queue
-        };
-        if queue.enqueue(prepared).is_err() {
-            return Err(StepperEnqueueError {
-                queue_len: queue.len(),
-            });
-        }
-        Ok(queue.len())
+        prepare_and_enqueue(stepper, queue, move_)
     }
 
     fn motor_armed(&self, _channel: u8) -> bool {
@@ -401,9 +409,10 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
         &mut self,
         channel: u8,
         move_: foci_klipper::stepper::StepMove,
-    ) -> Result<(), CommandError> {
-        let tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
-            .ok_or(CommandError::InvalidChannel(channel))?;
+    ) -> Result<(), StepperEnqueueError> {
+        let tmc_state = foci_firmware::state::tmc::tmc_channel(channel).ok_or(
+            StepperEnqueueError::Command(CommandError::InvalidChannel(channel)),
+        )?;
 
         with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_QUEUE_STEP, |td| {
             let mut board = OuroborosStepperBoard {
@@ -549,5 +558,25 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
 impl<'a> TmcHost for FirmwareCtx<'a> {
     fn enqueue_request(&self, req: TmcRequest) -> Result<(), QueueFull> {
         tmc_context::enqueue_tmc_request(&OuroborosTmcQueue, req)
+    }
+
+    fn motion_scale_idle(&self, channel: u8) -> bool {
+        let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
+            return false;
+        };
+        let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
+            return false;
+        };
+        if tmc_state
+            .motor_armed
+            .load(core::sync::atomic::Ordering::Relaxed)
+            || stepper_state
+                .timer_active_mirror
+                .load(core::sync::atomic::Ordering::Relaxed)
+        {
+            return false;
+        }
+        // SAFETY: P2 is the sole producer and only observes queue emptiness.
+        unsafe { step_queue(channel).is_some_and(|queue| queue.is_empty()) }
     }
 }

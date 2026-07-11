@@ -9,40 +9,42 @@ static STEP_LEVELS: [AtomicBool; crate::board_config::TMC_CHANNEL_COUNT as usize
 
 /// Set the DIR output for a motor channel.
 pub(crate) fn set_dir(channel: u8, forward: bool) -> Result<(), ()> {
-    let level = if forward {
-        embassy_stm32::pac::gpio::vals::Odr::HIGH
-    } else {
-        embassy_stm32::pac::gpio::vals::Odr::LOW
-    };
     match channel {
         0 => {
-            embassy_stm32::pac::GPIOD
-                .odr()
-                .modify(|w| w.set_odr(3, level));
+            embassy_stm32::pac::GPIOD.bsrr().write(|w| {
+                if forward {
+                    w.set_bs(3, true)
+                } else {
+                    w.set_br(3, true)
+                }
+            });
             Ok(())
         }
         1 => {
-            embassy_stm32::pac::GPIOC
-                .odr()
-                .modify(|w| w.set_odr(11, level));
+            embassy_stm32::pac::GPIOC.bsrr().write(|w| {
+                if forward {
+                    w.set_bs(11, true)
+                } else {
+                    w.set_br(11, true)
+                }
+            });
             Ok(())
         }
         _ => Err(()),
     }
 }
 
-/// Toggle STEP for a motor channel and return true when the new level is high.
-pub(crate) fn toggle_step(channel: u8) -> Result<bool, ()> {
+/// Drive STEP to an explicit level for a motor channel.
+pub(crate) fn set_step(channel: u8, high: bool) -> Result<(), ()> {
     let idx = channel as usize;
     let Some(level) = STEP_LEVELS.get(idx) else {
         return Err(());
     };
-    let new_high = !level.load(Relaxed);
     match channel {
         0 => {
             let gpio = embassy_stm32::pac::GPIOD;
             gpio.bsrr().write(|w| {
-                if new_high {
+                if high {
                     w.set_bs(4, true);
                 } else {
                     w.set_br(4, true);
@@ -52,7 +54,7 @@ pub(crate) fn toggle_step(channel: u8) -> Result<bool, ()> {
         1 => {
             let gpio = embassy_stm32::pac::GPIOC;
             gpio.bsrr().write(|w| {
-                if new_high {
+                if high {
                     w.set_bs(12, true);
                 } else {
                     w.set_br(12, true);
@@ -61,8 +63,8 @@ pub(crate) fn toggle_step(channel: u8) -> Result<bool, ()> {
         }
         _ => return Err(()),
     }
-    level.store(new_high, Relaxed);
-    Ok(new_high)
+    level.store(high, Relaxed);
+    Ok(())
 }
 
 /// Return STEP/DIR outputs to safe idle state for a motor channel.

@@ -200,6 +200,11 @@ mod app {
         crate::usb_trace::note_trace_boot();
         crate::board_init::init_stepdir_gpio();
         defmt::info!("TIM5 enabled for Klipper clock @ 260 MHz, STEP/DIR GPIO configured");
+        defmt::info!(
+            "STEP timing PROVISIONAL: total handler WCET={} ticks margin={} ticks",
+            crate::state::stepper::PROVISIONAL_TOTAL_HANDLER_WCET_TICKS,
+            crate::state::stepper::PROVISIONAL_HANDLER_MARGIN_TICKS,
+        );
 
         // TIM2 clock: 260 MHz (APB1 timer clock, same bus as TIM5). At the
         // 1 MHz target monotonic rate, the prescaler is 260 (integer divisor).
@@ -1336,6 +1341,41 @@ mod app {
         }
     }
 
+    #[inline(always)]
+    fn spin_tim5_ticks(start: u32, ticks: u32) {
+        while read_tim5().wrapping_sub(start) < ticks {
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Emit one bounded logical event as a complete, non-preemptible pulse train.
+    ///
+    /// This P3 hot path performs no SPI, logging, allocation, scheduler work,
+    /// or yield. The mapper guarantees zero, one, or two physical pulses.
+    #[inline(always)]
+    fn emit_logical_step_event(
+        channel: u8,
+        event: foci_klipper::stepper::LogicalStepEvent,
+    ) -> Result<(), ()> {
+        crate::stepper_pins::set_step(channel, false)?;
+        if event.dir_setup_required {
+            crate::stepper_pins::set_dir(channel, event.direction)?;
+            let setup_start = read_tim5();
+            spin_tim5_ticks(setup_start, crate::state::stepper::STEP_DIR_SETUP_TICKS);
+        }
+
+        crate::state::stepper::assert_physical_pulse_budget(event.physical_pulses);
+        for _ in 0..event.physical_pulses {
+            crate::stepper_pins::set_step(channel, true)?;
+            let high_start = read_tim5();
+            spin_tim5_ticks(high_start, crate::state::stepper::STEP_HALF_PERIOD_TICKS);
+            crate::stepper_pins::set_step(channel, false)?;
+            let low_start = read_tim5();
+            spin_tim5_ticks(low_start, crate::state::stepper::STEP_HALF_PERIOD_TICKS);
+        }
+        Ok(())
+    }
+
     fn load_next_step_move(
         channel: u8,
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
@@ -1390,15 +1430,12 @@ mod app {
         };
         let loaded_steps = u32::from(move_.count);
 
-        let dir_changed = stepper.load_move(move_);
+        let old_direction = stepper.dir_state();
+        stepper.load_move(move_);
+        let dir_changed = old_direction != stepper.dir_state();
         stepper_state
             .interval
             .store(stepper.current_interval(), Relaxed);
-        if crate::stepper_pins::set_dir(channel, stepper.dir_state()).is_err() {
-            fail_step_channel_deadline(channel, next_event_clocks);
-            return;
-        }
-        stepper_state.direction.store(stepper.dir_state(), Relaxed);
         if dir_changed {
             tmc_state.feedforward_reset.store(true, Relaxed);
         }
@@ -1445,7 +1482,7 @@ mod app {
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
     ) {
         use core::sync::atomic::Ordering::Relaxed;
-        use foci_klipper::stepper::{StepEventResult, StepPhase};
+        use foci_klipper::stepper::StepEventResult;
 
         let idx = channel as usize;
         if !channel_stepper_ready(channel) {
@@ -1469,27 +1506,27 @@ mod app {
             return;
         }
 
-        if crate::stepper_pins::toggle_step(channel).is_err() {
+        let result = stepper.step_event();
+        let event = result.event();
+        if emit_logical_step_event(channel, event).is_err() {
             fail_step_channel_deadline(channel, next_event_clocks);
             return;
         }
 
-        match stepper.step_event() {
-            StepEventResult::ScheduleNext { clock, phase } => {
-                let now = embassy_stm32::pac::TIM5.cnt().read();
-                let is_step = matches!(phase, StepPhase::Step);
-                if is_step {
-                    let dir = if stepper.dir_state() { 1i32 } else { -1i32 };
-                    stepper_state.position.fetch_add(dir, Relaxed);
-                    crate::state::stepper_diag::record_executed_step(
-                        channel,
-                        stepper.dir_state(),
-                        now,
-                    );
-                }
-                stepper_state
-                    .interval
-                    .store(stepper.current_interval(), Relaxed);
+        // STEP is low before mapper state, pulse counts, or the logical
+        // execution become observable outside this P3 train.
+        let now = embassy_stm32::pac::TIM5.cnt().read();
+        crate::state::stepper::publish_logical_event(channel, stepper, event);
+        let logical_delta = if event.direction { 1 } else { -1 };
+        stepper_state.position.fetch_add(logical_delta, Relaxed);
+        stepper_state.direction.store(event.direction, Relaxed);
+        stepper_state
+            .interval
+            .store(stepper.current_interval(), Relaxed);
+        crate::state::stepper_diag::record_executed_step(channel, event.direction, now);
+
+        match result {
+            StepEventResult::ScheduleNext { clock, .. } => {
                 match stepper.check_deadline(clock, now, CLOCK_FREQ) {
                     Ok(compare) => {
                         let immediate = compare != clock;
@@ -1511,7 +1548,7 @@ mod app {
                     }
                 }
             }
-            StepEventResult::NeedMove => {
+            StepEventResult::NeedMove { .. } => {
                 next_event_clocks[idx] = None;
                 load_next_step_move(channel, next_event_clocks);
             }
