@@ -574,6 +574,38 @@ mod app {
                 }};
             }
 
+            macro_rules! handle_tmc_disable_signal {
+                () => {
+                    handle_tmc_disable_signal!({});
+                };
+                ($before_classification:block) => {{
+                    if TMC_DISABLE_SIGNAL.try_take().is_some() {
+                        $before_classification
+                        let deadline_channel =
+                            STEPPER_DEADLINE_MISS_CHANNEL.swap(NO_STEPPER_CHANNEL, Relaxed);
+                        if deadline_channel != NO_STEPPER_CHANNEL {
+                            quiesce_all_channels(&mut runtimes, enable_pins);
+                            #[cfg(feature = "trace")]
+                            commission_trace_phase.fill(None);
+                            let clock = read_tim5();
+                            ctx.shared.app_state.lock(|state| {
+                                if crate::firmware_ctx::enter_shutdown(state) {
+                                    foci_firmware::dispatch_shutdown!(
+                                        foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast,
+                                        clock,
+                                        &mut crate::_ankyra_config::Sender
+                                    );
+                                }
+                            });
+                            FAULT_ACTIVE.store(false, Relaxed);
+                        } else {
+                            quiesce_and_report_tmc_fault!();
+                        }
+                        continue 'control_loop;
+                    }
+                }};
+            }
+
             macro_rules! poll_channel1_critical_status {
                 () => {{
                     let channel = CHANNEL1_STATUS_FALLBACK;
@@ -623,29 +655,7 @@ mod app {
                 }};
             }
 
-            if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                let deadline_channel =
-                    STEPPER_DEADLINE_MISS_CHANNEL.swap(NO_STEPPER_CHANNEL, Relaxed);
-                if deadline_channel != NO_STEPPER_CHANNEL {
-                    quiesce_all_channels(&mut runtimes, enable_pins);
-                    #[cfg(feature = "trace")]
-                    commission_trace_phase.fill(None);
-                    let clock = read_tim5();
-                    ctx.shared.app_state.lock(|state| {
-                        if crate::firmware_ctx::enter_shutdown(state) {
-                            foci_firmware::dispatch_shutdown!(
-                                foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast,
-                                clock,
-                                &mut crate::_ankyra_config::Sender
-                            );
-                        }
-                    });
-                    FAULT_ACTIVE.store(false, Relaxed);
-                } else {
-                    quiesce_and_report_tmc_fault!();
-                }
-                continue;
-            }
+            handle_tmc_disable_signal!();
 
             // On shutdown, perform one-shot motor safe-state then idle until
             // shutdown clears. This catches USB disconnect / host crash where
@@ -757,10 +767,7 @@ mod app {
                     quiesce_and_report_tmc_fault!();
                     continue 'control_loop;
                 }
-                if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                    quiesce_and_report_tmc_fault!();
-                    continue 'control_loop;
-                }
+                handle_tmc_disable_signal!();
 
                 let Some(device) = ctx.local.tmc_mux.device(channel) else {
                     ctx.shared.app_state.lock(|state| {
@@ -797,11 +804,9 @@ mod app {
                     let _ = tmc;
                     continue;
                 };
-                if TMC_DISABLE_SIGNAL.try_take().is_some() {
+                handle_tmc_disable_signal!({
                     let _ = tmc;
-                    quiesce_and_report_tmc_fault!();
-                    continue 'control_loop;
-                }
+                });
 
                 let action = {
                     let runtime = &mut runtimes[channel as usize];
@@ -818,18 +823,12 @@ mod app {
                         .await
                 };
                 let _ = tmc;
-                if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                    quiesce_and_report_tmc_fault!();
-                    continue 'control_loop;
-                }
+                handle_tmc_disable_signal!();
                 if poll_channel1_critical_status!() {
                     quiesce_and_report_tmc_fault!();
                     continue 'control_loop;
                 }
-                if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                    quiesce_and_report_tmc_fault!();
-                    continue 'control_loop;
-                }
+                handle_tmc_disable_signal!();
 
                 use foci_firmware::tmc_control::CommissionTickAction;
                 let Some(action) = action else {
@@ -841,18 +840,12 @@ mod app {
                 };
                 match action {
                     CommissionTickAction::Continue => {
-                        if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                            quiesce_and_report_tmc_fault!();
-                            continue 'control_loop;
-                        }
+                        handle_tmc_disable_signal!();
                         if poll_channel1_critical_status!() {
                             quiesce_and_report_tmc_fault!();
                             continue 'control_loop;
                         }
-                        if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                            quiesce_and_report_tmc_fault!();
-                            continue 'control_loop;
-                        }
+                        handle_tmc_disable_signal!();
                         #[cfg(feature = "trace")]
                         if let Some((engine_kind, phase_id)) =
                             commission_trace_phase[channel as usize]
@@ -919,10 +912,7 @@ mod app {
                         #[cfg(not(feature = "trace"))]
                         let _ = engine_kind;
                         emit_phase_reply(oid, phase_id);
-                        if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                            quiesce_and_report_tmc_fault!();
-                            continue 'control_loop;
-                        }
+                        handle_tmc_disable_signal!();
                         Mono::delay(1.millis()).await;
                         continue 'control_loop;
                     }
@@ -1041,10 +1031,7 @@ mod app {
             // Check emergency disable (non-blocking). Triggered by EXTI
             // STATUS interrupt or enter_shutdown. Disables motor and reports
             // the fault to Klipper so the host knows the MCU is down.
-            if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                quiesce_and_report_tmc_fault!();
-                continue;
-            }
+            handle_tmc_disable_signal!();
 
             // Poll STATUS_FLAGS every ~1 second on the shared slow-control
             // cadence. Channel 1 still gets a per-control-tick critical poll
