@@ -220,14 +220,11 @@ pub(crate) fn step_pulse_timing() -> StepPulseTiming {
     timing
 }
 
-/// Clear any old mapper, then install a freshly centered replacement.
-///
-/// Failure is fail-closed: the prior mapper is cleared before configuration.
+/// Install a freshly centered replacement without mutating state on rejection.
 pub(crate) fn install_motion_scale_mapper(
     stepper: &mut HardwareStepper,
     config: PulseMapperConfig,
 ) -> Result<(), MotionScaleConfigError> {
-    stepper.clear_motion_scale();
     stepper.configure_motion_scale(config)
 }
 
@@ -326,18 +323,27 @@ mod tests {
     }
 
     #[test]
-    fn failed_mapper_replacement_leaves_no_prior_mapper_usable() {
+    fn failed_mapper_replacement_preserves_prior_mapper_phase_and_observables() {
         let mut stepper = foci_klipper::stepper::HardwareStepper::new();
         stepper
             .configure_motion_scale(PulseMapperConfig::new(3_200).unwrap())
             .unwrap();
-        stepper.load_move(StepMove::new(100, 1, 0));
+        stepper.load_move(StepMove::new(100, 2, 0));
+        let _ = stepper.step_event();
+        let prior_phase = stepper.mapper_phase().unwrap();
+        PHYSICAL_PULSE_COUNTS[0].store(9, Ordering::Relaxed);
+        MAPPER_PHASES[0].store(prior_phase as i32, Ordering::Relaxed);
 
         assert!(
             install_motion_scale_mapper(&mut stepper, PulseMapperConfig::new(4_000).unwrap())
                 .is_err()
         );
-        assert!(!stepper.motion_scale_configured());
+        assert!(stepper.motion_scale_configured());
+        assert_eq!(stepper.planner_steps_per_rev(), Some(3_200));
+        assert_eq!(stepper.mapper_phase(), Some(prior_phase));
+        assert_eq!(PHYSICAL_PULSE_COUNTS[0].load(Ordering::Relaxed), 9);
+        assert_eq!(MAPPER_PHASES[0].load(Ordering::Relaxed), prior_phase as i32);
+        reset_mapper_observables(0);
     }
 
     #[test]
