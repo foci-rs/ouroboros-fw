@@ -181,3 +181,114 @@ pub(crate) fn emit_shutdown(reason: ShutdownReason) {
 fn emit_reply(reply: ReplyPayload) {
     crate::ankyra::replies::emit_terminal_reply(reply);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
+    use foci_firmware::tmc_control::CommissionWaitRequestDisposition;
+
+    #[test]
+    fn both_channel_fault_paths_enter_gpio_first_wait_exit() {
+        let channel_cases = [(0, true, false), (1, false, true)];
+
+        for (channel, interrupt_disable, critical_status) in channel_cases {
+            let exit =
+                classify_commission_wait_exit(false, false, interrupt_disable, critical_status);
+
+            assert_eq!(
+                exit,
+                Some(CommissionWaitExit::EmergencyDisable),
+                "channel {channel} must use the GPIO-first exit",
+            );
+        }
+    }
+
+    #[test]
+    fn post_yield_signals_exit_before_dispatch_on_both_channels() {
+        let cases = [
+            (0, true, false, false, false, false),
+            (0, false, true, false, false, false),
+            (0, false, false, true, false, true),
+            (1, false, false, false, true, true),
+        ];
+
+        for (channel, shutdown, flush, disable, critical_status, gpio_first) in cases {
+            let exit = classify_commission_wait_exit(shutdown, flush, disable, critical_status);
+            let dispatch = exit.is_none();
+            let reply = dispatch;
+            let trace = dispatch;
+            let next_engine_poll = dispatch;
+
+            assert!(exit.is_some(), "channel {channel} must exit after yield");
+            assert_eq!(
+                matches!(exit, Some(CommissionWaitExit::EmergencyDisable)),
+                gpio_first,
+            );
+            assert!(!dispatch);
+            assert!(!reply);
+            assert!(!trace);
+            assert!(!next_engine_poll);
+        }
+    }
+
+    #[test]
+    fn commission_wait_requests_use_shared_disposition() {
+        let cancel = TmcRequest::new(1, TmcRequestKind::SetEnable(false));
+        let reject = TmcRequest::new(0, TmcRequestKind::Commission { oid: 2, profile: 1 });
+        let drop = TmcRequest::new(1, TmcRequestKind::SetCurrent { run_ma: 800 });
+
+        assert_eq!(
+            commission_wait_request_disposition(&cancel),
+            CommissionWaitRequestDisposition::Cancel,
+        );
+        assert_eq!(
+            commission_wait_request_disposition(&reject),
+            CommissionWaitRequestDisposition::RejectBusy,
+        );
+        assert_eq!(
+            commission_wait_request_disposition(&drop),
+            CommissionWaitRequestDisposition::DropBusy,
+        );
+    }
+
+    #[test]
+    fn forced_ready_yield_survives_processing_past_classification_time() {
+        use foci_firmware::tmc_control::{CommissionPollDriver, PollDriverAction};
+
+        let mut driver = CommissionPollDriver::new();
+        for _ in 0..8 {
+            assert_eq!(
+                driver.classify_ready(10_000).unwrap(),
+                PollDriverAction::PollNow,
+            );
+        }
+        let action = driver.classify_ready(10_000).unwrap();
+        let processing_finished_us = 20_000;
+
+        assert!(processing_finished_us > 10_001);
+        assert_eq!(action, PollDriverAction::YieldNow);
+    }
+
+    #[test]
+    fn ready_chain_state_is_independent_per_channel() {
+        use foci_firmware::tmc_control::{CommissionPollDriver, PollDriverAction};
+
+        let mut drivers = [CommissionPollDriver::new(), CommissionPollDriver::new()];
+        for _ in 0..8 {
+            assert_eq!(
+                drivers[0].classify_ready(10_000).unwrap(),
+                PollDriverAction::PollNow,
+            );
+        }
+
+        assert_eq!(
+            drivers[0].classify_ready(10_000).unwrap(),
+            PollDriverAction::YieldNow,
+        );
+        assert_eq!(
+            drivers[1].classify_ready(10_000).unwrap(),
+            PollDriverAction::PollNow,
+        );
+    }
+}
