@@ -596,6 +596,10 @@ pub(crate) async fn sample_tick<B>(
     let mut flags = 0u8;
     let step_position = refs.stepper.position.load(Relaxed);
     let position_actual = read_register_trace(tmc, PID_POSITION_ACTUAL, &mut flags).await as i32;
+    let pid_velocity_actual =
+        read_register_trace(tmc, PID_VELOCITY_ACTUAL, &mut flags).await as i32;
+    let velocity_error =
+        read_sub_register_trace(tmc, PID_ERROR_PID_VELOCITY_ERROR, &mut flags).await as i32;
     let interim_pid_torque_target_actual =
         read_sub_register_trace(tmc, INTERIM_PID_TORQUE_TARGET_TORQUE_ACTUAL, &mut flags).await;
     let foc_uq_ud = read_sub_register_trace(tmc, INTERIM_FOC_UQ_UD, &mut flags).await;
@@ -622,9 +626,9 @@ pub(crate) async fn sample_tick<B>(
         tmc_position_actual: position_actual,
         position_error: step_position.wrapping_sub(position_actual),
         target_velocity: inputs.command_velocity_reference,
-        pid_velocity_actual: 0,
+        pid_velocity_actual,
         cached_pid_velocity_offset: inputs.cached_velocity_offset,
-        velocity_error: 0,
+        velocity_error,
         enable_and_direction: (if context.motor_enabled { 0x80 } else { 0 })
             | (u8::from(refs.stepper.direction.load(Relaxed)) & 0x01),
         sample_flags: flags,
@@ -714,8 +718,18 @@ pub(crate) async fn sample_tick<B>(
                 &mut detail_flags,
             )
             .await,
-            interim_pidin_target_velocity: 0,
-            interim_pidout_target_velocity: 0,
+            interim_pidin_target_velocity: read_sub_register_trace(
+                tmc,
+                INTERIM_PIDIN_TARGET_VELOCITY,
+                &mut detail_flags,
+            )
+            .await,
+            interim_pidout_target_velocity: read_sub_register_trace(
+                tmc,
+                INTERIM_PIDOUT_TARGET_VELOCITY,
+                &mut detail_flags,
+            )
+            .await,
             pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
             pid_torque_flux_limits: refs.tmc.current_limit_reg.load(Relaxed),
             pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
