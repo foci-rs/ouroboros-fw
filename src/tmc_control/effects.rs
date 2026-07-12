@@ -23,6 +23,17 @@ pub(crate) enum CommissionWaitExit {
     EmergencyDisable,
 }
 
+/// Ownership route for a disable request received during a commissioning wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CommissionWaitCancelRoute {
+    /// Reject an out-of-range request before mutating either channel.
+    Invalid,
+    /// Cancel the channel whose absolute wait is currently being serviced.
+    Current,
+    /// Disable the requested channel and preserve the current absolute wait.
+    Other,
+}
+
 struct OuroborosBusyReplySink;
 
 impl CommissionBusyReplySink for OuroborosBusyReplySink {
@@ -54,6 +65,21 @@ pub(crate) const fn classify_commission_wait_exit(
         Some(CommissionWaitExit::QueueFlush)
     } else {
         None
+    }
+}
+
+/// Validate and classify ownership for a queued disable request.
+pub(crate) const fn classify_commission_wait_cancel(
+    waited_channel: u8,
+    request_channel: u8,
+    channel_count: u8,
+) -> CommissionWaitCancelRoute {
+    if request_channel >= channel_count {
+        CommissionWaitCancelRoute::Invalid
+    } else if request_channel == waited_channel {
+        CommissionWaitCancelRoute::Current
+    } else {
+        CommissionWaitCancelRoute::Other
     }
 }
 
@@ -187,6 +213,157 @@ mod tests {
     use super::*;
     use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
     use foci_firmware::tmc_control::CommissionWaitRequestDisposition;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct CancelOwnershipModel {
+        engine_active: [bool; 2],
+        commission_in_flight: [bool; 2],
+        driver_ready_count: [u8; 2],
+        measurement_active: [bool; 2],
+        max_tick_cycles: [u32; 2],
+        deadline_us: [Option<u64>; 2],
+        gpio_low: [bool; 2],
+        disarmed: [bool; 2],
+    }
+
+    impl CancelOwnershipModel {
+        const fn both_active() -> Self {
+            Self {
+                engine_active: [true, true],
+                commission_in_flight: [true, true],
+                driver_ready_count: [3, 7],
+                measurement_active: [true, true],
+                max_tick_cycles: [101, 202],
+                deadline_us: [Some(11_000), Some(22_000)],
+                gpio_low: [false, false],
+                disarmed: [false, false],
+            }
+        }
+
+        fn service_cancel(&mut self, waited_channel: u8, request_channel: u8) -> bool {
+            match classify_commission_wait_cancel(waited_channel, request_channel, 2) {
+                CommissionWaitCancelRoute::Invalid => false,
+                CommissionWaitCancelRoute::Current | CommissionWaitCancelRoute::Other => {
+                    let target = request_channel as usize;
+                    self.engine_active[target] = false;
+                    self.commission_in_flight[target] = false;
+                    self.driver_ready_count[target] = 0;
+                    self.measurement_active[target] = false;
+                    self.max_tick_cycles[target] = 0;
+                    self.deadline_us[target] = None;
+                    self.gpio_low[target] = true;
+                    self.disarmed[target] = true;
+                    matches!(
+                        classify_commission_wait_cancel(waited_channel, request_channel, 2),
+                        CommissionWaitCancelRoute::Current
+                    )
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wait_channel0_disable_channel1_preserves_channel0_ownership() {
+        let mut model = CancelOwnershipModel::both_active();
+        let channel0_before = (
+            model.driver_ready_count[0],
+            model.measurement_active[0],
+            model.max_tick_cycles[0],
+            model.deadline_us[0],
+        );
+
+        let discard_wait = model.service_cancel(0, 1);
+
+        assert!(!discard_wait);
+        assert!(model.engine_active[0]);
+        assert!(model.commission_in_flight[0]);
+        assert_eq!(
+            (
+                model.driver_ready_count[0],
+                model.measurement_active[0],
+                model.max_tick_cycles[0],
+                model.deadline_us[0],
+            ),
+            channel0_before,
+        );
+        assert!(!model.engine_active[1]);
+        assert!(!model.commission_in_flight[1]);
+        assert!(model.gpio_low[1]);
+        assert!(model.disarmed[1]);
+        assert!(!model.gpio_low[0]);
+        assert!(!model.disarmed[0]);
+    }
+
+    #[test]
+    fn wait_channel1_disable_channel0_preserves_channel1_ownership() {
+        let mut model = CancelOwnershipModel::both_active();
+        let channel1_before = (
+            model.driver_ready_count[1],
+            model.measurement_active[1],
+            model.max_tick_cycles[1],
+            model.deadline_us[1],
+        );
+
+        let discard_wait = model.service_cancel(1, 0);
+
+        assert!(!discard_wait);
+        assert!(model.engine_active[1]);
+        assert!(model.commission_in_flight[1]);
+        assert_eq!(
+            (
+                model.driver_ready_count[1],
+                model.measurement_active[1],
+                model.max_tick_cycles[1],
+                model.deadline_us[1],
+            ),
+            channel1_before,
+        );
+        assert!(!model.engine_active[0]);
+        assert!(!model.commission_in_flight[0]);
+        assert!(model.gpio_low[0]);
+        assert!(model.disarmed[0]);
+        assert!(!model.gpio_low[1]);
+        assert!(!model.disarmed[1]);
+    }
+
+    #[test]
+    fn both_active_cancellation_removes_only_request_channel_engine() {
+        let mut model = CancelOwnershipModel::both_active();
+
+        model.service_cancel(0, 1);
+
+        assert_eq!(model.engine_active, [true, false]);
+        assert_eq!(model.commission_in_flight, [true, false]);
+        assert_eq!(model.driver_ready_count, [3, 0]);
+        assert_eq!(model.measurement_active, [true, false]);
+        assert_eq!(model.max_tick_cycles, [101, 0]);
+        assert_eq!(model.deadline_us, [Some(11_000), None]);
+    }
+
+    #[test]
+    fn same_channel_cancellation_discards_current_wait_action() {
+        let mut model = CancelOwnershipModel::both_active();
+
+        let discard_wait = model.service_cancel(1, 1);
+
+        assert!(discard_wait);
+        assert!(model.engine_active[0]);
+        assert!(!model.engine_active[1]);
+        assert_eq!(model.deadline_us, [Some(11_000), None]);
+        assert_eq!(model.gpio_low, [false, true]);
+        assert_eq!(model.disarmed, [false, true]);
+    }
+
+    #[test]
+    fn invalid_cancel_channel_mutates_no_channel_state() {
+        let mut model = CancelOwnershipModel::both_active();
+        let before = model;
+
+        let discard_wait = model.service_cancel(0, 2);
+
+        assert!(!discard_wait);
+        assert_eq!(model, before);
+    }
 
     #[test]
     fn both_channel_fault_paths_enter_gpio_first_wait_exit() {

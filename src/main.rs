@@ -991,13 +991,44 @@ mod app {
                                         use foci_firmware::tmc_control::CommissionWaitRequestDisposition;
                                         match crate::tmc_control::effects::commission_wait_request_disposition(&req) {
                                             CommissionWaitRequestDisposition::Cancel => {
-                                                lower_all_enable_pins(enable_pins);
-                                                runtimes[channel_idx].take_commission_engine();
-                                                tmc_state(channel).commission_in_flight.store(
+                                                let request_channel = req.channel;
+                                                let cancel_route = crate::tmc_control::effects::classify_commission_wait_cancel(
+                                                    channel,
+                                                    request_channel,
+                                                    crate::board_config::TMC_CHANNEL_COUNT,
+                                                );
+                                                if matches!(
+                                                    cancel_route,
+                                                    crate::tmc_control::effects::CommissionWaitCancelRoute::Invalid
+                                                ) {
+                                                    emit_invalid_channel_diagnostic(request_channel);
+                                                    ctx.shared.app_state.lock(|state| {
+                                                        if crate::firmware_ctx::enter_shutdown(state) {
+                                                            ::ankyra::klipper_shutdown_from!(
+                                                                &mut crate::_ankyra_config::Sender,
+                                                                "Invalid TMC channel",
+                                                                read_tim5(),
+                                                            );
+                                                        }
+                                                    });
+                                                    continue 'control_loop;
+                                                }
+
+                                                let request_idx = request_channel as usize;
+                                                enable_pin(enable_pins, request_channel).set_low();
+                                                runtimes[request_idx].take_commission_engine();
+                                                tmc_state(request_channel).commission_in_flight.store(
                                                     false,
                                                     core::sync::atomic::Ordering::Relaxed,
                                                 );
-                                                let request_channel = req.channel;
+                                                commission_poll_drivers[request_idx] =
+                                                    foci_firmware::tmc_control::CommissionPollDriver::new();
+                                                commission_tick_max_cycles[request_idx] = 0;
+                                                commission_measurement_active[request_idx] = false;
+                                                #[cfg(feature = "trace")]
+                                                {
+                                                    commission_trace_phase[request_idx] = None;
+                                                }
                                                 let Some(device) = ctx.local.tmc_mux.device(request_channel) else {
                                                     ctx.shared.app_state.lock(|state| {
                                                         if crate::firmware_ctx::enter_shutdown(state) {
@@ -1034,11 +1065,15 @@ mod app {
                                                 if outcome.should_refresh_velocity_scale {
                                                     refresh_velocity_scale(
                                                         request_channel,
-                                                        &mut runtimes[request_channel as usize],
+                                                        &mut runtimes[request_idx],
                                                     );
                                                 }
-                                                commission_measurement_active[channel_idx] = false;
-                                                continue 'control_loop;
+                                                if matches!(
+                                                    cancel_route,
+                                                    crate::tmc_control::effects::CommissionWaitCancelRoute::Current
+                                                ) {
+                                                    continue 'control_loop;
+                                                }
                                             }
                                             CommissionWaitRequestDisposition::RejectBusy => {
                                                 let outcome = crate::tmc_control::effects::handle_commission_wait_reject(req);
