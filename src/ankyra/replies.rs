@@ -34,6 +34,27 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
+    fn foci_commission_timing(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CommissionTimingReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCommissionTiming,
+            oid: u8 = report.oid,
+            method: u8 = report.method,
+            status: u8 = report.status,
+            requested_period_us: u16 = report.requested_period_us,
+            valid_samples: u16 = report.valid_samples,
+            missed_samples: u16 = report.missed_samples,
+            max_consecutive_misses: u8 = report.max_consecutive_misses,
+            max_lateness_us: u32 = report.max_lateness_us,
+            max_interval_us: u32 = report.max_interval_us,
+            max_poll_wall_us: u32 = report.max_poll_wall_us,
+            max_spi_wall_us: u32 = report.max_spi_wall_us,
+        );
+    }
+
     fn foci_commission_result(
         &mut self,
         oid: u8,
@@ -65,6 +86,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             fallback_velocity_limit: u32 = result.fallback_velocity_limit,
             tau_e_us: u32 = inner.tau_e_us,
             inner_warning_flags: u8 = inner.inner_warning_flags,
+            timing_summary: u32 = inner.timing_summary,
         );
     }
 
