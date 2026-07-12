@@ -2,11 +2,75 @@
 
 use foci_firmware::commission_dispatch::ReplyPayload;
 use foci_firmware::state::tmc::TMC_DISABLE_SIGNAL;
-use foci_firmware::tmc_control::request::TmcPreRequestDisposition;
-use foci_firmware::tmc_control::{BoardAction, BoardActions, ShutdownReason, StepperAction};
+use foci_firmware::tmc::TmcRequest;
+use foci_firmware::tmc_control::request::{CommissionBusyReplySink, TmcPreRequestDisposition};
+use foci_firmware::tmc_control::{
+    BoardAction, BoardActions, CommissionWaitRequestDisposition, ShutdownReason, StepperAction,
+    TmcControlRequestOutcome, TmcControlRequestTail, classify_wait_request,
+};
 
 use crate::helpers::lifecycle::read_tim5;
 use crate::helpers::stepper::stepper_stop_from_p1;
+
+/// Board signal that interrupts an absolute commissioning wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CommissionWaitExit {
+    /// Enter the existing shutdown safe-state path.
+    Shutdown,
+    /// Return to the queue-flush path.
+    QueueFlush,
+    /// Enter GPIO-first emergency-disable handling.
+    EmergencyDisable,
+}
+
+struct OuroborosBusyReplySink;
+
+impl CommissionBusyReplySink for OuroborosBusyReplySink {
+    fn normal_tail(&self) -> TmcControlRequestTail {
+        TmcControlRequestTail::SkipTickTail
+    }
+
+    fn emit_reply(&mut self, payload: ReplyPayload) {
+        crate::ankyra::replies::emit_terminal_reply(payload);
+    }
+
+    fn emit_busy_diagnostic(&mut self, request: TmcRequest) {
+        crate::tmc_diagnostics::emit_commission_busy_diagnostic(request);
+    }
+}
+
+/// Classify board-owned signals checked between commissioning wait slices.
+pub(crate) const fn classify_commission_wait_exit(
+    shutdown: bool,
+    queue_flush: bool,
+    emergency_disable: bool,
+    critical_status: bool,
+) -> Option<CommissionWaitExit> {
+    if emergency_disable || critical_status {
+        Some(CommissionWaitExit::EmergencyDisable)
+    } else if shutdown {
+        Some(CommissionWaitExit::Shutdown)
+    } else if queue_flush {
+        Some(CommissionWaitExit::QueueFlush)
+    } else {
+        None
+    }
+}
+
+/// Delegate queued commissioning request policy to the shared classifier.
+pub(crate) fn commission_wait_request_disposition(
+    request: &TmcRequest,
+) -> CommissionWaitRequestDisposition {
+    classify_wait_request(&request.kind)
+}
+
+/// Emit a shared busy-only response without granting hardware capabilities.
+pub(crate) fn handle_commission_wait_reject(req: TmcRequest) -> TmcControlRequestOutcome {
+    foci_firmware::tmc_control::request::handle_commission_wait_reject(
+        req,
+        &mut OuroborosBusyReplySink,
+    )
+}
 
 /// Apply runtime actions emitted before SPI-heavy request handling.
 ///

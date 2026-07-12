@@ -38,6 +38,24 @@ impl DiagnosticDelay for MonoDiagnosticDelay {
 
 struct BoardDiagnosticReplySink;
 
+/// Emit a deterministic not-ready reply without touching diagnostic hardware.
+pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
+    match foci_firmware::tmc_diagnostics::busy_diagnostic_report(
+        request,
+        &crate::board_config::TMC_CONFIG,
+    ) {
+        DiagnosticOutcome::Handled(report) => {
+            foci_firmware::tmc_diagnostics::emit_diagnostic_report(
+                &mut BoardDiagnosticReplySink,
+                report,
+            );
+        }
+        DiagnosticOutcome::NotDiagnostic(_) => {
+            defmt::error!("commission busy hook received non-diagnostic request");
+        }
+    }
+}
+
 impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticReplySink {
     fn foci_current_step_result(&mut self, report: CurrentStepReport) {
         ::ankyra::klipper_reply_from!(
