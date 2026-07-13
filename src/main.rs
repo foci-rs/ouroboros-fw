@@ -1141,19 +1141,6 @@ mod app {
                                                 );
                                                 Mono::delay_until(wake).await;
                                             }
-                                            Ok(
-                                                foci_firmware::tmc_control::AbsoluteWaitAction::SpinUntil(
-                                                    release_us,
-                                                ),
-                                            ) => {
-                                                while Mono::now()
-                                                    .duration_since_epoch()
-                                                    .to_micros()
-                                                    < release_us
-                                                {
-                                                    core::hint::spin_loop();
-                                                }
-                                            }
                                             Err(_) => {
                                                 lower_all_enable_pins(enable_pins);
                                                 TMC_DISABLE_SIGNAL.signal(());
