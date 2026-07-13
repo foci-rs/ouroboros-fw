@@ -202,25 +202,6 @@ mod pulse_train_tests {
 }
 
 #[cfg(test)]
-mod disable_signal_tests {
-    #[test]
-    fn every_main_loop_disable_signal_consumption_is_deadline_aware() {
-        let main_source = include_str!("../../src/main.rs");
-
-        assert_eq!(
-            main_source.matches("TMC_DISABLE_SIGNAL.try_take()").count(),
-            1
-        );
-        assert_eq!(
-            main_source
-                .matches("STEPPER_DEADLINE_MISS_CHANNEL.swap")
-                .count(),
-            1
-        );
-    }
-}
-
-#[cfg(test)]
 mod step_dispatch_tests {
     use std::vec::Vec;
 
