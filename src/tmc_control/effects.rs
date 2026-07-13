@@ -11,17 +11,10 @@ use foci_firmware::tmc_control::{
 
 use crate::helpers::lifecycle::read_tim5;
 use crate::helpers::stepper::stepper_stop_from_p1;
-
-/// Board signal that interrupts an absolute commissioning wait.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CommissionWaitExit {
-    /// Enter the existing shutdown safe-state path.
-    Shutdown,
-    /// Return to the queue-flush path.
-    QueueFlush,
-    /// Enter GPIO-first emergency-disable handling.
-    EmergencyDisable,
-}
+pub(crate) use crate::tmc_control::containment::{
+    CommissionWaitExit, CommissionWaitPrecheck, classify_commission_wait_exit,
+    classify_commission_wait_precheck,
+};
 
 /// Ownership route for a disable request received during a commissioning wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,24 +40,6 @@ impl CommissionBusyReplySink for OuroborosBusyReplySink {
 
     fn emit_busy_diagnostic(&mut self, request: TmcRequest) {
         crate::tmc_diagnostics::emit_commission_busy_diagnostic(request);
-    }
-}
-
-/// Classify board-owned signals checked between commissioning wait slices.
-pub(crate) const fn classify_commission_wait_exit(
-    shutdown: bool,
-    queue_flush: bool,
-    emergency_disable: bool,
-    critical_status: bool,
-) -> Option<CommissionWaitExit> {
-    if emergency_disable || critical_status {
-        Some(CommissionWaitExit::EmergencyDisable)
-    } else if shutdown {
-        Some(CommissionWaitExit::Shutdown)
-    } else if queue_flush {
-        Some(CommissionWaitExit::QueueFlush)
-    } else {
-        None
     }
 }
 

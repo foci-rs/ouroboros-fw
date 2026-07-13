@@ -665,18 +665,46 @@ mod app {
                 }};
             }
 
-            macro_rules! handle_commission_wait_exit {
+            macro_rules! commission_wait_containment_snapshot {
                 () => {{
-                    let emergency_disable = TMC_DISABLE_SIGNAL.try_take().is_some();
-                    let critical_status = if emergency_disable {
-                        false
-                    } else {
-                        poll_channel1_critical_status!()
-                    };
-                    let fault_active = FAULT_ACTIVE.load(core::sync::atomic::Ordering::Relaxed);
-                    let exit = crate::tmc_control::effects::classify_commission_wait_exit(
+                    (
                         SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed),
                         TMC_QUEUE_FLUSH.load(core::sync::atomic::Ordering::Relaxed),
+                        TMC_DISABLE_SIGNAL.try_take().is_some(),
+                        FAULT_ACTIVE.load(core::sync::atomic::Ordering::Relaxed),
+                    )
+                }};
+            }
+
+            macro_rules! handle_commission_wait_exit {
+                () => {{
+                    let (shutdown, queue_flush, emergency_disable, fault_active) =
+                        commission_wait_containment_snapshot!();
+                    let precheck = crate::tmc_control::effects::classify_commission_wait_precheck(
+                        shutdown,
+                        queue_flush,
+                        emergency_disable,
+                        fault_active,
+                    );
+                    if let crate::tmc_control::effects::CommissionWaitPrecheck::Exit(exit) =
+                        precheck
+                    {
+                        if matches!(
+                            exit,
+                            crate::tmc_control::effects::CommissionWaitExit::EmergencyDisable
+                        ) {
+                            lower_all_enable_pins(enable_pins);
+                            TMC_DISABLE_SIGNAL.signal(());
+                        }
+                        continue 'control_loop;
+                    }
+
+                    let critical_status = poll_channel1_critical_status!();
+                    let (shutdown, queue_flush, emergency_disable, fault_active) =
+                        commission_wait_containment_snapshot!();
+                    let exit = crate::tmc_control::effects::classify_commission_wait_exit(
+                        shutdown,
+                        queue_flush,
                         emergency_disable,
                         critical_status || fault_active,
                     );
