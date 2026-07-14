@@ -1,6 +1,10 @@
 //! Async SPI2 multiplexer for Ouroboros TMC4671 devices.
 
 use embassy_stm32::gpio::Output;
+use embedded_hal::delay::DelayNs as BlockingDelayNs;
+use embedded_hal::spi::{
+    Operation as BlockingOperation, SpiBus as BlockingSpiBus, SpiDevice as BlockingSpiDevice,
+};
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::spi::{ErrorType, Operation, SpiBus, SpiDevice};
 use embedded_hal_bus::spi::DeviceError;
@@ -64,7 +68,7 @@ impl SpiDevice<u8> for SelectedTmcDevice<'_> {
                         match <TmcSpiBus as SpiBus<u8>>::flush(self.bus).await {
                             Err(e) => Err(e),
                             Ok(()) => {
-                                self.delay.delay_ns(*ns).await;
+                                DelayNs::delay_ns(&mut self.delay, *ns).await;
                                 Ok(())
                             }
                         }
@@ -78,6 +82,50 @@ impl SpiDevice<u8> for SelectedTmcDevice<'_> {
         };
 
         let flush_result = <TmcSpiBus as SpiBus<u8>>::flush(self.bus).await;
+        self.cs.set_high();
+
+        op_result.map_err(DeviceError::Spi)?;
+        flush_result.map_err(DeviceError::Spi)?;
+        Ok(())
+    }
+}
+
+impl BlockingSpiDevice<u8> for SelectedTmcDevice<'_> {
+    fn transaction(
+        &mut self,
+        operations: &mut [BlockingOperation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        self.cs.set_low();
+
+        let op_result = 'ops: {
+            for op in operations {
+                let result = match op {
+                    BlockingOperation::Read(buf) => BlockingSpiBus::read(self.bus, buf),
+                    BlockingOperation::Write(buf) => BlockingSpiBus::write(self.bus, buf),
+                    BlockingOperation::Transfer(read, write) => {
+                        BlockingSpiBus::transfer(self.bus, read, write)
+                    }
+                    BlockingOperation::TransferInPlace(buf) => {
+                        BlockingSpiBus::transfer_in_place(self.bus, buf)
+                    }
+                    BlockingOperation::DelayNs(ns) => {
+                        match <TmcSpiBus as BlockingSpiBus<u8>>::flush(self.bus) {
+                            Err(error) => Err(error),
+                            Ok(()) => {
+                                BlockingDelayNs::delay_ns(&mut self.delay, *ns);
+                                Ok(())
+                            }
+                        }
+                    }
+                };
+                if let Err(error) = result {
+                    break 'ops Err(error);
+                }
+            }
+            Ok(())
+        };
+
+        let flush_result = <TmcSpiBus as BlockingSpiBus<u8>>::flush(self.bus);
         self.cs.set_high();
 
         op_result.map_err(DeviceError::Spi)?;

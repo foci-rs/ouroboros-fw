@@ -25,5 +25,12 @@ impl embedded_hal_async::delay::DelayNs for CycleDelay {
     }
 }
 
+impl embedded_hal::delay::DelayNs for CycleDelay {
+    fn delay_ns(&mut self, ns: u32) {
+        let cycles = (ns as u64 * 520 / 1000) as u32;
+        cortex_m::asm::delay(cycles);
+    }
+}
+
 /// Selected TMC4671 SPI device borrowed from the Ouroboros mux.
 pub type TmcSpiDevice<'a> = crate::tmc_mux::SelectedTmcDevice<'a>;
