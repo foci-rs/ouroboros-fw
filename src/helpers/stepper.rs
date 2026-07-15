@@ -3,10 +3,40 @@
 //! step-timer ISR share a single implementation.
 
 use crate::trigger_domain::stop_physical_stepper_no_lock;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use foci_firmware::commission_dispatch::{
     DispatchState, StepperPostAction, StepperTaskDirective, apply_stepper_post_action_state,
 };
+use foci_firmware::context::stepper_reconcile::StepperReconcilePending;
 use foci_firmware::diagnostic::StepperEventReason;
+
+pub(crate) static STEPPER_RECONCILE_PENDING: StepperReconcilePending<
+    { crate::board_config::TMC_CHANNEL_COUNT as usize },
+> = StepperReconcilePending::new();
+pub(crate) static STEPPER_RECONCILE_WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+pub(crate) fn request_stop_reconciliation(channel: u8) {
+    if STEPPER_RECONCILE_PENDING.request_stop(channel).is_err() {
+        defmt::error!(
+            "request_stop_reconciliation: invalid Ouroboros channel {}",
+            channel
+        );
+        return;
+    }
+    STEPPER_RECONCILE_WAKE.signal(());
+}
+
+pub(crate) fn request_arm_reconciliation(channel: u8) {
+    if STEPPER_RECONCILE_PENDING.request_arm(channel).is_err() {
+        defmt::error!(
+            "request_arm_reconciliation: invalid Ouroboros channel {}",
+            channel
+        );
+        return;
+    }
+    STEPPER_RECONCILE_WAKE.signal(());
+}
 
 /// Minimum lead time when arming TIM5 CC1.
 ///
@@ -83,11 +113,10 @@ pub(crate) fn arm_step_timer_if_earlier(clock: u32) {
 /// Quiesce the physical stepper from a P1 context without entering
 /// `TriggerDomain`.
 ///
-/// P1 performs the physical quiesce immediately (CC1 disable, queue
-/// drain via `stop_physical_stepper_no_lock`) then spawns
-/// `stop_check` at P2 to update the authoritative `timer_active`
-/// inside `TriggerDomain`. P1 must never enter `TriggerDomain` per
-/// spec.
+/// P1 performs the physical quiesce immediately (CC1 disable, queue drain via
+/// `stop_physical_stepper_no_lock`) then requests P2 reconciliation to update
+/// the authoritative `timer_active` inside `TriggerDomain`. P1 must never enter
+/// `TriggerDomain` per spec.
 pub(crate) fn stepper_stop_from_p1(channel: u8) {
     let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
         defmt::error!("stepper_stop_from_p1: invalid channel {}", channel);
@@ -112,13 +141,14 @@ pub(crate) fn stepper_stop_from_p1(channel: u8) {
     stepper_state
         .timer_active_mirror
         .store(false, core::sync::atomic::Ordering::Relaxed);
-    crate::app::stop_check::spawn(channel).ok();
+    request_stop_reconciliation(channel);
 }
 
 /// Apply a board-owned stepper runtime transition after commissioning dispatch.
 ///
 /// This is the single owner of firmware step-epoch zeroing, channel motor arming,
-/// and `arm_check` spawning. Dispatch only decides which transition is needed.
+/// and arm reconciliation requests. Dispatch only decides which transition is
+/// needed.
 pub(crate) fn apply_stepper_post_action(
     action: StepperPostAction,
     state: &mut DispatchState<'_>,
@@ -130,7 +160,7 @@ pub(crate) fn apply_stepper_post_action(
             stepper_stop_from_p1(channel);
         }
         StepperTaskDirective::ArmCheck => {
-            crate::app::arm_check::spawn(channel).ok();
+            request_arm_reconciliation(channel);
         }
     }
 }

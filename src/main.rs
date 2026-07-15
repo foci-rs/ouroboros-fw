@@ -69,6 +69,7 @@ mod app {
     use foci_firmware::context::stepper::{
         StepperArmCheckBoard, StepperStopCheckBoard, StepperTimerStateBoard,
     };
+    use foci_firmware::context::stepper_reconcile::drain_stepper_reconciliation;
     use foci_firmware::state::lifecycle::*;
     use foci_firmware::state::stepper::{NO_STEPPER_CHANNEL, STEPPER_DEADLINE_MISS_CHANNEL};
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
@@ -288,6 +289,7 @@ mod app {
         }
 
         // Spawn tasks
+        stepper_reconcile::spawn().expect("stepper reconciliation worker must spawn exactly once");
         tmc_control::spawn().ok();
         usb_task::spawn().ok();
         stats::spawn().ok();
@@ -1905,18 +1907,22 @@ mod app {
         StepDispatchOutcome::Continue
     }
 
-    /// P2 software task: clear TriggerDomain timer_active after P1 stop.
-    ///
-    /// Spawned by `stepper_stop_from_p1()`. P1 performs the physical
-    /// quiesce (CC1 disable, queue drain) immediately, then this task
-    /// updates the authoritative flag so `reset_step_clock` and
-    /// `arm_check` see the correct state.
+    /// P2 software task: reconcile pending stepper stop and arm state.
     #[task(priority = 2)]
-    async fn stop_check(_ctx: stop_check::Context, channel: u8) {
-        with_trigger_domain(|td| {
-            let mut board = crate::firmware_ctx::OuroborosStepperBoard { tmc_state: None };
-            foci_firmware::context::stepper::stop_check(td.state_mut(), &mut board, channel);
-        });
+    async fn stepper_reconcile(_ctx: stepper_reconcile::Context) {
+        loop {
+            STEPPER_RECONCILE_WAKE.wait().await;
+            loop {
+                let pending = STEPPER_RECONCILE_PENDING.take_pending();
+                if pending.is_empty() {
+                    break;
+                }
+                with_trigger_domain(|td| {
+                    let mut board = crate::firmware_ctx::OuroborosStepperBoard { tmc_state: None };
+                    drain_stepper_reconciliation(td.state_mut(), &mut board, pending);
+                });
+            }
+        }
     }
 
     impl StepperStopCheckBoard for crate::firmware_ctx::OuroborosStepperBoard {
@@ -1932,18 +1938,6 @@ mod app {
         ) {
             self.set_timer_active(state, stepper_idx, false);
         }
-    }
-
-    /// P2 software task: arm TIM5 CC1 if motor is ready and queue has moves.
-    ///
-    /// Spawned by P1 after calibration/enable completion. P1 must never
-    /// enter TriggerDomain — this task crosses the boundary at P2.
-    #[task(priority = 2)]
-    async fn arm_check(_ctx: arm_check::Context, channel: u8) {
-        with_trigger_domain(|td| {
-            let mut board = crate::firmware_ctx::OuroborosStepperBoard { tmc_state: None };
-            foci_firmware::context::stepper::arm_check(td.state_mut(), &mut board, channel);
-        });
     }
 
     impl StepperArmCheckBoard for crate::firmware_ctx::OuroborosStepperBoard {
