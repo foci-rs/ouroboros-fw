@@ -49,7 +49,6 @@ mod app {
     #[cfg(feature = "trace")]
     use foci_firmware::commissioning::types::EngineKind;
     use foci_klipper::state::State;
-    use foci_tmc4671::spi::Tmc4671Spi;
     use rtic_monotonics::fugit::ExtU64;
     use rtic_monotonics::stm32::prelude::*;
     use rtic_sync::channel::Receiver;
@@ -62,7 +61,7 @@ mod app {
     use crate::tmc_control::board::{
         TmcEnablePins, TmcRuntimes, channel_may_be_energized, channel_needs_safe_state,
         commissioning_request_blocked, enable_pin, new_tmc_runtimes, ouroboros_backend,
-        refresh_velocity_scale, stepper_state, tmc_state,
+        refresh_velocity_scale, stepper_state, tmc_driver, tmc_state,
     };
     use crate::trigger_domain::{
         TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain, with_trigger_domain_site,
@@ -336,6 +335,7 @@ mod app {
         // NOTE: auto-init disabled - motor current regulation not yet safe
         // tmc_init_open_loop(tmc, enable_pin(enable_pins, channel)).await;
 
+        let mut bootstrap_results = [Ok(()); crate::board_config::TMC_CHANNEL_COUNT as usize];
         for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
             let Some(device) = ctx.local.tmc_mux.device(channel) else {
                 defmt::error!("Ouroboros TMC channel {} is not available", channel);
@@ -350,8 +350,7 @@ mod app {
                 });
                 return;
             };
-            let mut tmc = Tmc4671Spi::new(device)
-                .with_retry_policy(foci_tmc4671::spi::RetryPolicy::production());
+            let mut tmc = tmc_driver(device);
 
             // Verify TMC4671 chip identity — shutdown if SPI fails or wrong chip.
             match tmc
@@ -448,24 +447,59 @@ mod app {
             // Proper board-level overvoltage protection is intentionally not
             // configured in this compile-only scaffold until the production-v1
             // power-stage pins are verified.
-            {
-                use foci_tmc4671::registers::*;
-                let _ = tmc.write_register(ADC_VM_LIMITS, 0xFFFF_FFFF).await;
-            }
-
             // Configure STATUS_MASK: route ADC current clipping to the channel-local
             // STATUS pin. PE2/channel 0 is routed to EXTI2 below. PA2/channel 1
             // shares EXTI line 2 with PE2, and SYSCFG can select only one port for
             // a given EXTI line, so channel 1 clipping is polled every tick
             // while the channel may be energized.
-            {
-                use foci_tmc4671::registers::*;
-                let mask = STATUS_CRITICAL_FAULT_MASK;
-                let _ = tmc.write_register(STATUS_MASK, mask).await;
-                // Clear pending STATUS flags from power-on before enabling EXTI/polling.
-                let _ = tmc.read_register(STATUS_FLAGS).await;
-                let _ = tmc.write_register(STATUS_FLAGS, 0).await;
-                defmt::info!("TMC4671 channel {} STATUS_MASK: {:#010x}", channel, mask);
+            let result = {
+                let mut backend =
+                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                foci_firmware::tmc_control::bootstrap_tmc_safety(
+                    &mut backend,
+                    STATUS_CRITICAL_FAULT_MASK,
+                )
+                .await
+            };
+            if let Err(failure) = result {
+                defmt::error!(
+                    "TMC4671 channel {} safety bootstrap failed: {:?}",
+                    channel,
+                    failure.stage
+                );
+            } else {
+                defmt::info!(
+                    "TMC4671 channel {} STATUS_MASK: {:#010x}",
+                    channel,
+                    STATUS_CRITICAL_FAULT_MASK
+                );
+            }
+            bootstrap_results[channel as usize] = result;
+        }
+
+        if let Some((channel, failure)) =
+            foci_firmware::tmc_control::first_tmc_safety_bootstrap_failure(&bootstrap_results)
+        {
+            lower_all_enable_pins(enable_pins);
+            let reason = failure.shutdown_reason(channel);
+            loop {
+                if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
+                    Mono::delay(1.millis()).await;
+                    continue;
+                }
+                let _request = rx.recv().await;
+                if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
+                ctx.shared.app_state.lock(|state| {
+                    if crate::firmware_ctx::enter_shutdown(state) {
+                        foci_firmware::dispatch_shutdown!(
+                            reason,
+                            read_tim5(),
+                            &mut crate::_ankyra_config::Sender
+                        );
+                    }
+                });
             }
         }
 
@@ -538,7 +572,7 @@ mod app {
                             });
                             continue;
                         };
-                        let mut report_tmc = Tmc4671Spi::new(device);
+                        let mut report_tmc = tmc_driver(device);
                         let report_flags = report_tmc
                             .read_register(foci_tmc4671::registers::STATUS_FLAGS)
                             .await
@@ -635,7 +669,7 @@ mod app {
                             });
                             continue 'control_loop;
                         };
-                        let mut tmc = Tmc4671Spi::new(device);
+                        let mut tmc = tmc_driver(device);
                         match tmc
                             .read_register(foci_tmc4671::registers::STATUS_FLAGS)
                             .await
@@ -746,7 +780,7 @@ mod app {
                             });
                             continue;
                         };
-                        let mut tmc = Tmc4671Spi::new(device);
+                        let mut tmc = tmc_driver(device);
                         let runtime = &mut runtimes[channel as usize];
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
@@ -798,7 +832,7 @@ mod app {
                             });
                             continue;
                         };
-                        let mut tmc = Tmc4671Spi::new(device);
+                        let mut tmc = tmc_driver(device);
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
                         let runtime = &mut runtimes[channel as usize];
@@ -862,7 +896,7 @@ mod app {
                             });
                             continue 'commission_channel;
                         };
-                        let mut tmc = Tmc4671Spi::new(device);
+                        let mut tmc = tmc_driver(device);
                         let runtime = &mut runtimes[channel_idx];
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
@@ -917,7 +951,7 @@ mod app {
                             });
                             continue 'commission_channel;
                         };
-                        let mut tmc = Tmc4671Spi::new(device);
+                        let mut tmc = tmc_driver(device);
                         let runtime = &mut runtimes[channel_idx];
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
@@ -988,7 +1022,7 @@ mod app {
                                 });
                                 continue 'control_loop;
                             };
-                            let mut tmc = Tmc4671Spi::new(device);
+                            let mut tmc = tmc_driver(device);
                             crate::usb_trace::sample_commission_closed_loop_entry(
                                 &mut tmc,
                                 crate::usb_trace::TraceSampleContext {
@@ -1074,7 +1108,7 @@ mod app {
                                                     });
                                                     continue 'control_loop;
                                                 };
-                                                let mut request_tmc = Tmc4671Spi::new(device);
+                                                let mut request_tmc = tmc_driver(device);
                                                 let outcome = crate::tmc_control::request::handle_tmc_control_request(
                                                     req,
                                                     TmcPreRequestDisposition::ContinueRequest,
@@ -1222,7 +1256,7 @@ mod app {
                         });
                         continue;
                     };
-                    let mut tmc = Tmc4671Spi::new(device);
+                    let mut tmc = tmc_driver(device);
 
                     let commissioning_blocked = match &req.kind {
                         TmcRequestKind::SetEnable(true) => {
@@ -1317,7 +1351,7 @@ mod app {
                     });
                     continue;
                 };
-                let mut tmc = Tmc4671Spi::new(device);
+                let mut tmc = tmc_driver(device);
                 let poll_channel1_critical = channel == CHANNEL1_STATUS_FALLBACK
                     && channel_may_be_energized(channel, &runtimes[channel as usize]);
                 if poll_channel1_critical {

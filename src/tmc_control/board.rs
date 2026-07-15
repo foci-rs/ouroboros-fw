@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering::Relaxed;
 use embassy_stm32::gpio::Output;
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_control::helpers::refresh_velocity_scale_from_state;
-use foci_tmc4671::spi::Tmc4671Spi;
+use foci_tmc4671::spi::{RetryPolicy, Tmc4671Spi};
 
 use crate::ankyra::constants::CLOCK_FREQ;
 use crate::app_types::TmcSpiDevice;
@@ -16,6 +16,10 @@ pub(crate) type TmcEnablePins = [Output<'static>; TMC_CHANNEL_COUNT as usize];
 pub(crate) type TmcRuntimes = [TmcControlRuntime; TMC_CHANNEL_COUNT as usize];
 
 const _: [(); 2] = [(); TMC_CHANNEL_COUNT as usize];
+
+pub(crate) fn tmc_driver<'spi>(device: TmcSpiDevice<'spi>) -> Tmc4671Spi<TmcSpiDevice<'spi>> {
+    Tmc4671Spi::new(device).with_retry_policy(RetryPolicy::production())
+}
 
 pub(crate) fn new_tmc_runtimes() -> TmcRuntimes {
     [
