@@ -5,6 +5,7 @@
 #![cfg(feature = "dev")]
 
 use embassy_stm32::gpio::Output;
+use foci_tmc4671::current_limit::PidTorqueFluxLimit;
 use foci_tmc4671::registers::*;
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::Monotonic;
@@ -136,15 +137,13 @@ pub(crate) async fn tmc_enter_openloop(
     let _ = tmc.write_register(PID_TORQUE_P_TORQUE_I, pid_pi).await;
 
     // 9. Current limit via PID_TORQUE_FLUX_LIMITS
-    // Both torque and flux limited to 433 counts (~0.5A with 1.155 mA/LSB).
+    // The shared torque/flux limit is 433 counts (~0.5A with 1.155 mA/LSB).
     // Flux limit must be nonzero so the flux PID can actively regulate
     // the D-axis current to zero (reject disturbances).
-    let current_limit: u32 = 433;
+    let current_limit = PidTorqueFluxLimit::new(433)
+        .expect("dev current limit must fit the TMC4671 register domain");
     let _ = tmc
-        .write_register(
-            PID_TORQUE_FLUX_LIMITS,
-            (current_limit << 16) | current_limit,
-        )
+        .write_register(PID_TORQUE_FLUX_LIMITS, current_limit.register_value())
         .await;
 
     // 10. PHI_E source: external angle register (open-loop)
