@@ -12,6 +12,9 @@ use foci_firmware::ankyra::replies::{FociStepperEvent, FociStepperPerfEvent, Sta
 /// to Klipper via `klipper_constant`.
 const STATS_SUMSQ_BASE: u32 = 256;
 
+/// Period between independent-watchdog service ticks.
+pub const WATCHDOG_INTERVAL_MS: u64 = 5_000;
+
 /// Accumulator state for the stats task between ticks.
 pub struct StatsAccumulator {
     count: u32,
@@ -31,9 +34,14 @@ impl StatsAccumulator {
     }
 }
 
+/// Service the independent watchdog from its dedicated RTIC task.
+pub fn watchdog_tick(wdg: &mut IndependentWatchdog<'static, peripherals::IWDG1>) {
+    wdg.pet();
+}
+
 /// Perform a single stats-tick cycle: compute elapsed ticks, update
-/// the stats accumulator, advance the 32-bit CYCCNT wrap counter, emit
-/// the Klipper `stats` message, and kick the watchdog.
+/// the stats accumulator, advance the 32-bit CYCCNT wrap counter, and emit
+/// the Klipper `stats` message.
 ///
 /// `stats_send_time` and `stats_send_time_high` are the atomics shared
 /// with `get_uptime`. Write-order matters: the `swap` on
@@ -45,7 +53,6 @@ pub fn stats_tick(
     now: u32,
     stats_send_time: &AtomicU32,
     stats_send_time_high: &AtomicU32,
-    wdg: &mut IndependentWatchdog<'static, peripherals::IWDG1>,
 ) {
     let elapsed = now.wrapping_sub(accumulator.last_clock);
     accumulator.last_clock = now;
@@ -72,8 +79,6 @@ pub fn stats_tick(
         sum: u32 = accumulator.sum,
         sumsq: u32 = accumulator.sumsq,
     );
-    wdg.pet();
-
     accumulator.count = 0;
     accumulator.sum = 0;
     accumulator.sumsq = 0;

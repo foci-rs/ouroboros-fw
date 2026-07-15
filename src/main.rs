@@ -291,6 +291,7 @@ mod app {
         tmc_control::spawn().ok();
         usb_task::spawn().ok();
         stats::spawn().ok();
+        watchdog::spawn().ok();
 
         defmt::info!("FOCI Ouroboros initialized");
 
@@ -2349,9 +2350,9 @@ mod app {
     ///
     /// Klipper requires regular stats messages to confirm the MCU is alive.
     /// Sends `stats count=%u sum=%u sumsq=%u` every 5 seconds with basic
-    /// CPU usage metrics. Also kicks the IWDG watchdog.
-    #[task(priority = 1, local = [wdg])]
-    async fn stats(ctx: stats::Context) {
+    /// CPU usage metrics.
+    #[task(priority = 1)]
+    async fn stats(_ctx: stats::Context) {
         let mut accumulator = crate::heartbeat::StatsAccumulator::new(read_tim5());
         loop {
             Mono::delay(5000.millis()).await;
@@ -2360,8 +2361,16 @@ mod app {
                 read_tim5(),
                 &STATS_SEND_TIME,
                 &STATS_SEND_TIME_HIGH,
-                ctx.local.wdg,
             );
+        }
+    }
+
+    /// Service the independent watchdog above sustained priority-1 work.
+    #[task(priority = 2, local = [wdg])]
+    async fn watchdog(ctx: watchdog::Context) {
+        loop {
+            Mono::delay(crate::heartbeat::WATCHDOG_INTERVAL_MS.millis()).await;
+            crate::heartbeat::watchdog_tick(ctx.local.wdg);
         }
     }
 }
