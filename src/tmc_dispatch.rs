@@ -9,7 +9,9 @@
 //! dispatches here.
 
 use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
-use foci_firmware::tmc_control::dispatch::{SharedTmcDispatch, apply_shared_tmc_request};
+use foci_firmware::tmc_control::dispatch::{
+    RegisterRequestError, SharedTmcDispatch, apply_shared_tmc_request,
+};
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;
@@ -34,16 +36,16 @@ fn report_invalid_channel(channel: u8) {
 /// Handle a TMC request that does not require main-loop state (motor_enabled, enable_pin).
 ///
 /// SetEnable, Init, and TestSpin are handled inline by the tmc_control main loop.
-/// Returns `Ok(())` on success, `Err(())` if the caller should enter shutdown.
+/// Returns `Ok(())` on success or the reason the caller should enter shutdown.
 pub(crate) async fn handle_tmc_request(
     req: TmcRequest,
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
-) -> Result<(), ()> {
+) -> Result<(), RegisterRequestError> {
     let channel = req.channel;
     let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
         defmt::error!("Invalid TMC channel {}", channel);
         report_invalid_channel(channel);
-        return Err(());
+        return Err(RegisterRequestError::Other);
     };
 
     let kind = req.kind;

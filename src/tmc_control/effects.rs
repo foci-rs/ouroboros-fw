@@ -161,6 +161,11 @@ pub(crate) fn emit_shutdown(reason: ShutdownReason) {
             "TMC request validation failed",
             clock,
         ),
+        ShutdownReason::CurrentLimitInvalid => ::ankyra::klipper_shutdown_from!(
+            &mut crate::_ankyra_config::Sender,
+            "TMC current limit invalid",
+            clock,
+        ),
         ShutdownReason::LiveGainApplyFailed => ::ankyra::klipper_shutdown_from!(
             &mut crate::_ankyra_config::Sender,
             "Live gain application failed",

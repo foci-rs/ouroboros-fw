@@ -7,6 +7,7 @@ use foci_firmware::commission_dispatch::{ReplyPayload, StepperPostAction};
 use foci_firmware::state::stepper::StepperChannelState;
 use foci_firmware::state::tmc::TmcChannelState;
 use foci_firmware::tmc::TmcRequest;
+use foci_firmware::tmc_control::dispatch::RegisterRequestError;
 use foci_firmware::tmc_control::request::{
     MotionScaleMapperInstallError, TmcPreRequestDisposition, TmcRequestBoard,
     handle_tmc_control_request as handle_shared_request,
@@ -175,7 +176,7 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         &mut self,
         req: TmcRequest,
         tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
-    ) -> Result<(), ()> {
+    ) -> Result<(), RegisterRequestError> {
         handle_tmc_request(req, tmc).await
     }
 
