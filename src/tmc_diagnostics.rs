@@ -5,13 +5,14 @@
 
 use core::sync::atomic::Ordering::Relaxed;
 
+use embassy_stm32::gpio::Output;
 use foci_firmware::state::trsync::HOMING_STATE;
 use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
-    DiagnosticReadiness, ResistanceAxisReport, ResistanceProfileReport, ResistanceRunReport,
-    VoltageStepReport,
+    DiagnosticPowerStage, DiagnosticReadiness, ResistanceAxisReport, ResistanceProfileReport,
+    ResistanceRunReport, VoltageStepReport,
 };
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::{Monotonic, fugit::ExtU64};
@@ -37,6 +38,18 @@ impl DiagnosticDelay for MonoDiagnosticDelay {
 }
 
 struct BoardDiagnosticReplySink;
+
+struct OuroborosDiagnosticPowerStage<'a> {
+    channel: u8,
+    enable_pin: &'a mut Output<'static>,
+}
+
+impl DiagnosticPowerStage for OuroborosDiagnosticPowerStage<'_> {
+    fn trip_power_stage(&mut self) {
+        self.enable_pin.set_low();
+        crate::helpers::stepper::stepper_stop_from_p1(self.channel);
+    }
+}
 
 /// Emit a deterministic not-ready reply without touching diagnostic hardware.
 pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
@@ -242,6 +255,10 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             gain_path_count_slope_milli: i32 = report.gain_path_count_slope_milli,
             warning_flags: u32 = report.warning_flags,
             status_flags_or: u32 = report.status_flags_or,
+            peak_abs_current_count: u16 = report.peak_abs_current_count,
+            max_abs_steady_mean_current_count: u16 = report.max_abs_steady_mean_current_count,
+            current_ceiling_count: u16 = report.current_ceiling_count,
+            power_stage_tripped: u8 = u8::from(report.power_stage_tripped),
             pwm_maxcnt_readback: u16 = report.pwm_maxcnt_readback,
             bbm_readback: u16 = report.bbm_readback,
             dsadc_mdec_readback: u32 = report.dsadc_mdec_readback,
@@ -255,11 +272,16 @@ pub(crate) async fn run_diagnostic_request<'spi>(
     channel: u8,
     runtime: &mut TmcControlRuntime,
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
+    enable_pin: &mut Output<'static>,
 ) {
     let homing_active = HOMING_STATE.load(Relaxed) != 0;
     let stepper_active = stepper_state(channel).timer_active_mirror.load(Relaxed);
     let saved_voltage_limit = tmc_state(channel).voltage_limit_cfg.load(Relaxed);
     let mut delay = MonoDiagnosticDelay;
+    let mut power_stage = OuroborosDiagnosticPowerStage {
+        channel,
+        enable_pin,
+    };
 
     let outcome = foci_firmware::tmc_diagnostics::handle_diagnostic_request(
         diagnostic_req,
@@ -267,6 +289,7 @@ pub(crate) async fn run_diagnostic_request<'spi>(
             tmc,
             runtime,
             delay: &mut delay,
+            power_stage: &mut power_stage,
             readiness: DiagnosticReadiness {
                 homing_active,
                 stepper_active,

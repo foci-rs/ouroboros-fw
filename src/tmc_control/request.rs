@@ -185,7 +185,14 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         runtime: &mut TmcControlRuntime,
         tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     ) {
-        crate::tmc_diagnostics::run_diagnostic_request(req, self.channel, runtime, tmc).await;
+        crate::tmc_diagnostics::run_diagnostic_request(
+            req,
+            self.channel,
+            runtime,
+            tmc,
+            enable_pin(self.enable_pins, self.channel),
+        )
+        .await;
     }
 
     #[cfg(feature = "dev")]
