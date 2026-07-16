@@ -50,6 +50,14 @@ impl CommissionBackendHooks for OuroborosHooks {
     ) {
         crate::usb_trace::request_commission_event(channel, event);
     }
+
+    #[cfg(feature = "trace")]
+    fn record_velocity_trace_observation(
+        channel: u8,
+        observation: foci_firmware::trace::stream::VelocityTraceObservation,
+    ) {
+        crate::usb_trace::request_velocity_observation(channel, observation);
+    }
 }
 
 pub(crate) type OuroborosBackend<'a, 'spi> =
