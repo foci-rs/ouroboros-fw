@@ -974,8 +974,6 @@ mod app {
                     commission_tick_max_cycles[channel_idx] =
                         commission_tick_max_cycles[channel_idx].max(tick_cycles);
                     handle_commission_wait_exit!();
-                    #[cfg(feature = "trace")]
-                    crate::usb_trace::drain_pending_events();
 
                     use foci_firmware::tmc_control::ScheduledCommissionTickAction;
                     match action {
@@ -1525,7 +1523,6 @@ mod app {
             #[cfg(feature = "trace")]
             if slow_control_tick {
                 crate::usb_trace::request_spi_duration_event_if_ready();
-                crate::usb_trace::drain_pending_events();
                 if trace_metadata_due {
                     crate::usb_trace::emit_metadata();
                 }

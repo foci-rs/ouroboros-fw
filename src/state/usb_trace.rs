@@ -86,8 +86,20 @@ const STATUS_SLOT_COUNT: usize =
 
 pub(crate) static TRACE_COUNTERS: TraceCounters = TraceCounters::new();
 
-pub(crate) static mut MOTION_QUEUE: heapless::spsc::Queue<QueuedFrame, MOTION_QUEUE_DEPTH> =
-    heapless::spsc::Queue::new();
+struct MotionQueueEndpoints {
+    producer: heapless::spsc::Producer<'static, QueuedFrame>,
+    consumer: heapless::spsc::Consumer<'static, QueuedFrame>,
+}
+
+static mut MOTION_QUEUE_ENDPOINTS: MotionQueueEndpoints = {
+    static mut QUEUE: heapless::spsc::Queue<QueuedFrame, MOTION_QUEUE_DEPTH> =
+        heapless::spsc::Queue::new();
+    // SAFETY: `QUEUE` is private to this initializer. The returned endpoints
+    // are stored separately and accessed only by their owning RTIC contexts.
+    #[allow(static_mut_refs)]
+    let (producer, consumer) = unsafe { QUEUE.split_const() };
+    MotionQueueEndpoints { producer, consumer }
+};
 pub(crate) static mut EVENT_QUEUE: heapless::spsc::Queue<QueuedFrame, EVENT_QUEUE_DEPTH> =
     heapless::spsc::Queue::new();
 pub(crate) static mut PENDING_EVENTS: heapless::Deque<PendingEvent, PENDING_EVENT_DEPTH> =
@@ -98,17 +110,29 @@ pub(crate) static mut LAST_STATUS: [StatusSnapshot; STATUS_SLOT_COUNT] =
 /// Partially sent frame owned by the single USB trace consumer.
 pub(crate) static mut CURRENT_TX: Option<QueuedFrame> = None;
 
-/// Return the trace motion/counter queue.
+/// Return the P1-owned trace motion/counter producer.
 ///
 /// # Safety
 ///
-/// Callers must uphold the single-producer/single-consumer access discipline:
-/// producer contexts enqueue only, and the USB task is the sole consumer.
+/// Only the priority-1 TMC control task may call this function.
 #[inline]
-pub(crate) unsafe fn motion_queue()
--> &'static mut heapless::spsc::Queue<QueuedFrame, MOTION_QUEUE_DEPTH> {
-    let ptr = core::ptr::addr_of_mut!(MOTION_QUEUE);
-    // SAFETY: The caller guarantees exclusive access for this RTIC context.
+pub(crate) unsafe fn motion_producer() -> &'static mut heapless::spsc::Producer<'static, QueuedFrame>
+{
+    let ptr = unsafe { core::ptr::addr_of_mut!(MOTION_QUEUE_ENDPOINTS.producer) };
+    // SAFETY: The caller guarantees exclusive P1 producer access.
+    unsafe { &mut *ptr }
+}
+
+/// Return the P2-owned trace motion/counter consumer.
+///
+/// # Safety
+///
+/// Only the priority-2 USB task may call this function.
+#[inline]
+pub(crate) unsafe fn motion_consumer() -> &'static mut heapless::spsc::Consumer<'static, QueuedFrame>
+{
+    let ptr = unsafe { core::ptr::addr_of_mut!(MOTION_QUEUE_ENDPOINTS.consumer) };
+    // SAFETY: The caller guarantees exclusive P2 consumer access.
     unsafe { &mut *ptr }
 }
 
@@ -116,8 +140,8 @@ pub(crate) unsafe fn motion_queue()
 ///
 /// # Safety
 ///
-/// Callers must uphold the single-producer/single-consumer access discipline:
-/// producer contexts enqueue only, and the USB task is the sole consumer.
+/// Only the priority-2 USB task may call this function. Pending event requests
+/// from other priorities are converted to frames by that task before enqueue.
 #[inline]
 pub(crate) unsafe fn event_queue()
 -> &'static mut heapless::spsc::Queue<QueuedFrame, EVENT_QUEUE_DEPTH> {
