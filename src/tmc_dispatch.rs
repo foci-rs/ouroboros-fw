@@ -112,7 +112,7 @@ pub(crate) async fn handle_tmc_request(
                 Mono::delay(1.millis()).await;
 
                 let reg = foci_tmc4671::registers::Register::new(addr);
-                let value = match tmc.read_register(reg).await {
+                let value = match tmc.read_register_blocking(reg) {
                     Ok(v) => v,
                     Err(_) => {
                         defmt::error!("TMC4671 SPI read failed: addr={:#04x}", addr);
@@ -131,7 +131,7 @@ pub(crate) async fn handle_tmc_request(
             for &(synthetic_addr, sub_reg) in foci_firmware::dump::DUMP_SUB_REGISTERS {
                 Mono::delay(1.millis()).await;
 
-                let value = match tmc.read_sub_register(sub_reg).await {
+                let value = match tmc.read_sub_register_blocking(sub_reg) {
                     Ok(v) => v,
                     Err(_) => {
                         defmt::error!(
