@@ -58,6 +58,14 @@ impl CommissionBackendHooks for OuroborosHooks {
     ) {
         crate::usb_trace::request_velocity_observation(channel, observation);
     }
+
+    #[cfg(feature = "trace-velocity-sweep")]
+    fn record_velocity_sweep_trace_record(
+        channel: u8,
+        record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,
+    ) {
+        crate::usb_trace::request_velocity_sweep_evidence(channel, record);
+    }
 }
 
 pub(crate) type OuroborosBackend<'a, 'spi> =

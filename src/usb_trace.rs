@@ -593,6 +593,30 @@ pub(crate) fn request_velocity_observation(
     enqueue_motion(frame);
 }
 
+/// Enqueue one canonical velocity-sweep record for offline audit.
+pub(crate) fn request_velocity_sweep_evidence(
+    channel: u8,
+    record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,
+) {
+    use foci_firmware::trace::stream::*;
+
+    if !is_configured() {
+        return;
+    }
+
+    let payload = record.as_bytes();
+    let mut frame = FrameBuf::new();
+    frame.write_header(header(
+        FRAME_TYPE_VELOCITY_SWEEP_EVIDENCE,
+        payload.len(),
+        SOURCE_KIND_FOCI,
+        channel,
+        motion_flags(),
+    ));
+    frame.payload_mut(payload.len()).copy_from_slice(payload);
+    enqueue_motion(frame);
+}
+
 /// Board-local inputs for one Ouroboros trace sample.
 #[derive(Clone, Copy)]
 pub(crate) struct TraceSampleContext<'a> {
