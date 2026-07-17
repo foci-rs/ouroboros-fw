@@ -34,10 +34,14 @@ pub(crate) struct FociTuneParams {
     pub(crate) current_ringing: u8,
     pub(crate) current_bw: u32,
     pub(crate) inner_warning_flags: u8,
-    pub(crate) max_travel_mrev: u32,
-    pub(crate) max_velocity_mrev_s: u32,
+    pub(crate) requested_velocity_mrev_s: u32,
+    pub(crate) machine_velocity_ceiling_mrev_s: u32,
+    pub(crate) requested_velocity_source: u8,
+    pub(crate) max_stroke_travel_mrev: u32,
+    pub(crate) settle_travel_reserve_mrev: u32,
+    pub(crate) negative_position_headroom_mrev: u32,
+    pub(crate) positive_position_headroom_mrev: u32,
     pub(crate) max_duration_ms: u16,
-    pub(crate) direction_mask: u8,
 }
 
 /// Send a request to the tmc_control task.
@@ -65,12 +69,30 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         current_ringing,
         current_bw,
         inner_warning_flags,
-        max_travel_mrev,
-        max_velocity_mrev_s,
+        requested_velocity_mrev_s,
+        machine_velocity_ceiling_mrev_s,
+        requested_velocity_source,
+        max_stroke_travel_mrev,
+        settle_travel_reserve_mrev,
+        negative_position_headroom_mrev,
+        positive_position_headroom_mrev,
         max_duration_ms,
-        direction_mask,
         channel,
     } = params;
+    let requested_velocity_source = match requested_velocity_source {
+        0 => foci_firmware::commissioning::outer::velocity::sweep_plan::RequestedVelocitySource::Explicit,
+        1 => foci_firmware::commissioning::outer::velocity::sweep_plan::RequestedVelocitySource::Defaulted,
+        _ => {
+            ::ankyra::klipper_reply_from!(
+                &mut crate::_ankyra_config::Sender,
+                foci_firmware::ankyra::replies::FociCommissionPhase,
+                oid: u8 = oid,
+                phase: u8 = 0,
+                status: u8 = foci_firmware::autotune::CommissionError::InvalidSchedule.status_code(),
+            );
+            return;
+        }
+    };
     let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
         defmt::error!("foci_tune: invalid channel={}", channel);
         return;
@@ -95,10 +117,14 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         current_ringing,
         current_bw,
         inner_warning_flags,
-        max_travel_mrev,
-        max_velocity_mrev_s,
+        requested_velocity_mrev_s,
+        machine_velocity_ceiling_mrev_s,
+        requested_velocity_source,
+        max_stroke_travel_mrev,
+        settle_travel_reserve_mrev,
+        negative_position_headroom_mrev,
+        positive_position_headroom_mrev,
         max_duration_ms,
-        direction_mask,
     )) {
         tmc_state.commission_in_flight.store(false, Relaxed);
         ::ankyra::klipper_reply_from!(

@@ -6,6 +6,278 @@
 struct BoardCommissionReplySink;
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
+    fn foci_velocity_sweep_plan_limits(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocitySweepPlanLimits,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocitySweepPlanLimits,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            requested_velocity_mrev_s: u32 = report.requested_velocity_mrev_s,
+            requested_velocity_source: u8 = report.requested_velocity_source,
+            used_velocity_mrev_s: u32 = report.used_velocity_mrev_s,
+            effective_ceiling_mrev_s: u32 = report.effective_ceiling_mrev_s,
+            clamp_flags: u16 = report.clamp_flags,
+            binding_source: u8 = report.binding_source,
+        );
+    }
+
+    fn foci_velocity_sweep_plan_geometry(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocitySweepPlanGeometry,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocitySweepPlanGeometry,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            target_velocity_register: i32 = report.target_velocity_register,
+            p_start: u16 = report.p_start,
+            p_top: u16 = report.p_top,
+            rung_count: u8 = report.rung_count,
+            observations_per_direction: u16 = report.observations_per_direction,
+            max_stroke_travel_mrev: u32 = report.max_stroke_travel_mrev,
+            settle_travel_reserve_mrev: u32 = report.settle_travel_reserve_mrev,
+            negative_position_headroom_mrev: u32 = report.negative_position_headroom_mrev,
+            positive_position_headroom_mrev: u32 = report.positive_position_headroom_mrev,
+            hard_torque_limit: u16 = report.hard_torque_limit,
+            usable_torque_limit: u16 = report.usable_torque_limit,
+        );
+    }
+
+    fn foci_velocity_sweep_plan_timing(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocitySweepPlanTiming,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocitySweepPlanTiming,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            moving_stroke_us: u32 = report.moving_stroke_us,
+            zero_settle_us: u32 = report.zero_settle_us,
+            nominal_workflow_ms: u32 = report.nominal_workflow_ms,
+            maximum_workflow_ms: u32 = report.maximum_workflow_ms,
+        );
+    }
+
+    fn foci_velocity_observation_core(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocityObservationCore,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocityObservationCore,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            rung_index: u8 = report.rung_index,
+            slot: u8 = report.slot,
+            classification: u8 = report.classification,
+            flags: u8 = report.flags,
+            delta_sign: u8 = report.delta_sign,
+            delta_mantissa: u32 = report.delta_mantissa,
+            delta_shift: u8 = report.delta_shift,
+            elapsed_mantissa: u32 = report.elapsed_mantissa,
+            elapsed_shift: u8 = report.elapsed_shift,
+        );
+    }
+
+    fn foci_velocity_observation_rate(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocityObservationRate,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocityObservationRate,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            rate_low: i32 = report.rate_low,
+            rate_mean: i32 = report.rate_mean,
+            rate_high: i32 = report.rate_high,
+            deficit_low: i32 = report.deficit_low,
+            deficit_high: i32 = report.deficit_high,
+            rate_shift: u8 = report.rate_shift,
+            suffix_len: u16 = report.suffix_len,
+            selected_level: u8 = report.selected_level,
+            selected_blocks: u32 = report.selected_blocks,
+            variance_mantissa: u32 = report.variance_mantissa,
+            variance_shift: u8 = report.variance_shift,
+        );
+    }
+
+    fn foci_velocity_observation_stationarity(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocityObservationStationarity,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocityObservationStationarity,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            slope_mantissa: i32 = report.slope_mantissa,
+            slope_shift: u8 = report.slope_shift,
+            slope_half_width_mantissa: u32 = report.slope_half_width_mantissa,
+            slope_half_width_shift: u8 = report.slope_half_width_shift,
+            lag_one_q: i32 = report.lag_one_q,
+            lag_one_half_width_q: u32 = report.lag_one_half_width_q,
+            residual_mantissa: u32 = report.residual_mantissa,
+            residual_shift: u8 = report.residual_shift,
+            tested_suffixes: u8 = report.tested_suffixes,
+        );
+    }
+
+    fn foci_velocity_observation_disturbance(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocityObservationDisturbance,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocityObservationDisturbance,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            velocity_p: u16 = report.velocity_p,
+            target_velocity_register: i32 = report.target_velocity_register,
+            disturbance_q16: i32 = report.disturbance_q16,
+            disturbance_low_q16: i32 = report.disturbance_low_q16,
+            disturbance_high_q16: i32 = report.disturbance_high_q16,
+            variance_mantissa: u32 = report.variance_mantissa,
+            variance_shift: u8 = report.variance_shift,
+            predicted_torque_target_abs: u16 = report.predicted_torque_target_abs,
+        );
+    }
+
+    fn foci_velocity_rung_verdict_band(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocityRungVerdictBand,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocityRungVerdictBand,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            rung_index: u8 = report.rung_index,
+            velocity_p: u16 = report.velocity_p,
+            forward_low_q16: i32 = report.forward_low_q16,
+            forward_high_q16: i32 = report.forward_high_q16,
+            reverse_low_q16: i32 = report.reverse_low_q16,
+            reverse_high_q16: i32 = report.reverse_high_q16,
+            forward_p_low: u16 = report.forward_p_low,
+            forward_p_high: u16 = report.forward_p_high,
+            reverse_p_low: u16 = report.reverse_p_low,
+            reverse_p_high: u16 = report.reverse_p_high,
+        );
+    }
+
+    fn foci_velocity_rung_verdict_quality(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocityRungVerdictQuality,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocityRungVerdictQuality,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            rung_index: u8 = report.rung_index,
+            forward_class: u8 = report.forward_class,
+            reverse_class: u8 = report.reverse_class,
+            forward_closure: u8 = report.forward_closure,
+            reverse_closure: u8 = report.reverse_closure,
+            flags: u8 = report.flags,
+            forward_eligible_rungs: u8 = report.forward_eligible_rungs,
+            reverse_eligible_rungs: u8 = report.reverse_eligible_rungs,
+            forward_eligible_observations: u16 = report.forward_eligible_observations,
+            reverse_eligible_observations: u16 = report.reverse_eligible_observations,
+        );
+    }
+
+    fn foci_velocity_sweep_terminal_direction(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocitySweepTerminalDirection,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocitySweepTerminalDirection,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            direction_closure: u8 = report.direction_closure,
+            first_moving: u16 = report.first_moving,
+            p_low: u16 = report.p_low,
+            p_high: u16 = report.p_high,
+            common_low_q16: i32 = report.common_low_q16,
+            common_high_q16: i32 = report.common_high_q16,
+            pooled_q16: i32 = report.pooled_q16,
+            pooled_low_q16: i32 = report.pooled_low_q16,
+            pooled_high_q16: i32 = report.pooled_high_q16,
+            eligible_rungs: u8 = report.eligible_rungs,
+            eligible_observations: u16 = report.eligible_observations,
+            flags: u8 = report.flags,
+        );
+    }
+
+    fn foci_velocity_sweep_terminal_integrity(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociVelocitySweepTerminalIntegrity,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVelocitySweepTerminalIntegrity,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            expected_observations: u16 = report.expected_observations,
+            emitted_observations: u16 = report.emitted_observations,
+            expected_rungs: u16 = report.expected_rungs,
+            emitted_rungs: u16 = report.emitted_rungs,
+            digest_low: u32 = report.digest_low,
+            digest_high: u32 = report.digest_high,
+            outcome: u8 = report.outcome,
+            cause: u8 = report.cause,
+            sufficient_direction_mask: u8 = report.sufficient_direction_mask,
+        );
+    }
+
+    fn foci_outer_inconclusive(
+        &mut self,
+        report: foci_firmware::ankyra::replies::FociOuterInconclusive,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociOuterInconclusive,
+            oid: u8 = report.oid,
+            run_sequence: u32 = report.run_sequence,
+            evidence_sequence: u16 = report.evidence_sequence,
+            fragment: u8 = report.fragment,
+            phase: u8 = report.phase,
+            sufficient_direction_mask: u8 = report.sufficient_direction_mask,
+            cause: u8 = report.cause,
+            digest_low: u32 = report.digest_low,
+            digest_high: u32 = report.digest_high,
+        );
+    }
+
     fn foci_commission_detail(
         &mut self,
         oid: u8,
@@ -500,6 +772,15 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
 pub(crate) fn emit_terminal_reply(payload: foci_firmware::commission_dispatch::ReplyPayload) {
     let mut sink = BoardCommissionReplySink;
     foci_firmware::commission_dispatch::emit_terminal_reply(&mut sink, payload);
+}
+
+/// Emit one nonterminal velocity-sweep evidence group.
+pub(crate) fn emit_velocity_sweep_event(
+    oid: u8,
+    event: foci_firmware::commissioning::types::VelocitySweepEvent,
+) {
+    let mut sink = BoardCommissionReplySink;
+    foci_firmware::commission_dispatch::emit_velocity_sweep_event(&mut sink, oid, event);
 }
 
 /// Emit a `FociCommissionPhase` reply for a phase transition.

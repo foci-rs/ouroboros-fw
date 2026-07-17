@@ -45,10 +45,14 @@ pub fn foci_tune(
     current_ringing: u8,
     current_bw: u32,
     inner_warning_flags: u8,
-    max_travel_mrev: u32,
-    max_velocity_mrev_s: u32,
+    requested_velocity_mrev_s: u32,
+    machine_velocity_ceiling_mrev_s: u32,
+    requested_velocity_source: u8,
+    max_stroke_travel_mrev: u32,
+    settle_travel_reserve_mrev: u32,
+    negative_position_headroom_mrev: u32,
+    positive_position_headroom_mrev: u32,
     max_duration_ms: u16,
-    direction_mask: u8,
 ) {
     let channel = match ctx.state().stepper_channel(oid) {
         Some(channel) => channel,
@@ -70,10 +74,14 @@ pub fn foci_tune(
         current_ringing,
         current_bw,
         inner_warning_flags,
-        max_travel_mrev,
-        max_velocity_mrev_s,
+        requested_velocity_mrev_s,
+        machine_velocity_ceiling_mrev_s,
+        requested_velocity_source,
+        max_stroke_travel_mrev,
+        settle_travel_reserve_mrev,
+        negative_position_headroom_mrev,
+        positive_position_headroom_mrev,
         max_duration_ms,
-        direction_mask,
     });
 }
 
