@@ -519,6 +519,8 @@ mod app {
         defmt::info!("TMC4671 STATUS EXTI2 enabled");
 
         let mut runtimes = new_tmc_runtimes();
+        let mut stage_b_candidate =
+            foci_firmware::commissioning::outer::velocity::reproduction::StageBCandidateSlot::new();
         // Board constants bundled once and passed to runtime commissioning tick.
         let tmc_control_config = foci_firmware::tmc_control::TmcControlConfig::new(
             CLOCK_FREQ,
@@ -800,6 +802,7 @@ mod app {
                             .store(false, core::sync::atomic::Ordering::Relaxed);
                     }
                     shutdown_handled = all_shutdown_safe_state_complete;
+                    stage_b_candidate.clear();
                 }
                 Mono::delay(1.millis()).await;
                 continue;
@@ -809,6 +812,7 @@ mod app {
             // Drain stale requests after config_reset
             if TMC_QUEUE_FLUSH.swap(false, core::sync::atomic::Ordering::Relaxed) {
                 commission_measurement_active.fill(false);
+                stage_b_candidate.clear();
                 while rx.try_recv().is_ok() {}
                 let mut needs_disarm = [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
                 for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
@@ -962,6 +966,7 @@ mod app {
                             .drive_commissioning_poll(
                                 poll,
                                 &mut backend,
+                                &mut stage_b_candidate,
                                 tmc_state(channel),
                                 stepper_state(channel),
                                 &tmc_control_config,
@@ -1129,6 +1134,7 @@ mod app {
                                                         tmc: &mut request_tmc,
                                                         enable_pins,
                                                         commission_trace_engine_seq: &mut commission_trace_engine_seq,
+                                                        stage_b_candidate: &mut stage_b_candidate,
                                                     },
                                                 )
                                                 .await;
@@ -1291,6 +1297,7 @@ mod app {
                             tmc: &mut tmc,
                             enable_pins,
                             commission_trace_engine_seq: &mut commission_trace_engine_seq,
+                            stage_b_candidate: &mut stage_b_candidate,
                         },
                     )
                     .await;

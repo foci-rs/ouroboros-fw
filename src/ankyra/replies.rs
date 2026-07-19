@@ -5,7 +5,81 @@
 
 struct BoardCommissionReplySink;
 
+macro_rules! forward_commission_reply {
+    ($method:ident, $reply:ident, $( $field:ident : $field_ty:ty ),+ $(,)?) => {
+        fn $method(&mut self, report: foci_firmware::ankyra::replies::$reply) {
+            ::ankyra::klipper_reply_from!(
+                &mut crate::_ankyra_config::Sender,
+                foci_firmware::ankyra::replies::$reply,
+                $( $field: $field_ty = report.$field, )+
+            );
+        }
+    };
+}
+
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
+    forward_commission_reply!(foci_velocity_structured_boundary, FociVelocityStructuredBoundary,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8, slot: u8,
+        passing_suffix_mask: u8, rate_low_mantissa: i32, rate_high_mantissa: i32,
+        rate_shift: u8, slope_margin_mantissa: i32, slope_margin_shift: u8,
+        lag_one_margin_q: i32);
+    forward_commission_reply!(foci_velocity_directional_region_core, FociVelocityDirectionalRegionCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction_kind_closure: u8,
+        member_mask: u32, rung_bounds: u16, p_low: u16, p_high: u16, member_count: u8,
+        boundary_rung_plus_one: u8);
+    forward_commission_reply!(foci_velocity_directional_region_model, FociVelocityDirectionalRegionModel,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, member_mask: u32,
+        common_low_q16: i32, common_high_q16: i32, pooled_q16: i32, pooled_low_q16: i32,
+        pooled_high_q16: i32, variance_floor_observations: u8);
+    forward_commission_reply!(foci_velocity_directional_region_rates, FociVelocityDirectionalRegionRates,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, member_mask: u32,
+        mean_min_mantissa: i32, mean_max_mantissa: i32, envelope_low_mantissa: i32,
+        envelope_high_mantissa: i32, rate_shift: u8);
+    forward_commission_reply!(foci_velocity_directional_region_boundary, FociVelocityDirectionalRegionBoundary,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, member_mask: u32,
+        tested_low_q16: i32, tested_high_q16: i32);
+    forward_commission_reply!(foci_velocity_joint_region, FociVelocityJointRegion,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, member_mask: u32,
+        rung_bounds: u16, member_count: u8, p_low: u16, p_high: u16, closure: u8);
+    forward_commission_reply!(foci_velocity_stage_b_handoff_core, FociVelocityStageBHandoffCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, nominated_p: u16,
+        joint_member_mask: u32, forward_member_mask: u32, reverse_member_mask: u32, flags: u8);
+    forward_commission_reply!(foci_velocity_stage_b_nomination, FociVelocityStageBNomination,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, nominated_rung: u8,
+        nominated_p: u16, distance_to_start_q16: u32, distance_to_top_q16: u32, flags: u8);
+    forward_commission_reply!(foci_velocity_stage_b_directional_handoff, FociVelocityStageBDirectionalHandoff,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8, member_mask: u32,
+        coverage: u8, signed_rung_distance: i32, gain_ratio_num: u16, gain_ratio_den: u16,
+        settled_rate_difference_mantissa: i32, settled_rate_difference_shift: u8);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_core, FociVelocityStageBReproductionCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, outcome: u8,
+        previous_nominated_p: u16, current_nominated_p: u16);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_membership, FociVelocityStageBReproductionMembership,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, previous_forward_mask: u32,
+        previous_reverse_mask: u32, previous_joint_mask: u32, current_forward_mask: u32,
+        current_reverse_mask: u32, current_joint_mask: u32);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_interval, FociVelocityStageBReproductionInterval,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
+        previous_low_q16: i32, previous_high_q16: i32, current_low_q16: i32,
+        current_high_q16: i32);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_digest, FociVelocityStageBReproductionDigest,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, previous_digest_low: u32,
+        previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
+    forward_commission_reply!(foci_velocity_stage_b_terminal_core, FociVelocityStageBTerminalCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, outcome: u8,
+        cause: u8, model_direction_mask: u8, coverage_mask: u8, forward_region_count: u8,
+        reverse_region_count: u8, forward_fragment_count: u8, reverse_fragment_count: u8,
+        expected_observations: u16, emitted_observations: u16, expected_rungs: u16,
+        emitted_rungs: u16);
+    forward_commission_reply!(foci_velocity_stage_b_terminal_identity, FociVelocityStageBTerminalIdentity,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        forward_member_mask: u32, reverse_member_mask: u32, joint_member_mask: u32,
+        nominated_p: u16, plan_digest_low: u32, plan_digest_high: u32,
+        digest_low: u32, digest_high: u32);
+    forward_commission_reply!(foci_velocity_stage_b_terminal_interval, FociVelocityStageBTerminalInterval,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, direction: u8,
+        pooled_low_q16: i32, pooled_high_q16: i32, started_low: u32, started_high: u32,
+        completed_low: u32, completed_high: u32);
     fn foci_velocity_sweep_plan_limits(
         &mut self,
         report: foci_firmware::ankyra::replies::FociVelocitySweepPlanLimits,

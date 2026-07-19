@@ -38,6 +38,14 @@ const _: () = assert!(
         == foci_firmware::commissioning::outer::velocity::sweep_plan::ENVELOPE_ABSOLUTE_MARGIN_MREV_S
 );
 
+#[klipper_constant]
+pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 1;
+const _: () = assert!(
+    STAGE_B_EVIDENCE_SCHEMA_REVISION
+        == foci_firmware::commissioning::outer::velocity::reproduction::STAGE_B_EVIDENCE_SCHEMA_REVISION
+            as u32
+);
+
 #[allow(dead_code)]
 #[klipper_constant]
 pub const MCU: &str = "stm32h723xx";
