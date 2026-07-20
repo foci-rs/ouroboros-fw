@@ -236,53 +236,21 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
-    fn foci_velocity_rung_verdict_band(
-        &mut self,
-        report: foci_firmware::ankyra::replies::FociVelocityRungVerdictBand,
-    ) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociVelocityRungVerdictBand,
-            oid: u8 = report.oid,
-            run_sequence: u32 = report.run_sequence,
-            evidence_sequence: u16 = report.evidence_sequence,
-            fragment: u8 = report.fragment,
-            rung_index: u8 = report.rung_index,
-            velocity_p: u16 = report.velocity_p,
-            forward_low_q16: i32 = report.forward_low_q16,
-            forward_high_q16: i32 = report.forward_high_q16,
-            reverse_low_q16: i32 = report.reverse_low_q16,
-            reverse_high_q16: i32 = report.reverse_high_q16,
-            forward_p_low: u16 = report.forward_p_low,
-            forward_p_high: u16 = report.forward_p_high,
-            reverse_p_low: u16 = report.reverse_p_low,
-            reverse_p_high: u16 = report.reverse_p_high,
-        );
-    }
-
-    fn foci_velocity_rung_verdict_quality(
-        &mut self,
-        report: foci_firmware::ankyra::replies::FociVelocityRungVerdictQuality,
-    ) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociVelocityRungVerdictQuality,
-            oid: u8 = report.oid,
-            run_sequence: u32 = report.run_sequence,
-            evidence_sequence: u16 = report.evidence_sequence,
-            fragment: u8 = report.fragment,
-            rung_index: u8 = report.rung_index,
-            forward_class: u8 = report.forward_class,
-            reverse_class: u8 = report.reverse_class,
-            forward_closure: u8 = report.forward_closure,
-            reverse_closure: u8 = report.reverse_closure,
-            flags: u8 = report.flags,
-            forward_eligible_rungs: u8 = report.forward_eligible_rungs,
-            reverse_eligible_rungs: u8 = report.reverse_eligible_rungs,
-            forward_eligible_observations: u16 = report.forward_eligible_observations,
-            reverse_eligible_observations: u16 = report.reverse_eligible_observations,
-        );
-    }
+    forward_commission_reply!(foci_velocity_rung_consensus_core, FociVelocityRungConsensusCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, rung_index: u8,
+        velocity_p: u16, forward_class: u8, reverse_class: u8, forward_collected_mask: u8,
+        reverse_collected_mask: u8, forward_eligible_mask: u8, reverse_eligible_mask: u8,
+        forward_included_mask: u8, reverse_included_mask: u8, forward_component_count: u8,
+        reverse_component_count: u8, forward_operable_count: u8, reverse_operable_count: u8,
+        flags: u8);
+    forward_commission_reply!(foci_velocity_rung_consensus_component, FociVelocityRungConsensusComponent,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, rung_index: u8,
+        direction: u8, component_index: u8, low_q16: i32, high_q16: i32);
+    forward_commission_reply!(foci_velocity_rung_consensus_pool, FociVelocityRungConsensusPool,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, rung_index: u8,
+        direction: u8, pooled_q16: i32, pooled_low_q16: i32, pooled_high_q16: i32,
+        variance_floor_observations: u8, mean_min_mantissa: i32, mean_max_mantissa: i32,
+        envelope_low_mantissa: i32, envelope_high_mantissa: i32, rate_shift: u8);
 
     fn foci_velocity_sweep_terminal_direction(
         &mut self,
