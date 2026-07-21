@@ -126,7 +126,6 @@ mod app {
                 | BoardAction::Stepper(StepperAction::ApplyPostAction(_))
                 | BoardAction::Shutdown(_)
                 | BoardAction::SignalEmergencyDisable
-                | BoardAction::Reply(_)
                 | BoardAction::DelegatedDiagnostic(_) => {}
             }
         }
@@ -992,14 +991,14 @@ mod app {
                             .drive_commissioning_poll_with_stages(
                                 poll,
                                 &mut backend,
-                                foci_firmware::commission_dispatch::CommissionRetention::new(
+                                foci_firmware::commission_dispatch::CommissionTerminalContext::new(
                                     &mut stage_b_candidate,
                                     &mut *stage_c_candidate,
+                                    crate::ankyra::replies::emit_terminal_reply,
                                 ),
                                 tmc_state(channel),
                                 stepper_state(channel),
                                 &tmc_control_config,
-                                crate::ankyra::replies::emit_terminal_reply,
                             )
                             .await;
                         #[cfg(not(feature = "trace-velocity-sweep"))]

@@ -127,10 +127,6 @@ where
             defmt::warn!("TMC runtime post-action requires dispatch state; handled inline");
             None
         }
-        BoardAction::Reply(reply) => {
-            emit_reply(reply);
-            Some(TmcPreRequestDisposition::RequestHandled)
-        }
         BoardAction::DelegatedDiagnostic(delegated) => {
             Some(TmcPreRequestDisposition::RunDiagnostic(delegated.request))
         }
@@ -182,10 +178,6 @@ pub(crate) fn emit_shutdown(reason: ShutdownReason) {
             clock,
         ),
     }
-}
-
-fn emit_reply(reply: ReplyPayload) {
-    crate::ankyra::replies::emit_terminal_reply(reply);
 }
 
 #[cfg(test)]
