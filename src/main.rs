@@ -521,6 +521,8 @@ mod app {
         let mut runtimes = new_tmc_runtimes();
         let mut stage_b_candidate =
             foci_firmware::commissioning::outer::velocity::reproduction::StageBCandidateSlot::new();
+        #[cfg(feature = "trace-velocity-sweep")]
+        let mut stage_c_candidate = foci_firmware::commissioning::outer::velocity::integral_reproduction::StageCCandidateSlot::new();
         // Board constants bundled once and passed to runtime commissioning tick.
         let tmc_control_config = foci_firmware::tmc_control::TmcControlConfig::new(
             CLOCK_FREQ,
@@ -803,6 +805,8 @@ mod app {
                     }
                     shutdown_handled = all_shutdown_safe_state_complete;
                     stage_b_candidate.clear();
+                    #[cfg(feature = "trace-velocity-sweep")]
+                    stage_c_candidate.observe_fault();
                 }
                 Mono::delay(1.millis()).await;
                 continue;
@@ -813,6 +817,8 @@ mod app {
             if TMC_QUEUE_FLUSH.swap(false, core::sync::atomic::Ordering::Relaxed) {
                 commission_measurement_active.fill(false);
                 stage_b_candidate.clear();
+                #[cfg(feature = "trace-velocity-sweep")]
+                stage_c_candidate.observe_fault();
                 while rx.try_recv().is_ok() {}
                 let mut needs_disarm = [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
                 for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
@@ -962,7 +968,22 @@ mod app {
                         let runtime = &mut runtimes[channel_idx];
                         let mut backend =
                             ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        runtime
+                        #[cfg(feature = "trace-velocity-sweep")]
+                        let action = runtime
+                            .drive_commissioning_poll_with_stages(
+                                poll,
+                                &mut backend,
+                                foci_firmware::commission_dispatch::CommissionRetention::new(
+                                    &mut stage_b_candidate,
+                                    &mut stage_c_candidate,
+                                ),
+                                tmc_state(channel),
+                                stepper_state(channel),
+                                &tmc_control_config,
+                            )
+                            .await;
+                        #[cfg(not(feature = "trace-velocity-sweep"))]
+                        let action = runtime
                             .drive_commissioning_poll(
                                 poll,
                                 &mut backend,
@@ -971,8 +992,8 @@ mod app {
                                 stepper_state(channel),
                                 &tmc_control_config,
                             )
-                            .await
-                            .expect("active commissioning poll produces an action")
+                            .await;
+                        action.expect("active commissioning poll produces an action")
                     };
                     let tick_cycles =
                         cortex_m::peripheral::DWT::cycle_count().wrapping_sub(tick_start);
@@ -1005,6 +1026,14 @@ mod app {
                                         event,
                                     } => {
                                         crate::ankyra::replies::emit_velocity_sweep_event(oid, event);
+                                    }
+                                    foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegral {
+                                        oid,
+                                        event,
+                                    } => {
+                                        crate::ankyra::replies::emit_velocity_integral_event(
+                                            oid, event,
+                                        );
                                     }
                                 }
                             }
@@ -1135,6 +1164,8 @@ mod app {
                                                         enable_pins,
                                                         commission_trace_engine_seq: &mut commission_trace_engine_seq,
                                                         stage_b_candidate: &mut stage_b_candidate,
+                                                        #[cfg(feature = "trace-velocity-sweep")]
+                                                        stage_c_candidate: &mut stage_c_candidate,
                                                     },
                                                 )
                                                 .await;
@@ -1298,6 +1329,8 @@ mod app {
                             enable_pins,
                             commission_trace_engine_seq: &mut commission_trace_engine_seq,
                             stage_b_candidate: &mut stage_b_candidate,
+                            #[cfg(feature = "trace-velocity-sweep")]
+                            stage_c_candidate: &mut stage_c_candidate,
                         },
                     )
                     .await;

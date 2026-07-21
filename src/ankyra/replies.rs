@@ -18,6 +18,99 @@ macro_rules! forward_commission_reply {
 }
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
+    forward_commission_reply!(foci_commissioning_workflow_plan, FociCommissioningWorkflowPlan,
+        oid: u8, run_sequence: u32, shape: u8, digest_low: u32, digest_high: u32,
+        nominal_workflow_ms: u32, maximum_workflow_ms: u32);
+    forward_commission_reply!(foci_velocity_integral_plan_core, FociVelocityIntegralPlanCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        plan_digest_low: u32, plan_digest_high: u32, stage_b_digest_low: u32,
+        stage_b_digest_high: u32, build_revision: u32, schema_revision: u16,
+        channel: u8, final_p: u16);
+    forward_commission_reply!(foci_velocity_integral_plan_geometry, FociVelocityIntegralPlanGeometry,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        planned_velocity_mrev_s: u32, target_velocity_rpm: i32, pwm_hz: u32,
+        encoder_counts_per_rev: u32, i_start: u16, positive_rung_count: u8,
+        family_size: u16, total_rung_count: u8, expected_observations: u16,
+        hard_torque_limit: u16, usable_torque_limit: u16);
+    forward_commission_reply!(foci_velocity_integral_plan_authority, FociVelocityIntegralPlanAuthority,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
+        directional_membership: u32, joint_membership: u32, pooled_low_q16: i32,
+        pooled_high_q16: i32);
+    forward_commission_reply!(foci_velocity_integral_plan_timing, FociVelocityIntegralPlanTiming,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        moving_stroke_us: u32, zero_settle_us: u32, analysis_budget_us: u32,
+        nominal_workflow_ms: u32, maximum_workflow_ms: u32);
+    forward_commission_reply!(foci_velocity_integral_plan_travel, FociVelocityIntegralPlanTravel,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        max_stroke_travel_mrev: u32, settle_travel_reserve_mrev: u32,
+        negative_position_headroom_mrev: u32, positive_position_headroom_mrev: u32);
+    forward_commission_reply!(foci_velocity_integral_plan_rung, FociVelocityIntegralPlanRung,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8,
+        i_raw: u16, tau_us: u32);
+    forward_commission_reply!(foci_velocity_integral_observation_core, FociVelocityIntegralObservationCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        plan_digest_low: u32, plan_digest_high: u32, rung_index: u8, slot: u8,
+        i_raw: u16, direction: u8, classification: u8, initial_lead_in: u8,
+        peak_torque_target_abs: u16);
+    forward_commission_reply!(foci_velocity_integral_observation_rate, FociVelocityIntegralObservationRate,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        settled_low: i32, settled_mean: i32, settled_high: i32, settled_shift: u8,
+        deficit_low_q: i32, deficit_high_q: i32);
+    forward_commission_reply!(foci_velocity_integral_observation_quality, FociVelocityIntegralObservationQuality,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        suffix_len: u16, level_or_exclusion: u8, selected_blocks: u32,
+        slope_mantissa: i32, slope_shift: u8, slope_half_width_mantissa: u32,
+        slope_half_width_shift: u8, lag_one_q: i32, lag_one_half_width_q: u32,
+        residual_mantissa: u32, residual_shift: u8, tested_suffixes: u8);
+    forward_commission_reply!(foci_velocity_integral_rung_core, FociVelocityIntegralRungCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        rung_index: u8, i_raw: u16, direction: u8, kind: u8, classification: u8,
+        component_count: u8, usable_mask: u8, included_mask: u8,
+        observation_classes: u16);
+    forward_commission_reply!(foci_velocity_integral_rung_component, FociVelocityIntegralRungComponent,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8,
+        direction: u8, component: u8, low_q: i32, high_q: i32);
+    forward_commission_reply!(foci_velocity_integral_run_summary, FociVelocityIntegralRunSummary,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        forward_eligible_mask: u32, reverse_eligible_mask: u32,
+        bookend_available_mask: u8, current_terminus_plus_one: u8,
+        sufficient_direction_mask: u8);
+    forward_commission_reply!(foci_velocity_integral_curve_interval, FociVelocityIntegralCurveInterval,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, kind: u8, direction: u8,
+        rung_index: u8, low_q: i32, high_q: i32);
+    forward_commission_reply!(foci_velocity_integral_drift, FociVelocityIntegralDrift,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
+        available: u8, opening_low_q: i32, opening_high_q: i32, closing_low_q: i32,
+        closing_high_q: i32);
+    forward_commission_reply!(foci_velocity_integral_stage_b_comparison, FociVelocityIntegralStageBComparison,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
+        stage_b_low_q16: i32, stage_b_high_q16: i32, expected_low_q: i32,
+        expected_high_q: i32, opening_low_q: i32, opening_high_q: i32);
+    forward_commission_reply!(foci_velocity_integral_reproduction_core, FociVelocityIntegralReproductionCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, outcome: u8,
+        direction_mask: u8);
+    forward_commission_reply!(foci_velocity_integral_reproduction_mask, FociVelocityIntegralReproductionMask,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
+        previous_mask: u32, current_mask: u32, shared_mask: u32, reproduced_mask: u32,
+        divergent_mask: u32, previous_only_mask: u32, current_only_mask: u32);
+    forward_commission_reply!(foci_velocity_integral_reproduction_interval, FociVelocityIntegralReproductionInterval,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
+        rung_index: u8, kind: u8, previous_low_q: i32, previous_high_q: i32,
+        current_low_q: i32, current_high_q: i32, result_low_or_gap_q: i32,
+        result_high_q: i32);
+    forward_commission_reply!(foci_velocity_integral_reproduction_digest, FociVelocityIntegralReproductionDigest,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, previous_digest_low: u32,
+        previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
+    forward_commission_reply!(foci_velocity_integral_terminal_core, FociVelocityIntegralTerminalCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        outcome: u8, cause: u8, expected_observations: u16, emitted_observations: u16,
+        expected_rungs: u16, emitted_rungs: u16);
+    forward_commission_reply!(foci_velocity_integral_terminal_identity, FociVelocityIntegralTerminalIdentity,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        plan_digest_low: u32, plan_digest_high: u32, digest_low: u32, digest_high: u32);
+    forward_commission_reply!(foci_velocity_integral_terminal_timing, FociVelocityIntegralTerminalTiming,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
+        started_low: u32, started_high: u32, completed_low: u32, completed_high: u32);
     forward_commission_reply!(foci_velocity_structured_boundary, FociVelocityStructuredBoundary,
         oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8, slot: u8,
         passing_suffix_mask: u8, rate_low_mantissa: i32, rate_high_mantissa: i32,
@@ -832,6 +925,25 @@ pub(crate) fn emit_velocity_sweep_event(
 ) {
     let mut sink = BoardCommissionReplySink;
     foci_firmware::commission_dispatch::emit_velocity_sweep_event(&mut sink, oid, event);
+}
+
+/// Emit one nonterminal velocity-integral evidence group.
+pub(crate) fn emit_velocity_integral_event(
+    oid: u8,
+    event: foci_firmware::commissioning::types::VelocityIntegralEvent,
+) {
+    #[cfg(feature = "trace-velocity-sweep")]
+    {
+        let mut sink = BoardCommissionReplySink;
+        foci_firmware::commission_dispatch::replies::emit_velocity_integral_event(
+            &mut sink, oid, event,
+        );
+    }
+    #[cfg(not(feature = "trace-velocity-sweep"))]
+    {
+        let _ = (oid, event);
+        unreachable!("velocity-integral event requires trace-velocity-sweep");
+    }
 }
 
 /// Emit a `FociCommissionPhase` reply for a phase transition.

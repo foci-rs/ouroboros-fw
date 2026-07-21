@@ -46,6 +46,37 @@ const _: () = assert!(
             as u32
 );
 
+#[klipper_constant]
+pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 1;
+const _: () = assert!(
+    STAGE_C_EVIDENCE_SCHEMA_REVISION
+        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_EVIDENCE_SCHEMA_REVISION
+            as u32
+);
+
+#[klipper_constant]
+pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;
+const _: () = assert!(
+    STAGE_C_MAX_POSITIVE_RUNGS
+        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_MAX_POSITIVE_RUNGS
+            as u32
+);
+
+#[klipper_constant]
+pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;
+const _: () = assert!(
+    STAGE_C_OBSERVATIONS_PER_DIRECTION
+        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_OBSERVATIONS_PER_DIRECTION
+            as u32
+);
+
+#[klipper_constant]
+pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;
+const _: () = assert!(
+    STAGE_C_OBSERVATIONS_PER_RUNG
+        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_OBSERVATIONS_PER_RUNG
+);
+
 #[allow(dead_code)]
 #[klipper_constant]
 pub const MCU: &str = "stm32h723xx";

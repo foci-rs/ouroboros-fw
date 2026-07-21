@@ -11,7 +11,7 @@ use foci_firmware::tmc_control::dispatch::RegisterRequestError;
 #[cfg(not(feature = "trace-velocity-sweep"))]
 use foci_firmware::tmc_control::request::handle_tmc_control_request as handle_shared_request;
 #[cfg(feature = "trace-velocity-sweep")]
-use foci_firmware::tmc_control::request::handle_tmc_control_request_with_stage_b;
+use foci_firmware::tmc_control::request::handle_tmc_control_request_with_stages;
 use foci_firmware::tmc_control::request::{
     MotionScaleMapperInstallError, TmcPreRequestDisposition, TmcRequestBoard,
 };
@@ -86,6 +86,10 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
 
     fn default_current_filter_hz(&self) -> u16 {
         crate::board_config::TMC_CONFIG.default_current_filter_hz()
+    }
+
+    fn pwm_freq_hz(&self) -> u32 {
+        crate::board_config::TMC_CONFIG.pwm_freq_hz()
     }
 
     fn motion_scale_queue_empty(&self) -> bool {
@@ -231,6 +235,8 @@ pub(crate) struct TmcControlRequestContext<'a, 'spi> {
     pub(crate) commission_trace_engine_seq: &'a mut [u32; TMC_CHANNEL_COUNT as usize],
     pub(crate) stage_b_candidate:
         &'a mut foci_firmware::commissioning::outer::velocity::reproduction::StageBCandidateSlot,
+    #[cfg(feature = "trace-velocity-sweep")]
+    pub(crate) stage_c_candidate: &'a mut foci_firmware::commissioning::outer::velocity::integral_reproduction::StageCCandidateSlot,
 }
 
 pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
@@ -246,6 +252,8 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         enable_pins,
         commission_trace_engine_seq,
         stage_b_candidate,
+        #[cfg(feature = "trace-velocity-sweep")]
+        stage_c_candidate,
     } = context;
     let runtime = &mut runtimes[channel as usize];
 
@@ -256,11 +264,12 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         commission_trace_engine_seq,
     );
     #[cfg(feature = "trace-velocity-sweep")]
-    return handle_tmc_control_request_with_stage_b(
+    return handle_tmc_control_request_with_stages(
         req,
         disposition,
         runtime,
         stage_b_candidate,
+        stage_c_candidate,
         tmc,
         &mut board,
     )
