@@ -231,6 +231,12 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn trace_event_ids_match_shared_recovery_and_timing_markers() {
+        assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
+        assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_OUTER_SAFETY_TIMING: u16 = 144"));
+    }
+
+    #[test]
     fn consensus_replies_fit_the_board_wire_budget() {
         assert_wire_budget(
             "consensus core",
