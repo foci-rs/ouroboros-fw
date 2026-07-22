@@ -18,6 +18,18 @@ macro_rules! forward_commission_reply {
 }
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
+    forward_commission_reply!(foci_rung_origin_recovery_core, FociRungOriginRecoveryCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, stage: u8,
+        rung_index: u8, p_raw: u16, binding_source: u8, outcome: u8);
+    forward_commission_reply!(foci_rung_origin_recovery_position, FociRungOriginRecoveryPosition,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, start_offset_counts: i32,
+        closest_offset_counts: i32, final_offset_counts: i32, origin_band_counts: u32);
+    forward_commission_reply!(foci_rung_origin_recovery_timing, FociRungOriginRecoveryTiming,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, moving_duration_us: u32,
+        settle_duration_us: u32, total_duration_us: u32);
+    forward_commission_reply!(foci_rung_origin_recovery_limits, FociRungOriginRecoveryLimits,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, planned_velocity_mrev_s: u32,
+        lower_rate_low: u32, lower_rate_high: u32, peak_torque_target_abs: u16);
     forward_commission_reply!(foci_commissioning_workflow_plan, FociCommissioningWorkflowPlan,
         oid: u8, run_sequence: u32, shape: u8, digest_low: u32, digest_high: u32,
         nominal_workflow_ms: u32, maximum_workflow_ms: u32);
@@ -44,6 +56,9 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
         max_stroke_travel_mrev: u32, settle_travel_reserve_mrev: u32,
         negative_position_headroom_mrev: u32, positive_position_headroom_mrev: u32);
+    forward_commission_reply!(foci_velocity_integral_plan_recovery, FociVelocityIntegralPlanRecovery,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, origin_band_counts: u32,
+        nominal_slot_us: u32, maximum_slot_us: u32, slot_count: u8);
     forward_commission_reply!(foci_velocity_integral_plan_rung, FociVelocityIntegralPlanRung,
         oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8,
         i_raw: u16, tau_us: u32);
@@ -103,7 +118,8 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
     forward_commission_reply!(foci_velocity_integral_terminal_core, FociVelocityIntegralTerminalCore,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
-        outcome: u8, cause: u8, expected_observations: u16, emitted_observations: u16,
+        outcome: u8, cause: u8, recovery_unavailable: u8,
+        expected_observations: u16, emitted_observations: u16,
         expected_rungs: u16, emitted_rungs: u16);
     forward_commission_reply!(foci_velocity_integral_terminal_identity, FociVelocityIntegralTerminalIdentity,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
@@ -169,7 +185,8 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
     forward_commission_reply!(foci_velocity_stage_b_terminal_core, FociVelocityStageBTerminalCore,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, outcome: u8,
-        cause: u8, model_direction_mask: u8, coverage_mask: u8, forward_region_count: u8,
+        cause: u8, recovery_unavailable: u8, model_direction_mask: u8, coverage_mask: u8,
+        forward_region_count: u8,
         reverse_region_count: u8, forward_fragment_count: u8, reverse_fragment_count: u8,
         expected_observations: u16, emitted_observations: u16, expected_rungs: u16,
         emitted_rungs: u16);
@@ -244,6 +261,10 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             maximum_workflow_ms: u32 = report.maximum_workflow_ms,
         );
     }
+
+    forward_commission_reply!(foci_velocity_sweep_plan_recovery, FociVelocitySweepPlanRecovery,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, origin_band_counts: u32,
+        nominal_slot_us: u32, maximum_slot_us: u32, slot_count: u8);
 
     fn foci_velocity_observation_core(
         &mut self,

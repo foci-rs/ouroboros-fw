@@ -15,6 +15,8 @@ mod commissioning_board_contract_tests {
     const REPLIES: &str = include_str!("../../src/ankyra/replies.rs");
     const CONSTANTS: &str = include_str!("../../src/ankyra/constants.rs");
     const PROVIDER: &str = include_str!("../../src/ankyra/provider.rs");
+    const SHARED_EVENTS: &str =
+        include_str!("../../../../shared/foci-firmware/src/trace/events.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -78,7 +80,7 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn board_publishes_the_stage_b_schema_revision() {
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 3;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 4;"));
     }
 
     #[test]
@@ -125,7 +127,7 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_publishes_the_stage_c_schema_and_geometry_constants() {
         for declaration in [
-            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 1;",
+            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 2;",
             "pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;",
             "pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
             "pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;",
@@ -133,6 +135,7 @@ mod commissioning_board_contract_tests {
             assert!(CONSTANTS.contains(declaration), "missing {declaration}");
         }
         for constant in [
+            "STAGE_B_EVIDENCE_SCHEMA_REVISION",
             "STAGE_C_EVIDENCE_SCHEMA_REVISION",
             "STAGE_C_MAX_POSITIVE_RUNGS",
             "STAGE_C_OBSERVATIONS_PER_DIRECTION",
@@ -140,6 +143,24 @@ mod commissioning_board_contract_tests {
         ] {
             assert!(PROVIDER.contains(constant), "provider omits {constant}");
         }
+    }
+
+    #[test]
+    fn board_forwards_rung_origin_recovery() {
+        for method in [
+            "foci_rung_origin_recovery_core",
+            "foci_rung_origin_recovery_position",
+            "foci_rung_origin_recovery_timing",
+            "foci_rung_origin_recovery_limits",
+            "foci_velocity_sweep_plan_recovery",
+            "foci_velocity_integral_plan_recovery",
+        ] {
+            assert!(REPLIES.contains(method), "missing board reply {method}");
+        }
+        assert!(REPLIES.contains("recovery_unavailable: u8"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 4;"));
+        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 2;"));
+        assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
     }
 
     #[test]
