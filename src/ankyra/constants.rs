@@ -39,7 +39,7 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 4;
+pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 5;
 const _: () = assert!(
     STAGE_B_EVIDENCE_SCHEMA_REVISION
         == foci_firmware::commissioning::outer::velocity::reproduction::STAGE_B_EVIDENCE_SCHEMA_REVISION
