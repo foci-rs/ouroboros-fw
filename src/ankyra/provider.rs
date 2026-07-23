@@ -50,5 +50,6 @@ ankyra::ankyra_provider! {
         crate::ankyra::constants::STAGE_C_MAX_POSITIVE_RUNGS,
         crate::ankyra::constants::STAGE_C_OBSERVATIONS_PER_DIRECTION,
         crate::ankyra::constants::STAGE_C_OBSERVATIONS_PER_RUNG,
+        crate::ankyra::constants::VELOCITY_LIMIT_EVIDENCE_CAPABILITY,
     ],
 }

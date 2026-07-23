@@ -39,7 +39,7 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 6;
+pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 7;
 const _: () = assert!(
     STAGE_B_EVIDENCE_SCHEMA_REVISION
         == foci_firmware::commissioning::outer::velocity::reproduction::STAGE_B_EVIDENCE_SCHEMA_REVISION
@@ -47,11 +47,18 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 2;
+pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 3;
 const _: () = assert!(
     STAGE_C_EVIDENCE_SCHEMA_REVISION
         == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_EVIDENCE_SCHEMA_REVISION
             as u32
+);
+
+#[klipper_constant]
+pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 0;
+const _: () = assert!(
+    VELOCITY_LIMIT_EVIDENCE_CAPABILITY
+        == foci_firmware::commissioning::outer::velocity::VELOCITY_LIMIT_EVIDENCE_CAPABILITY_BEST_EFFORT
 );
 
 #[klipper_constant]

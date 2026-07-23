@@ -30,6 +30,13 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
     forward_commission_reply!(foci_rung_origin_recovery_limits, FociRungOriginRecoveryLimits,
         oid: u8, run_sequence: u32, evidence_sequence: u16, planned_velocity_mrev_s: u32,
         lower_rate_low: u32, lower_rate_high: u32, peak_torque_target_abs: u16);
+    forward_commission_reply!(foci_velocity_primitive_current_evidence,
+        FociVelocityPrimitiveCurrentEvidence,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, stage: u8,
+        rung_index: u8, slot: u8, clamp_limit: u16, clamp_readback: u16,
+        moving_pid_output_peak: u16, zero_pid_output_peak: u16,
+        moving_status_flags: u32, zero_status_flags: u32, capability: u8,
+        contact: u8);
     forward_commission_reply!(foci_commissioning_workflow_plan, FociCommissioningWorkflowPlan,
         oid: u8, run_sequence: u32, shape: u8, digest_low: u32, digest_high: u32,
         nominal_workflow_ms: u32, maximum_workflow_ms: u32);
