@@ -80,7 +80,7 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn board_publishes_the_stage_b_schema_revision() {
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 5;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 6;"));
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod commissioning_board_contract_tests {
             assert!(REPLIES.contains(method), "missing board reply {method}");
         }
         assert!(REPLIES.contains("recovery_unavailable: u8"));
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 5;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 6;"));
         assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 2;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
     }
