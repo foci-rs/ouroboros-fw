@@ -9,7 +9,7 @@ use embassy_stm32::gpio::Output;
 use foci_firmware::state::trsync::HOMING_STATE;
 use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::TmcControlRuntime;
-#[cfg(feature = "trace-velocity-sweep")]
+#[cfg(feature = "trace-velocity-limit-latch-test")]
 use foci_firmware::tmc_diagnostics::VelocityLimitLatchReport;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
@@ -268,7 +268,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    #[cfg(feature = "trace-velocity-sweep")]
+    #[cfg(feature = "trace-velocity-limit-latch-test")]
     fn foci_velocity_limit_latch_flags(&mut self, report: VelocityLimitLatchReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
@@ -281,7 +281,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    #[cfg(feature = "trace-velocity-sweep")]
+    #[cfg(feature = "trace-velocity-limit-latch-test")]
     fn foci_velocity_limit_latch_motion(&mut self, report: VelocityLimitLatchReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
@@ -295,7 +295,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    #[cfg(feature = "trace-velocity-sweep")]
+    #[cfg(feature = "trace-velocity-limit-latch-test")]
     fn foci_velocity_limit_latch_restore(&mut self, report: VelocityLimitLatchReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
@@ -313,7 +313,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    #[cfg(feature = "trace-velocity-sweep")]
+    #[cfg(feature = "trace-velocity-limit-latch-test")]
     fn foci_velocity_limit_latch_result(&mut self, report: VelocityLimitLatchReport) {
         crate::usb_trace::request_event(
             foci_firmware::trace::events::EVENT_LEVEL_INFO,
