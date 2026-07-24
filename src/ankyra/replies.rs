@@ -18,18 +18,9 @@ macro_rules! forward_commission_reply {
 }
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
-    forward_commission_reply!(foci_rung_origin_recovery_core, FociRungOriginRecoveryCore,
+    forward_commission_reply!(foci_rung_origin_recovery_summary, FociRungOriginRecoverySummary,
         oid: u8, run_sequence: u32, evidence_sequence: u16, stage: u8,
         rung_index: u8, p_raw: u16, binding_source: u8, outcome: u8);
-    forward_commission_reply!(foci_rung_origin_recovery_position, FociRungOriginRecoveryPosition,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, start_offset_counts: i32,
-        closest_offset_counts: i32, final_offset_counts: i32, origin_band_counts: u32);
-    forward_commission_reply!(foci_rung_origin_recovery_timing, FociRungOriginRecoveryTiming,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, moving_duration_us: u32,
-        settle_duration_us: u32, total_duration_us: u32);
-    forward_commission_reply!(foci_rung_origin_recovery_limits, FociRungOriginRecoveryLimits,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, planned_velocity_mrev_s: u32,
-        lower_rate_low: u32, lower_rate_high: u32, peak_torque_target_abs: u16);
     forward_commission_reply!(foci_velocity_primitive_current_evidence,
         FociVelocityPrimitiveCurrentEvidence,
         oid: u8, run_sequence: u32, evidence_sequence: u16, stage: u8,

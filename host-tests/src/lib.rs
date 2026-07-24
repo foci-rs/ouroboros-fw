@@ -148,15 +148,34 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_forwards_rung_origin_recovery() {
         for method in [
-            "foci_rung_origin_recovery_core",
-            "foci_rung_origin_recovery_position",
-            "foci_rung_origin_recovery_timing",
-            "foci_rung_origin_recovery_limits",
+            "foci_rung_origin_recovery_summary",
             "foci_velocity_sweep_plan_recovery",
             "foci_velocity_integral_plan_recovery",
         ] {
             assert!(REPLIES.contains(method), "missing board reply {method}");
         }
+        for retired in [
+            "foci_rung_origin_recovery_core",
+            "foci_rung_origin_recovery_position",
+            "foci_rung_origin_recovery_timing",
+            "foci_rung_origin_recovery_limits",
+        ] {
+            assert!(!REPLIES.contains(retired), "retained board reply {retired}");
+        }
+        assert_reply_contract(
+            "foci_rung_origin_recovery_summary",
+            "FociRungOriginRecoverySummary",
+            &[
+                "oid: u8",
+                "run_sequence: u32",
+                "evidence_sequence: u16",
+                "stage: u8",
+                "rung_index: u8",
+                "p_raw: u16",
+                "binding_source: u8",
+                "outcome: u8",
+            ],
+        );
         assert!(REPLIES.contains("recovery_unavailable: u8"));
         assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 7;"));
         assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 4;"));
