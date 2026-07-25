@@ -197,7 +197,7 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_publishes_the_stage_c_schema_and_geometry_constants() {
         for declaration in [
-            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 4;",
+            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 5;",
             "pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;",
             "pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
             "pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;",
@@ -248,7 +248,7 @@ mod commissioning_board_contract_tests {
         );
         assert!(REPLIES.contains("recovery_unavailable: u8"));
         assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
-        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 4;"));
+        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 5;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
     }
 
