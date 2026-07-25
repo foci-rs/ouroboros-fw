@@ -64,23 +64,24 @@ mod commissioning_board_contract_tests {
             "foci_velocity_stage_b_handoff_core",
             "foci_velocity_stage_b_nomination",
             "foci_velocity_stage_b_directional_handoff",
-            "foci_velocity_stage_b_reproduction_v3_core",
-            "foci_velocity_stage_b_reproduction_v3_membership",
-            "foci_velocity_stage_b_reproduction_v3_pooled",
-            "foci_velocity_stage_b_reproduction_v3_common",
-            "foci_velocity_stage_b_reproduction_v3_coverage",
-            "foci_velocity_stage_b_reproduction_v3_digest",
+            "foci_velocity_stage_b_reproduction_v4_core",
+            "foci_velocity_stage_b_reproduction_v4_membership",
+            "foci_velocity_stage_b_reproduction_v4_pooled",
+            "foci_velocity_stage_b_reproduction_v4_common",
+            "foci_velocity_stage_b_reproduction_v4_coverage",
+            "foci_velocity_stage_b_reproduction_v4_digest",
             "foci_velocity_stage_b_terminal_core",
             "foci_velocity_stage_b_terminal_identity",
             "foci_velocity_stage_b_terminal_interval",
         ] {
             assert!(REPLIES.contains(method), "missing board reply {method}");
         }
+        assert!(!REPLIES.contains("foci_velocity_stage_b_reproduction_v3_"));
     }
 
     #[test]
     fn board_publishes_the_stage_b_schema_revision() {
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 7;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
     }
 
     #[test]
@@ -122,6 +123,56 @@ mod commissioning_board_contract_tests {
         ] {
             assert!(REPLIES.contains(method), "missing board reply {method}");
         }
+    }
+
+    #[test]
+    fn board_forwards_schema8_authority_without_narrowing() {
+        assert_reply_contract(
+            "foci_velocity_stage_b_reproduction_v4_core",
+            "FociVelocityStageBReproductionV4Core",
+            &[
+                "previous_provisional_p: u16",
+                "current_provisional_p: u16",
+                "final_p: u16",
+                "selected_joint_mask: u32",
+                "selected_first_rung: u8",
+                "selected_member_count: u8",
+                "forward_validity: u8",
+                "reverse_validity: u8",
+                "reduced_margin: u8",
+                "schema_revision: u16",
+            ],
+        );
+        assert_reply_contract(
+            "foci_velocity_stage_b_nomination",
+            "FociVelocityStageBNomination",
+            &["nominated_p: u16", "selected_joint_mask: u32"],
+        );
+        assert_reply_contract(
+            "foci_velocity_stage_b_directional_handoff",
+            "FociVelocityStageBDirectionalHandoff",
+            &["member_mask: u32", "region_class: u8", "coverage: u8"],
+        );
+        assert_reply_contract(
+            "foci_velocity_integral_plan_authority",
+            "FociVelocityIntegralPlanAuthority",
+            &[
+                "directional_membership: u32",
+                "joint_membership: u32",
+                "directional_validity: u8",
+                "reduced_margin: u8",
+            ],
+        );
+        assert_reply_contract(
+            "foci_velocity_integral_run_summary",
+            "FociVelocityIntegralRunSummary",
+            &["opening_available_mask: u8", "bookend_available_mask: u8"],
+        );
+        assert_reply_contract(
+            "foci_velocity_integral_stage_b_comparison",
+            "FociVelocityIntegralStageBComparison",
+            &["direction: u8", "available: u8"],
+        );
     }
 
     #[test]
@@ -177,7 +228,7 @@ mod commissioning_board_contract_tests {
             ],
         );
         assert!(REPLIES.contains("recovery_unavailable: u8"));
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 7;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
         assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 4;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
     }

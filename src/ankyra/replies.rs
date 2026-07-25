@@ -44,8 +44,8 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         hard_torque_limit: u16, usable_torque_limit: u16);
     forward_commission_reply!(foci_velocity_integral_plan_authority, FociVelocityIntegralPlanAuthority,
         oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
-        directional_membership: u32, joint_membership: u32, pooled_low_q16: i32,
-        pooled_high_q16: i32);
+        directional_membership: u32, joint_membership: u32, directional_validity: u8,
+        reduced_margin: u8, pooled_low_q16: i32, pooled_high_q16: i32);
     forward_commission_reply!(foci_velocity_integral_plan_timing, FociVelocityIntegralPlanTiming,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
         moving_stroke_us: u32, zero_settle_us: u32, analysis_budget_us: u32,
@@ -86,7 +86,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
     forward_commission_reply!(foci_velocity_integral_run_summary, FociVelocityIntegralRunSummary,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
         forward_eligible_mask: u32, reverse_eligible_mask: u32,
-        bookend_available_mask: u8, current_terminus_plus_one: u8,
+        opening_available_mask: u8, bookend_available_mask: u8, current_terminus_plus_one: u8,
         sufficient_direction_mask: u8);
     forward_commission_reply!(foci_velocity_integral_curve_interval, FociVelocityIntegralCurveInterval,
         oid: u8, run_sequence: u32, evidence_sequence: u16, kind: u8, direction: u8,
@@ -97,7 +97,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         closing_high_q: i32);
     forward_commission_reply!(foci_velocity_integral_stage_b_comparison, FociVelocityIntegralStageBComparison,
         oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
-        stage_b_low_q16: i32, stage_b_high_q16: i32, expected_low_q: i32,
+        available: u8, stage_b_low_q16: i32, stage_b_high_q16: i32, expected_low_q: i32,
         expected_high_q: i32, opening_low_q: i32, opening_high_q: i32);
     forward_commission_reply!(foci_velocity_integral_reproduction_core, FociVelocityIntegralReproductionCore,
         oid: u8, run_sequence: u32, evidence_sequence: u16, outcome: u8,
@@ -153,32 +153,36 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         joint_member_mask: u32, forward_member_mask: u32, reverse_member_mask: u32, flags: u8);
     forward_commission_reply!(foci_velocity_stage_b_nomination, FociVelocityStageBNomination,
         oid: u8, run_sequence: u32, evidence_sequence: u16, nominated_rung: u8,
-        nominated_p: u16, distance_to_start_q16: u32, distance_to_top_q16: u32, flags: u8);
+        nominated_p: u16, selected_joint_mask: u32, distance_to_start_q16: u32,
+        distance_to_top_q16: u32, flags: u8);
     forward_commission_reply!(foci_velocity_stage_b_directional_handoff, FociVelocityStageBDirectionalHandoff,
         oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8, member_mask: u32,
-        coverage: u8, signed_rung_distance: i32, gain_ratio_num: u16, gain_ratio_den: u16,
-        settled_rate_difference_mantissa: i32, settled_rate_difference_shift: u8);
-    forward_commission_reply!(foci_velocity_stage_b_reproduction_v3_core, FociVelocityStageBReproductionV3Core,
+        region_class: u8, coverage: u8, signed_rung_distance: i32, gain_ratio_num: u16,
+        gain_ratio_den: u16, settled_rate_difference_mantissa: i32,
+        settled_rate_difference_shift: u8);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_v4_core, FociVelocityStageBReproductionV4Core,
         oid: u8, run_sequence: u32, evidence_sequence: u16, outcome: u8, reason_mask: u8,
         previous_provisional_p: u16, current_provisional_p: u16, final_p: u16,
-        reduced_margin: u8, schema_revision: u16);
-    forward_commission_reply!(foci_velocity_stage_b_reproduction_v3_membership, FociVelocityStageBReproductionV3Membership,
+        selected_joint_mask: u32, selected_first_rung: u8, selected_member_count: u8,
+        forward_validity: u8, reverse_validity: u8, reduced_margin: u8,
+        schema_revision: u16);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_v4_membership, FociVelocityStageBReproductionV4Membership,
         oid: u8, run_sequence: u32, evidence_sequence: u16, object: u8, previous_mask: u32,
         current_mask: u32, core_mask: u32, previous_only_mask: u32, current_only_mask: u32,
         low_delta: i32, high_delta: i32);
-    forward_commission_reply!(foci_velocity_stage_b_reproduction_v3_pooled, FociVelocityStageBReproductionV3Pooled,
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_v4_pooled, FociVelocityStageBReproductionV4Pooled,
         oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
         previous_low_q16: i32, previous_high_q16: i32, current_low_q16: i32,
         current_high_q16: i32, overlap_low_q16: i32, overlap_high_q16: i32);
-    forward_commission_reply!(foci_velocity_stage_b_reproduction_v3_common, FociVelocityStageBReproductionV3Common,
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_v4_common, FociVelocityStageBReproductionV4Common,
         oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8,
         previous_low_q16: i32, previous_high_q16: i32, current_low_q16: i32,
         current_high_q16: i32, conservative_low_q16: i32, conservative_high_q16: i32,
         nonempty: u8);
-    forward_commission_reply!(foci_velocity_stage_b_reproduction_v3_coverage, FociVelocityStageBReproductionV3Coverage,
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_v4_coverage, FociVelocityStageBReproductionV4Coverage,
         oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8, coverage: u8,
         signed_rung_distance: i32, gain_ratio_num: u16, gain_ratio_den: u16);
-    forward_commission_reply!(foci_velocity_stage_b_reproduction_v3_digest, FociVelocityStageBReproductionV3Digest,
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_v4_digest, FociVelocityStageBReproductionV4Digest,
         oid: u8, run_sequence: u32, evidence_sequence: u16, previous_digest_low: u32,
         previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
     forward_commission_reply!(foci_velocity_stage_b_terminal_core, FociVelocityStageBTerminalCore,
