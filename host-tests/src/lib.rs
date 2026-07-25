@@ -53,6 +53,25 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn startup_establishes_pi_representation_per_channel_before_adc_vm_capture() {
+        let chip_identity = MAIN
+            .find("CHIPINFO_SI_TYPE")
+            .expect("startup must verify each TMC4671 identity");
+        let representation = MAIN
+            .find("bootstrap_pi_representation")
+            .expect("startup must establish the fixed PI representation");
+        let adc_vm = MAIN
+            .find("capture_adc_vm_offset")
+            .expect("startup must retain per-channel ADC-VM capture");
+
+        assert!(chip_identity < representation);
+        assert!(representation < adc_vm);
+        assert_eq!(MAIN.matches("bootstrap_pi_representation").count(), 1);
+        assert!(MAIN.contains("TMC4671 PI representation failed at boot"));
+        assert!(!MAIN.contains("0x15"));
+    }
+
+    #[test]
     fn board_forwards_the_complete_stage_b_reply_family() {
         for method in [
             "foci_velocity_structured_boundary",
