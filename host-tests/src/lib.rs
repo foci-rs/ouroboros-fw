@@ -219,10 +219,13 @@ mod commissioning_board_contract_tests {
             assert!(PROVIDER.contains(constant), "provider omits {constant}");
         }
         assert!(SHARED_TYPES.contains("Failed = 5"));
-        assert!(SHARED_INTEGRAL_REPORTING
-            .contains("PLAN_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 1"));
-        assert!(SHARED_INTEGRAL_REPORTING
-            .contains("TERMINAL_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 3"));
+        assert!(
+            SHARED_INTEGRAL_REPORTING.contains("PLAN_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 1")
+        );
+        assert!(
+            SHARED_INTEGRAL_REPORTING
+                .contains("TERMINAL_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 3")
+        );
     }
 
     #[test]
