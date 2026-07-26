@@ -17,6 +17,11 @@ mod commissioning_board_contract_tests {
     const PROVIDER: &str = include_str!("../../src/ankyra/provider.rs");
     const SHARED_EVENTS: &str =
         include_str!("../../../../shared/foci-firmware/src/trace/events.rs");
+    const SHARED_TYPES: &str =
+        include_str!("../../../../shared/foci-firmware/src/commissioning/types.rs");
+    const SHARED_INTEGRAL_REPORTING: &str = include_str!(
+        "../../../../shared/foci-firmware/src/commissioning/outer/velocity/integral_reporting.rs"
+    );
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -197,7 +202,7 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_publishes_the_stage_c_schema_and_geometry_constants() {
         for declaration in [
-            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 5;",
+            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 7;",
             "pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;",
             "pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
             "pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;",
@@ -213,6 +218,11 @@ mod commissioning_board_contract_tests {
         ] {
             assert!(PROVIDER.contains(constant), "provider omits {constant}");
         }
+        assert!(SHARED_TYPES.contains("Failed = 5"));
+        assert!(SHARED_INTEGRAL_REPORTING
+            .contains("PLAN_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 1"));
+        assert!(SHARED_INTEGRAL_REPORTING
+            .contains("TERMINAL_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 3"));
     }
 
     #[test]
@@ -248,7 +258,7 @@ mod commissioning_board_contract_tests {
         );
         assert!(REPLIES.contains("recovery_unavailable: u8"));
         assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
-        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 5;"));
+        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 7;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
     }
 
