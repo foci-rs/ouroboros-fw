@@ -56,7 +56,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         negative_position_headroom_mrev: u32, positive_position_headroom_mrev: u32);
     forward_commission_reply!(foci_velocity_integral_plan_recovery, FociVelocityIntegralPlanRecovery,
         oid: u8, run_sequence: u32, evidence_sequence: u16, origin_band_counts: u32,
-        nominal_slot_us: u32, maximum_slot_us: u32, slot_count: u8);
+        nominal_slot_us: u32, maximum_slot_us: u32, slot_count: u8, flags: u8);
     forward_commission_reply!(foci_velocity_integral_plan_rung, FociVelocityIntegralPlanRung,
         oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8,
         i_raw: u16, tau_us: u32);
@@ -116,7 +116,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
     forward_commission_reply!(foci_velocity_integral_terminal_core, FociVelocityIntegralTerminalCore,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
-        outcome: u8, cause: u8, recovery_unavailable: u8,
+        outcome: u8, cause: u8, recovery_flags: u8,
         rest_boundary_rung_plus_one: u8, rest_boundary_slot_plus_one: u8,
         expected_observations: u16, emitted_observations: u16,
         expected_rungs: u16, emitted_rungs: u16);
