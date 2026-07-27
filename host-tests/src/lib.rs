@@ -22,6 +22,9 @@ mod commissioning_board_contract_tests {
     const SHARED_INTEGRAL_REPORTING: &str = include_str!(
         "../../../../shared/foci-firmware/src/commissioning/outer/velocity/integral_reporting.rs"
     );
+    const SHARED_INTEGRAL_PLAN: &str = include_str!(
+        "../../../../shared/foci-firmware/src/commissioning/outer/velocity/integral_plan.rs"
+    );
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -105,7 +108,7 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn board_publishes_the_stage_b_schema_revision() {
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 9;"));
     }
 
     #[test]
@@ -202,7 +205,7 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_publishes_the_stage_c_schema_and_geometry_constants() {
         for declaration in [
-            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 7;",
+            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 8;",
             "pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;",
             "pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
             "pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;",
@@ -226,6 +229,14 @@ mod commissioning_board_contract_tests {
             SHARED_INTEGRAL_REPORTING
                 .contains("TERMINAL_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 3")
         );
+        assert_reply_contract(
+            "foci_commissioning_workflow_plan",
+            "FociCommissioningWorkflowPlan",
+            &["shape: u8"],
+        );
+        assert!(SHARED_INTEGRAL_PLAN.contains("CombinedPThenI = 3"));
+        assert!(!REPLIES.contains("foci_combined_"));
+        assert!(!REPLIES.contains("foci_velocity_combined_"));
     }
 
     #[test]
@@ -260,8 +271,8 @@ mod commissioning_board_contract_tests {
             ],
         );
         assert!(REPLIES.contains("recovery_unavailable: u8"));
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
-        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 7;"));
+        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 9;"));
+        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 8;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
     }
 
