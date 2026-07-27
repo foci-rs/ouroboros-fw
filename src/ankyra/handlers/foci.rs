@@ -38,6 +38,7 @@ use crate::trigger_domain::with_trigger_domain;
 pub fn foci_tune(
     ctx: &mut FirmwareCtx<'_>,
     oid: u8,
+    action: u8,
     profile: u8,
     mode: u8,
     inner_lambda: u32,
@@ -67,6 +68,7 @@ pub fn foci_tune(
     foci_tune_inner(FociTuneParams {
         channel,
         oid,
+        action,
         profile,
         mode,
         inner_lambda,

@@ -39,7 +39,7 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 9;
+pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 10;
 const _: () = assert!(
     STAGE_B_EVIDENCE_SCHEMA_REVISION
         == foci_firmware::commissioning::outer::velocity::combined_plan::COMBINED_STAGE_B_SCHEMA_REVISION
@@ -47,7 +47,7 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 9;
+pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 10;
 const _: () = assert!(
     STAGE_C_EVIDENCE_SCHEMA_REVISION
         == foci_firmware::commissioning::outer::velocity::combined_plan::COMBINED_STAGE_C_SCHEMA_REVISION

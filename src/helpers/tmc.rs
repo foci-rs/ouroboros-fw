@@ -27,6 +27,7 @@ impl TmcRequestQueueBoard for OuroborosTmcQueue {
 pub(crate) struct FociTuneParams {
     pub(crate) channel: u8,
     pub(crate) oid: u8,
+    pub(crate) action: u8,
     pub(crate) profile: u8,
     pub(crate) mode: u8,
     pub(crate) inner_lambda: u32,
@@ -62,6 +63,7 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
     use core::sync::atomic::Ordering::Relaxed;
     let FociTuneParams {
         oid,
+        action,
         profile,
         mode,
         inner_lambda,
@@ -79,6 +81,16 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         max_duration_ms,
         channel,
     } = params;
+    let Some(action) = foci_firmware::tmc::AutotuneAction::from_u8(action) else {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCommissionPhase,
+            oid: u8 = oid,
+            phase: u8 = 0,
+            status: u8 = foci_firmware::autotune::CommissionError::InvalidSchedule.status_code(),
+        );
+        return;
+    };
     let requested_velocity_source = match requested_velocity_source {
         0 => foci_firmware::commissioning::outer::velocity::sweep_plan::RequestedVelocitySource::Explicit,
         1 => foci_firmware::commissioning::outer::velocity::sweep_plan::RequestedVelocitySource::Defaulted,
@@ -107,9 +119,10 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         );
         return;
     }
-    if !tmc_send(foci_firmware::tmc::tmc_tune(
+    if !tmc_send(foci_firmware::tmc::tmc_tune_with_action(
         channel,
         oid,
+        action,
         profile,
         mode,
         inner_lambda,

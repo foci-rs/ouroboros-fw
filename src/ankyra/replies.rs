@@ -126,6 +126,10 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
     forward_commission_reply!(foci_velocity_integral_terminal_timing, FociVelocityIntegralTerminalTiming,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
         started_low: u32, started_high: u32, completed_low: u32, completed_high: u32);
+    forward_commission_reply!(foci_acceptance_matrix_plan, FociAcceptanceMatrixPlan,
+        oid: u8, payload: &[u8]);
+    forward_commission_reply!(foci_acceptance_matrix_terminal, FociAcceptanceMatrixTerminal,
+        oid: u8, payload: &[u8]);
     forward_commission_reply!(foci_velocity_structured_boundary, FociVelocityStructuredBoundary,
         oid: u8, run_sequence: u32, evidence_sequence: u16, rung_index: u8, slot: u8,
         passing_suffix_mask: u8, rate_low_mantissa: i32, rate_high_mantissa: i32,
