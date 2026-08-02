@@ -202,6 +202,7 @@ mod app {
         uid_str: [u8; 24] = [0; 24],
     ])]
     fn init(ctx: init::Context) -> (Shared, Local) {
+        foci_firmware::diagnostic::recover_last_boot_breakaway_breadcrumb();
         defmt::info!("FOCI Ouroboros starting");
 
         let p = embassy_stm32::init(crate::board_init::rcc_config());
