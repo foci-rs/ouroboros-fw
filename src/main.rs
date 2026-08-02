@@ -1188,7 +1188,6 @@ mod app {
 
                                                 let request_idx = request_channel as usize;
                                                 enable_pin(enable_pins, request_channel).set_low();
-                                                runtimes[request_idx].take_commission_engine();
                                                 tmc_state(request_channel).commission_in_flight.store(
                                                     false,
                                                     core::sync::atomic::Ordering::Relaxed,
