@@ -1097,6 +1097,15 @@ mod app {
                                         );
                                     }
                                     #[cfg(feature = "trace-velocity-sweep")]
+                                    foci_firmware::commissioning::schedule::CommissionEvent::BreakawayCampaign {
+                                        oid,
+                                        event,
+                                    } => {
+                                        crate::ankyra::replies::emit_breakaway_campaign_event(
+                                            oid, event,
+                                        );
+                                    }
+                                    #[cfg(feature = "trace-velocity-sweep")]
                                     foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegralPlan {
                                         oid,
                                         run_sequence,

@@ -974,6 +974,18 @@ pub(crate) fn emit_velocity_integral_event(
     }
 }
 
+/// Emit one breakaway-campaign evidence group.
+#[cfg(feature = "trace-velocity-sweep")]
+pub(crate) fn emit_breakaway_campaign_event(
+    oid: u8,
+    event: foci_firmware::commissioning::types::BreakawayCampaignEvent,
+) {
+    let mut sink = BoardCommissionReplySink;
+    foci_firmware::commission_dispatch::replies::emit_breakaway_campaign_event(
+        &mut sink, oid, event,
+    );
+}
+
 /// Emit the exact Stage-C plan an accepted breakaway campaign handed off to.
 ///
 /// The host assembler refuses every Stage-C observation until it has seen a
