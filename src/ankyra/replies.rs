@@ -974,6 +974,27 @@ pub(crate) fn emit_velocity_integral_event(
     }
 }
 
+/// Emit the exact Stage-C plan an accepted breakaway campaign handed off to.
+///
+/// The host assembler refuses every Stage-C observation until it has seen a
+/// complete plan, and a breakaway hand-off reaches Stage C on the
+/// scheduled-tick path, which carries the plan as a `CommissionEvent` rather
+/// than through a dispatch reply.
+#[cfg(feature = "trace-velocity-sweep")]
+pub(crate) fn emit_velocity_integral_plan(
+    oid: u8,
+    run_sequence: u32,
+    plan: foci_firmware::commissioning::outer::velocity::integral_plan::VelocityIntegralPlan,
+) {
+    let mut sink = BoardCommissionReplySink;
+    foci_firmware::commission_dispatch::replies::emit_velocity_integral_plan(
+        &mut sink,
+        oid,
+        run_sequence,
+        plan,
+    );
+}
+
 /// Emit a `FociCommissionPhase` reply for a phase transition.
 pub(crate) fn emit_phase_reply(oid: u8, phase_id: foci_firmware::autotune::PhaseId) {
     let mut sink = BoardCommissionReplySink;
