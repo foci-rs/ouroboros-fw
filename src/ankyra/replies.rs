@@ -18,6 +18,30 @@ macro_rules! forward_commission_reply {
 }
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
+    forward_commission_reply!(foci_breakaway_probe_plan, FociBreakawayProbePlan,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, max_observations: u8, search_count: u8, p_start_raw: u16, p_top_raw: u16, motion_threshold_counts: u32, max_capture_interval_us: u32);
+    forward_commission_reply!(foci_breakaway_probe_result, FociBreakawayProbeResult,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, rung_index: u8, breakaway_p_raw: u16, motion_threshold_counts: u32, observation_count: u8);
+    forward_commission_reply!(foci_breakaway_probe_terminal, FociBreakawayProbeTerminal,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, terminal_cause: u8, has_safety_fault: u8);
+    forward_commission_reply!(foci_breakaway_discovery_plan_identity, FociBreakawayDiscoveryPlanIdentity,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, prior_plan_digest_low: u32, prior_plan_digest_high: u32, family_size: u16);
+    forward_commission_reply!(foci_breakaway_discovery_plan_geometry, FociBreakawayDiscoveryPlanGeometry,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, schema_revision: u16, rung_count: u8, observations_per_direction: u16, floor_p_raw: u16, floor_origin: u8, breakaway_p_raw: u16, ceiling_p_raw: u16, first_additive_step_raw: u32, maximum_workflow_ms: u32);
+    forward_commission_reply!(foci_breakaway_ceiling_source, FociBreakawayCeilingSource,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, binding_source: u8);
+    forward_commission_reply!(foci_breakaway_rung_zero_diagnostic, FociBreakawayRungZeroDiagnostic,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, forward_moved: u8, reverse_moved: u8);
+    forward_commission_reply!(foci_breakaway_discovery_terminal, FociBreakawayDiscoveryTerminal,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, prior_plan_digest_low: u32, prior_plan_digest_high: u32, family_size: u16, terminal_cause: u8, collected_count: u8, has_safety_fault: u8);
+    forward_commission_reply!(foci_breakaway_confirmation_plan, FociBreakawayConfirmationPlan,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, prior_plan_digest_low: u32, prior_plan_digest_high: u32, family_size: u16, observations_per_direction: u16, candidate_p_raw: u16, band_lower_percent: u8, band_upper_percent: u8, capture_profile: u8, acceptance_rule: u8, nominated_margin_percent_milli: i32);
+    forward_commission_reply!(foci_breakaway_confirmation_terminal_identity, FociBreakawayConfirmationTerminalIdentity,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, prior_plan_digest_low: u32, prior_plan_digest_high: u32, family_size: u16, terminal_cause: u8);
+    forward_commission_reply!(foci_breakaway_confirmation_terminal_masks, FociBreakawayConfirmationTerminalMasks,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, forward_collected_mask: u8, forward_eligible_mask: u8, forward_included_mask: u8, reverse_collected_mask: u8, reverse_eligible_mask: u8, reverse_included_mask: u8, accepted: u8, confirmed_p_raw: u16, max_relative_se_permille: u16, required_relative_se_permille: u16, has_safety_fault: u8);
+    forward_commission_reply!(foci_breakaway_campaign_terminal, FociBreakawayCampaignTerminal,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, phase: u8, terminal_cause: u8, accepted: u8, stage_c_plan_digest_low: u32, stage_c_plan_digest_high: u32);
     forward_commission_reply!(foci_rung_origin_recovery_summary, FociRungOriginRecoverySummary,
         oid: u8, run_sequence: u32, evidence_sequence: u16, stage: u8,
         rung_index: u8, p_raw: u16, binding_source: u8, outcome: u8);
