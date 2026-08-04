@@ -18,6 +18,14 @@ macro_rules! forward_commission_reply {
 }
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_core, FociVelocityStageBReproductionCore,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, outcome: u8, previous_nominated_p: u16, current_nominated_p: u16);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_membership, FociVelocityStageBReproductionMembership,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, previous_forward_mask: u32, previous_reverse_mask: u32, previous_joint_mask: u32, current_forward_mask: u32, current_reverse_mask: u32, current_joint_mask: u32);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_interval, FociVelocityStageBReproductionInterval,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, direction: u8, previous_low_q16: i32, previous_high_q16: i32, current_low_q16: i32, current_high_q16: i32);
+    forward_commission_reply!(foci_velocity_stage_b_reproduction_digest, FociVelocityStageBReproductionDigest,
+        oid: u8, run_sequence: u32, evidence_sequence: u16, previous_digest_low: u32, previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
     forward_commission_reply!(foci_breakaway_probe_plan, FociBreakawayProbePlan,
         oid: u8, run_sequence: u32, evidence_sequence: u16, plan_digest_low: u32, plan_digest_high: u32, max_observations: u8, search_count: u8, p_start_raw: u16, p_top_raw: u16, motion_threshold_counts: u32, max_capture_interval_us: u32);
     forward_commission_reply!(foci_breakaway_probe_result, FociBreakawayProbeResult,
