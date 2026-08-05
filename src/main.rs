@@ -1437,8 +1437,31 @@ mod app {
                     }
                 }
                 Either::First(Err(_)) => {}
-                // 1ms timeout — write position target via SPI
-                Either::Second(()) => {}
+                // 1ms timeout — write position target via SPI, and push any
+                // configuration recorded by config-time setters. Those setters
+                // record state instead of enqueueing, so a connect-time burst
+                // cannot overflow the bounded TMC request channel.
+                Either::Second(()) => {
+                    for pending_channel in 0..foci_firmware::state::tmc::MAX_TMC_CHANNELS as u8 {
+                        let Some(device) = ctx.local.tmc_mux.device(pending_channel) else {
+                            continue;
+                        };
+                        let mut pending_tmc = tmc_driver(device);
+                        if foci_firmware::tmc_control::filters::apply_pending_config(
+                            &mut pending_tmc,
+                            tmc_state(pending_channel),
+                            TMC_CONFIG.pwm_maxcnt,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            defmt::error!(
+                                "pending TMC config apply failed: channel {}",
+                                pending_channel
+                            );
+                        }
+                    }
+                }
             }
 
             // Check emergency disable (non-blocking). Triggered by EXTI
