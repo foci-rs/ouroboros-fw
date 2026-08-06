@@ -297,10 +297,10 @@ mod app {
 
         // Spawn tasks
         stepper_reconcile::spawn().expect("stepper reconciliation worker must spawn exactly once");
-        tmc_control::spawn().ok();
-        usb_task::spawn().ok();
-        stats::spawn().ok();
-        watchdog::spawn().ok();
+        tmc_control::spawn().expect("tmc_control task must spawn exactly once");
+        usb_task::spawn().expect("usb_task must spawn exactly once");
+        stats::spawn().expect("stats task must spawn exactly once");
+        watchdog::spawn().expect("watchdog task must spawn exactly once");
 
         defmt::info!("FOCI Ouroboros initialized");
 

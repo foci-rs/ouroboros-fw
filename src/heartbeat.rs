@@ -1,7 +1,7 @@
-//! Periodic board heartbeat tasks: LED blink, stats output, and
-//! trsync-report drain. Each function is the body of an RTIC task
-//! declared in `main.rs`; the task shells handle only RTIC plumbing
-//! (Mono, local-resource binding) and delegate all work here.
+//! Periodic board heartbeat tasks: stats output and trsync-report drain.
+//! Each function is the body of an RTIC task declared in `main.rs`; the
+//! task shells handle only RTIC plumbing (Mono, local-resource binding)
+//! and delegate all work here.
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use embassy_stm32::peripherals;
