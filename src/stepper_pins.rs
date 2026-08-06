@@ -1,12 +1,5 @@
 //! Ouroboros production-v1 STEP/DIR GPIO operations.
 
-use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
-
-// Match Klipper's STM32H7 GPIO strategy: keep STEP parity in RAM and write
-// BSRR from the mirror instead of deriving toggle state from GPIO readback.
-static STEP_LEVELS: [AtomicBool; crate::board_config::TMC_CHANNEL_COUNT as usize] =
-    [const { AtomicBool::new(false) }; crate::board_config::TMC_CHANNEL_COUNT as usize];
-
 /// Set the DIR output for a motor channel.
 pub(crate) fn set_dir(channel: u8, forward: bool) -> Result<(), ()> {
     match channel {
@@ -36,10 +29,6 @@ pub(crate) fn set_dir(channel: u8, forward: bool) -> Result<(), ()> {
 
 /// Drive STEP to an explicit level for a motor channel.
 pub(crate) fn set_step(channel: u8, high: bool) -> Result<(), ()> {
-    let idx = channel as usize;
-    let Some(level) = STEP_LEVELS.get(idx) else {
-        return Err(());
-    };
     match channel {
         0 => {
             let gpio = embassy_stm32::pac::GPIOD;
@@ -63,16 +52,11 @@ pub(crate) fn set_step(channel: u8, high: bool) -> Result<(), ()> {
         }
         _ => return Err(()),
     }
-    level.store(high, Relaxed);
     Ok(())
 }
 
 /// Return STEP/DIR outputs to safe idle state for a motor channel.
 pub(crate) fn reset_idle(channel: u8) -> Result<(), ()> {
-    let idx = channel as usize;
-    let Some(level) = STEP_LEVELS.get(idx) else {
-        return Err(());
-    };
     match channel {
         0 => {
             let gpio = embassy_stm32::pac::GPIOD;
@@ -90,6 +74,5 @@ pub(crate) fn reset_idle(channel: u8) -> Result<(), ()> {
         }
         _ => return Err(()),
     }
-    level.store(false, Relaxed);
     Ok(())
 }
