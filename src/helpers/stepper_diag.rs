@@ -35,5 +35,6 @@ pub(crate) fn record_stepper_event(
     if stepper_event_pairs_perf_snapshot(reason) {
         crate::state::stepper_diag::record_perf_event(reason, channel, clock);
     }
+    foci_firmware::state::lifecycle::STEPPER_DIAG_PENDING.store(true, Relaxed);
     crate::app::stepper_diag_task::spawn().ok();
 }

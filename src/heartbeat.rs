@@ -86,32 +86,49 @@ pub fn stats_tick(
 
 /// Drain pending trsync reports and emit `trsync_state` replies.
 ///
-/// Spawned by the TIM5 CC2 ISR when any trsync has a pending report.
-/// The caller-supplied `drain_snapshots` closure collects snapshots in
-/// one brief critical section (typically inside the trigger-domain
-/// lock); the replies are then sent at P2 without holding that lock.
-pub fn emit_trigger_reports<F>(drain_snapshots: F, report_pending: &AtomicBool)
+/// Spawned by the TIM5 CC2 ISR when any trsync has a pending report. The
+/// caller-supplied `drain_snapshots` closure collects snapshots in one
+/// brief critical section (typically inside the trigger-domain lock); the
+/// replies are then sent at P2 without holding that lock.
+///
+/// Runs until a pass finds `report_pending` still clear afterward, via
+/// [`foci_firmware::helpers::drain::drain_until_quiescent`], so a report
+/// that a producer raises while this task is already running is never
+/// stranded behind the single-capacity spawn slot.
+pub fn emit_trigger_reports<F>(mut drain_snapshots: F, report_pending: &AtomicBool)
 where
-    F: FnOnce(&mut heapless::Vec<foci_klipper::trigger::ReportSnapshot, 4>),
+    F: FnMut(&mut heapless::Vec<foci_klipper::trigger::ReportSnapshot, 4>),
 {
-    let mut snapshots: heapless::Vec<foci_klipper::trigger::ReportSnapshot, 4> =
-        heapless::Vec::new();
-    drain_snapshots(&mut snapshots);
-    report_pending.store(false, Relaxed);
-    for snap in &snapshots {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            TrsyncState,
-            oid: u8 = snap.oid,
-            can_trigger: u8 = snap.can_trigger,
-            trigger_reason: u8 = snap.trigger_reason,
-            clock: u32 = snap.clock,
-        );
-    }
+    foci_firmware::helpers::drain::drain_until_quiescent(report_pending, || {
+        let mut snapshots: heapless::Vec<foci_klipper::trigger::ReportSnapshot, 4> =
+            heapless::Vec::new();
+        drain_snapshots(&mut snapshots);
+        for snap in &snapshots {
+            ::ankyra::klipper_reply_from!(
+                &mut crate::_ankyra_config::Sender,
+                TrsyncState,
+                oid: u8 = snap.oid,
+                can_trigger: u8 = snap.can_trigger,
+                trigger_reason: u8 = snap.trigger_reason,
+                clock: u32 = snap.clock,
+            );
+        }
+    });
 }
 
 /// Drain pending stepper diagnostic events and emit host-visible replies.
-pub fn emit_stepper_diagnostics() {
+///
+/// Runs until a pass finds `stepper_diag_pending` still clear afterward, via
+/// [`foci_firmware::helpers::drain::drain_until_quiescent`], so an event
+/// queued while this task is already running is never stranded behind the
+/// single-capacity spawn slot.
+pub fn emit_stepper_diagnostics(stepper_diag_pending: &AtomicBool) {
+    foci_firmware::helpers::drain::drain_until_quiescent(stepper_diag_pending, || {
+        emit_stepper_diagnostics_pass();
+    });
+}
+
+fn emit_stepper_diagnostics_pass() {
     while let Some(event) = crate::state::stepper_diag::pop_event() {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
