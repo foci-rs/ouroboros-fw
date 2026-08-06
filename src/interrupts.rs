@@ -42,5 +42,7 @@ pub fn tmc_status_irq(
     tim5.dier().modify(|w| w.set_ccie(0, false));
 
     tmc_disable_signal.signal(());
-    defmt::warn!("TMC4671 STATUS interrupt: fault detected, step timer disabled");
+    // No logging here: this P3 handler can fire repeatedly during energized
+    // injection, and a reentrant defmt call panics in RttEncoder::acquire.
+    // tmc_control logs the cause from STATUS_FLAGS on its next tick.
 }
