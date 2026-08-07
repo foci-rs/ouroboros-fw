@@ -1,13 +1,9 @@
 //! Trsync / endstop helpers: raw-PAC GPIO configuration and sampling
 //! for the Klipper pin enumeration. Promoted from `mod app` in
 //! `main.rs` by Task 8c so both the trsync/endstop handlers and the
-//! TIM5 CC1 ISR can share a single implementation.
-//!
-//! The `platform_impl` module already contains a PAC-backed
-//! `GpioEndstopInput` trait implementation; these helpers remain
-//! duplicated for now because Phase A-7 hands them off to that
-//! trait object in a later task. This file consolidates the callsite
-//! paths so that cutover happens in one place.
+//! TIM5 CC1 ISR can share a single implementation. This file
+//! consolidates the callsite paths so board GPIO access happens in
+//! one place.
 
 /// Total number of GPIO ports exposed in the pin enumeration
 /// (`PA`..`PE`).

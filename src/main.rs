@@ -20,7 +20,6 @@ mod firmware_ctx;
 mod heartbeat;
 mod helpers;
 mod interrupts;
-mod platform_impl;
 mod pulse_train;
 mod state;
 mod step_dispatch;
