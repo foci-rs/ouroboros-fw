@@ -66,7 +66,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
     forward_commission_reply!(foci_velocity_integral_plan_core, FociVelocityIntegralPlanCore,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
         plan_digest_low: u32, plan_digest_high: u32, stage_b_digest_low: u32,
-        stage_b_digest_high: u32, build_revision: u32, schema_revision: u16,
+        stage_b_digest_high: u32, build_features: u16, build_identity: u32, schema_revision: u16,
         channel: u8, final_p: u16);
     forward_commission_reply!(foci_velocity_integral_plan_geometry, FociVelocityIntegralPlanGeometry,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
