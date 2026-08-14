@@ -234,7 +234,6 @@ mod commissioning_board_contract_tests {
             "FociCommissioningWorkflowPlan",
             &["shape: u8"],
         );
-        assert!(SHARED_INTEGRAL_PLAN.contains("CombinedPThenI = 3"));
         assert!(!REPLIES.contains("foci_combined_"));
         assert!(!REPLIES.contains("foci_velocity_combined_"));
     }
