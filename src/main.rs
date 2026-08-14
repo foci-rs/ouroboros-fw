@@ -1081,12 +1081,6 @@ mod app {
                                         }
                                         emit_phase_reply(oid, phase_id);
                                     }
-                                    foci_firmware::commissioning::schedule::CommissionEvent::VelocitySweep {
-                                        oid,
-                                        event,
-                                    } => {
-                                        crate::ankyra::replies::emit_velocity_sweep_event(oid, event);
-                                    }
                                     foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegral {
                                         oid,
                                         event,

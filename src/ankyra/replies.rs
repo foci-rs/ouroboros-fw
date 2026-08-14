@@ -978,15 +978,6 @@ pub(crate) fn emit_terminal_reply(payload: foci_firmware::commission_dispatch::R
     foci_firmware::commission_dispatch::emit_terminal_reply(&mut sink, payload);
 }
 
-/// Emit one nonterminal velocity-sweep evidence group.
-pub(crate) fn emit_velocity_sweep_event(
-    oid: u8,
-    event: foci_firmware::commissioning::types::VelocitySweepEvent,
-) {
-    let mut sink = BoardCommissionReplySink;
-    foci_firmware::commission_dispatch::emit_velocity_sweep_event(&mut sink, oid, event);
-}
-
 /// Emit one nonterminal velocity-integral evidence group.
 pub(crate) fn emit_velocity_integral_event(
     oid: u8,
