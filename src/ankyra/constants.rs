@@ -42,7 +42,7 @@ const _: () = assert!(
 pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;
 const _: () = assert!(
     STAGE_B_EVIDENCE_SCHEMA_REVISION
-        == foci_firmware::commissioning::outer::velocity::combined_plan::COMBINED_STAGE_B_SCHEMA_REVISION
+        == foci_firmware::commissioning::outer::velocity::combined_plan::STAGE_B_PLAN_SCHEMA_REVISION
             as u32
 );
 
@@ -50,7 +50,7 @@ const _: () = assert!(
 pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 13;
 const _: () = assert!(
     STAGE_C_EVIDENCE_SCHEMA_REVISION
-        == foci_firmware::commissioning::outer::velocity::combined_plan::COMBINED_STAGE_C_SCHEMA_REVISION
+        == foci_firmware::commissioning::outer::velocity::combined_plan::STAGE_C_PLAN_SCHEMA_REVISION
             as u32
 );
 
