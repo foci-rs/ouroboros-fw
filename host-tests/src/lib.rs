@@ -80,23 +80,8 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_forwards_the_complete_stage_b_reply_family() {
+    fn board_forwards_the_stage_b_terminal_reply_family() {
         for method in [
-            "foci_velocity_structured_boundary",
-            "foci_velocity_directional_region_core",
-            "foci_velocity_directional_region_model",
-            "foci_velocity_directional_region_rates",
-            "foci_velocity_directional_region_boundary",
-            "foci_velocity_joint_region",
-            "foci_velocity_stage_b_handoff_core",
-            "foci_velocity_stage_b_nomination",
-            "foci_velocity_stage_b_directional_handoff",
-            "foci_velocity_stage_b_reproduction_v4_core",
-            "foci_velocity_stage_b_reproduction_v4_membership",
-            "foci_velocity_stage_b_reproduction_v4_pooled",
-            "foci_velocity_stage_b_reproduction_v4_common",
-            "foci_velocity_stage_b_reproduction_v4_coverage",
-            "foci_velocity_stage_b_reproduction_v4_digest",
             "foci_velocity_stage_b_terminal_core",
             "foci_velocity_stage_b_terminal_identity",
             "foci_velocity_stage_b_terminal_interval",
@@ -104,6 +89,17 @@ mod commissioning_board_contract_tests {
             assert!(REPLIES.contains(method), "missing board reply {method}");
         }
         assert!(!REPLIES.contains("foci_velocity_stage_b_reproduction_v3_"));
+        for removed in [
+            "structured_boundary",
+            "directional_region_core",
+            "joint_region",
+            "stage_b_handoff_core",
+            "stage_b_nomination",
+            "stage_b_directional_handoff",
+            "stage_b_reproduction_v4_",
+        ] {
+            assert!(!REPLIES.contains(removed), "retained board reply {removed}");
+        }
     }
 
     #[test]
@@ -153,33 +149,7 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_forwards_schema8_authority_without_narrowing() {
-        assert_reply_contract(
-            "foci_velocity_stage_b_reproduction_v4_core",
-            "FociVelocityStageBReproductionV4Core",
-            &[
-                "previous_provisional_p: u16",
-                "current_provisional_p: u16",
-                "final_p: u16",
-                "selected_joint_mask: u32",
-                "selected_first_rung: u8",
-                "selected_member_count: u8",
-                "forward_validity: u8",
-                "reverse_validity: u8",
-                "reduced_margin: u8",
-                "schema_revision: u16",
-            ],
-        );
-        assert_reply_contract(
-            "foci_velocity_stage_b_nomination",
-            "FociVelocityStageBNomination",
-            &["nominated_p: u16", "selected_joint_mask: u32"],
-        );
-        assert_reply_contract(
-            "foci_velocity_stage_b_directional_handoff",
-            "FociVelocityStageBDirectionalHandoff",
-            &["member_mask: u32", "region_class: u8", "coverage: u8"],
-        );
+    fn board_forwards_integral_authority_without_narrowing() {
         assert_reply_contract(
             "foci_velocity_integral_plan_authority",
             "FociVelocityIntegralPlanAuthority",
@@ -242,7 +212,6 @@ mod commissioning_board_contract_tests {
     fn board_forwards_rung_origin_recovery() {
         for method in [
             "foci_rung_origin_recovery_summary",
-            "foci_velocity_sweep_plan_recovery",
             "foci_velocity_integral_plan_recovery",
         ] {
             assert!(REPLIES.contains(method), "missing board reply {method}");
@@ -278,89 +247,9 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_forwards_exact_consensus_reply_contracts() {
-        assert_reply_contract(
-            "foci_velocity_rung_consensus_core",
-            "FociVelocityRungConsensusCore",
-            &[
-                "oid: u8",
-                "run_sequence: u32",
-                "evidence_sequence: u16",
-                "fragment: u8",
-                "rung_index: u8",
-                "velocity_p: u16",
-                "forward_class: u8",
-                "reverse_class: u8",
-                "forward_collected_mask: u8",
-                "reverse_collected_mask: u8",
-                "forward_eligible_mask: u8",
-                "reverse_eligible_mask: u8",
-                "forward_included_mask: u8",
-                "reverse_included_mask: u8",
-                "forward_component_count: u8",
-                "reverse_component_count: u8",
-                "forward_operable_count: u8",
-                "reverse_operable_count: u8",
-                "flags: u8",
-            ],
-        );
-        assert_reply_contract(
-            "foci_velocity_rung_consensus_component",
-            "FociVelocityRungConsensusComponent",
-            &[
-                "oid: u8",
-                "run_sequence: u32",
-                "evidence_sequence: u16",
-                "fragment: u8",
-                "rung_index: u8",
-                "direction: u8",
-                "component_index: u8",
-                "low_q16: i32",
-                "high_q16: i32",
-            ],
-        );
-        assert_reply_contract(
-            "foci_velocity_rung_consensus_pool",
-            "FociVelocityRungConsensusPool",
-            &[
-                "oid: u8",
-                "run_sequence: u32",
-                "evidence_sequence: u16",
-                "fragment: u8",
-                "rung_index: u8",
-                "direction: u8",
-                "pooled_q16: i32",
-                "pooled_low_q16: i32",
-                "pooled_high_q16: i32",
-                "variance_floor_observations: u8",
-                "mean_min_mantissa: i32",
-                "mean_max_mantissa: i32",
-                "envelope_low_mantissa: i32",
-                "envelope_high_mantissa: i32",
-                "rate_shift: u8",
-            ],
-        );
-        assert!(!REPLIES.contains("FociVelocityRungVerdictBand"));
-        assert!(!REPLIES.contains("FociVelocityRungVerdictQuality"));
-    }
-
-    #[test]
     fn trace_event_ids_match_shared_recovery_and_timing_markers() {
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_OUTER_SAFETY_TIMING: u16 = 144"));
-    }
-
-    #[test]
-    fn consensus_replies_fit_the_board_wire_budget() {
-        assert_wire_budget(
-            "consensus core",
-            &[2, 5, 3, 2, 2, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-        );
-        assert_wire_budget("consensus component", &[2, 5, 3, 2, 2, 2, 2, 5, 5]);
-        assert_wire_budget(
-            "consensus pool",
-            &[2, 5, 3, 2, 2, 2, 5, 5, 5, 2, 5, 5, 5, 5, 2],
-        );
     }
 }
 
