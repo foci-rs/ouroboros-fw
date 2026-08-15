@@ -140,7 +140,7 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         crate::ankyra::replies::emit_terminal_reply(payload);
     }
 
-    #[cfg(feature = "trace-velocity-sweep")]
+    #[cfg(feature = "trace")]
     fn record_velocity_sweep_trace_record(
         &mut self,
         record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,
