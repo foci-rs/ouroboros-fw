@@ -8,9 +8,6 @@ use foci_firmware::state::stepper::StepperChannelState;
 use foci_firmware::state::tmc::TmcChannelState;
 use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::dispatch::RegisterRequestError;
-#[cfg(not(feature = "trace-velocity-sweep"))]
-use foci_firmware::tmc_control::request::handle_tmc_control_request as handle_shared_request;
-#[cfg(feature = "trace-velocity-sweep")]
 use foci_firmware::tmc_control::request::handle_tmc_control_request_with_stages;
 use foci_firmware::tmc_control::request::{
     MotionScaleMapperInstallError, TmcPreRequestDisposition, TmcRequestBoard,
@@ -237,7 +234,6 @@ pub(crate) struct TmcControlRequestContext<'a, 'spi> {
     pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     pub(crate) enable_pins: &'a mut TmcEnablePins,
     pub(crate) commission_trace_engine_seq: &'a mut [u32; TMC_CHANNEL_COUNT as usize],
-    #[cfg(feature = "trace-velocity-sweep")]
     pub(crate) stage_c_candidate: &'a mut foci_firmware::commissioning::outer::velocity::integral_reproduction::StageCCandidateSlot,
 }
 
@@ -253,7 +249,6 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         tmc,
         enable_pins,
         commission_trace_engine_seq,
-        #[cfg(feature = "trace-velocity-sweep")]
         stage_c_candidate,
     } = context;
     let runtime = &mut runtimes[channel as usize];
@@ -264,8 +259,7 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         enable_pins,
         commission_trace_engine_seq,
     );
-    #[cfg(feature = "trace-velocity-sweep")]
-    return handle_tmc_control_request_with_stages(
+    handle_tmc_control_request_with_stages(
         req,
         disposition,
         runtime,
@@ -273,7 +267,5 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         tmc,
         &mut board,
     )
-    .await;
-    #[cfg(not(feature = "trace-velocity-sweep"))]
-    handle_shared_request(req, disposition, runtime, tmc, &mut board).await
+    .await
 }

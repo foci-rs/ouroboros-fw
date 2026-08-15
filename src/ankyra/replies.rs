@@ -656,22 +656,13 @@ pub(crate) fn emit_velocity_integral_event(
     oid: u8,
     event: foci_firmware::commissioning::types::VelocityIntegralEvent,
 ) {
-    #[cfg(feature = "trace-velocity-sweep")]
-    {
-        let mut sink = BoardCommissionReplySink;
-        foci_firmware::commission_dispatch::replies::emit_velocity_integral_event(
-            &mut sink, oid, event,
-        );
-    }
-    #[cfg(not(feature = "trace-velocity-sweep"))]
-    {
-        let _ = (oid, event);
-        unreachable!("velocity-integral event requires trace-velocity-sweep");
-    }
+    let mut sink = BoardCommissionReplySink;
+    foci_firmware::commission_dispatch::replies::emit_velocity_integral_event(
+        &mut sink, oid, event,
+    );
 }
 
 /// Emit one breakaway-campaign evidence group.
-#[cfg(feature = "trace-velocity-sweep")]
 pub(crate) fn emit_breakaway_campaign_event(
     oid: u8,
     event: foci_firmware::commissioning::types::BreakawayCampaignEvent,
@@ -688,7 +679,6 @@ pub(crate) fn emit_breakaway_campaign_event(
 /// complete plan, and a breakaway hand-off reaches Stage C on the
 /// scheduled-tick path, which carries the plan as a `CommissionEvent` rather
 /// than through a dispatch reply.
-#[cfg(feature = "trace-velocity-sweep")]
 pub(crate) fn emit_velocity_integral_plan(
     oid: u8,
     run_sequence: u32,
