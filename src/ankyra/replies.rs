@@ -154,22 +154,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         oid: u8, fragment: u8, payload: &[u8]);
     forward_commission_reply!(foci_acceptance_matrix_terminal, FociAcceptanceMatrixTerminal,
         oid: u8, payload: &[u8]);
-    forward_commission_reply!(foci_velocity_stage_b_terminal_core, FociVelocityStageBTerminalCore,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, outcome: u8,
-        cause: u8, recovery_unavailable: u8, model_direction_mask: u8, coverage_mask: u8,
-        forward_region_count: u8,
-        reverse_region_count: u8, forward_fragment_count: u8, reverse_fragment_count: u8,
-        expected_observations: u16, emitted_observations: u16, expected_rungs: u16,
-        emitted_rungs: u16);
-    forward_commission_reply!(foci_velocity_stage_b_terminal_identity, FociVelocityStageBTerminalIdentity,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
-        forward_member_mask: u32, reverse_member_mask: u32, joint_member_mask: u32,
-        nominated_p: u16, plan_digest_low: u32, plan_digest_high: u32,
-        digest_low: u32, digest_high: u32);
-    forward_commission_reply!(foci_velocity_stage_b_terminal_interval, FociVelocityStageBTerminalInterval,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8, direction: u8,
-        pooled_low_q16: i32, pooled_high_q16: i32, started_low: u32, started_high: u32,
-        completed_low: u32, completed_high: u32);
 
     fn foci_commission_detail(
         &mut self,

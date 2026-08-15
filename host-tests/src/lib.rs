@@ -80,14 +80,7 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_forwards_the_stage_b_terminal_reply_family() {
-        for method in [
-            "foci_velocity_stage_b_terminal_core",
-            "foci_velocity_stage_b_terminal_identity",
-            "foci_velocity_stage_b_terminal_interval",
-        ] {
-            assert!(REPLIES.contains(method), "missing board reply {method}");
-        }
+    fn board_does_not_forward_removed_stage_b_reply_families() {
         assert!(!REPLIES.contains("foci_velocity_stage_b_reproduction_v3_"));
         for removed in [
             "structured_boundary",
@@ -238,7 +231,6 @@ mod commissioning_board_contract_tests {
                 "outcome: u8",
             ],
         );
-        assert!(REPLIES.contains("recovery_unavailable: u8"));
         assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
         assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 13;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
