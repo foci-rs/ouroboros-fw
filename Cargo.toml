@@ -55,8 +55,7 @@ dev = ["foci-firmware/dev"]
 dev-flash = []
 trace = ["foci-firmware/trace", "foci-usb-stm32/trace"]
 trace-current-path = ["trace"]
-trace-velocity-sweep = ["trace", "foci-firmware/trace-velocity-sweep"]
 trace-velocity-limit-latch-test = [
-    "trace-velocity-sweep",
+    "trace",
     "foci-firmware/trace-velocity-limit-latch-test",
 ]
