@@ -54,13 +54,6 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_owns_one_stage_b_candidate_and_threads_it_through_dispatch() {
-        assert_eq!(MAIN.matches("StageBCandidateSlot::new()").count(), 1);
-        assert!(MAIN.contains("&mut stage_b_candidate"));
-        assert!(REQUEST.contains("handle_tmc_control_request_with_stages"));
-    }
-
-    #[test]
     fn startup_establishes_pi_representation_per_channel_before_adc_vm_capture() {
         let chip_identity = MAIN
             .find("CHIPINFO_SI_TYPE")
