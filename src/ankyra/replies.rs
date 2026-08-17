@@ -154,6 +154,8 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         oid: u8, fragment: u8, payload: &[u8]);
     forward_commission_reply!(foci_acceptance_matrix_terminal, FociAcceptanceMatrixTerminal,
         oid: u8, payload: &[u8]);
+    forward_commission_reply!(foci_robustness_cycle_evidence, FociRobustnessCycleEvidence,
+        oid: u8, payload: &[u8]);
     forward_commission_reply!(foci_robustness_reversal_terminal, FociRobustnessReversalTerminal,
         oid: u8, payload: &[u8]);
 
