@@ -129,6 +129,7 @@ mod commissioning_board_contract_tests {
             "foci_velocity_integral_terminal_core",
             "foci_velocity_integral_terminal_identity",
             "foci_velocity_integral_terminal_timing",
+            "foci_robustness_cycle_evidence",
             "foci_robustness_reversal_terminal",
         ] {
             assert!(REPLIES.contains(method), "missing board reply {method}");
