@@ -238,6 +238,51 @@ mod commissioning_board_contract_tests {
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_OUTER_SAFETY_TIMING: u16 = 144"));
     }
+
+    #[test]
+    fn board_forwards_the_tune_result_provenance_fields() {
+        assert_reply_contract(
+            "foci_tune_result",
+            "FociTuneResult",
+            &[
+                "oid: u8",
+                "status: u8",
+                "velocity_p: u16",
+                "velocity_i: u16",
+                "velocity_limit: u32",
+                "position_p: u16",
+                "position_i: u16",
+                "velocity_filter_hz: u16",
+                "position_filter_hz: u16",
+                "flux_filter_hz: u16",
+                "torque_filter_hz: u16",
+                "j_eff: u32",
+                "b_eff: u32",
+                "warning_code: u8",
+                "mech_torque_step: u16",
+                "mech_fwd_accel: u32",
+                "mech_rev_accel: u32",
+                "mech_fwd_peak_velocity: u32",
+                "mech_rev_peak_velocity: u32",
+                "mech_fwd_travel: u32",
+                "mech_rev_travel: u32",
+                "synth_velocity_p: u16",
+                "synth_velocity_i: u16",
+                "synth_position_p: u16",
+                "synth_position_i: u16",
+                "outer_evidence_flags: u8",
+                "stiffness_timebase_ms: u16",
+                "velocity_search_stop_reason: u8",
+                "motion_budget_mrev: u16",
+                "probed_velocity_mrev_s: u32",
+                "d_eq_q: i32",
+                "confidence_q: u16",
+                "band_lower_percent: u8",
+                "band_upper_percent: u8",
+                "band_position_q: u16",
+            ],
+        );
+    }
 }
 
 #[path = "../../src/state/stepper.rs"]

@@ -578,6 +578,12 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             stiffness_timebase_ms: u16 = result.stiffness_timebase_ms,
             velocity_search_stop_reason: u8 = result.velocity_search_stop_reason,
             motion_budget_mrev: u16 = result.motion_budget_mrev,
+            probed_velocity_mrev_s: u32 = result.provenance.probed_velocity_mrev_s,
+            d_eq_q: i32 = result.provenance.d_eq_q,
+            confidence_q: u16 = result.provenance.confidence_q,
+            band_lower_percent: u8 = result.provenance.band_lower_percent,
+            band_upper_percent: u8 = result.provenance.band_upper_percent,
+            band_position_q: u16 = result.provenance.band_position_q,
         );
     }
 
