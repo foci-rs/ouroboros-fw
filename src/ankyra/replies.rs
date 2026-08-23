@@ -140,7 +140,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         previous_digest_high: u32, current_digest_low: u32, current_digest_high: u32);
     forward_commission_reply!(foci_velocity_integral_terminal_core, FociVelocityIntegralTerminalCore,
         oid: u8, run_sequence: u32, evidence_sequence: u16, fragment: u8,
-        outcome: u8, cause: u8, recovery_flags: u8,
+        outcome: u8, cause: u8, cause_namespace: u8, recovery_flags: u8,
         rest_boundary_rung_plus_one: u8, rest_boundary_slot_plus_one: u8,
         expected_observations: u16, emitted_observations: u16,
         expected_rungs: u16, emitted_rungs: u16);
