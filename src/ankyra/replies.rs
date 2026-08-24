@@ -41,7 +41,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
     forward_commission_reply!(foci_breakaway_confirmation_terminal_masks, FociBreakawayConfirmationTerminalMasks,
         oid: u8, run_sequence: u32, evidence_sequence: u16, forward_collected_mask: u8, forward_eligible_mask: u8, forward_included_mask: u8, reverse_collected_mask: u8, reverse_eligible_mask: u8, reverse_included_mask: u8, accepted: u8, confirmed_p_raw: u16, max_relative_se_permille: u16, required_relative_se_permille: u16, has_safety_fault: u8);
     forward_commission_reply!(foci_breakaway_campaign_terminal, FociBreakawayCampaignTerminal,
-        oid: u8, run_sequence: u32, evidence_sequence: u16, phase: u8, terminal_cause: u8, accepted: u8, stage_c_plan_digest_low: u32, stage_c_plan_digest_high: u32);
+        oid: u8, run_sequence: u32, evidence_sequence: u16, phase: u8, terminal_cause: u8, accepted: u8, stage_c_plan_digest_low: u32, stage_c_plan_digest_high: u32, error_code: u8);
     forward_commission_reply!(foci_rung_origin_recovery_summary, FociRungOriginRecoverySummary,
         oid: u8, run_sequence: u32, evidence_sequence: u16, stage: u8,
         rung_index: u8, p_raw: u16, binding_source: u8, outcome: u8);
