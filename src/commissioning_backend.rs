@@ -21,6 +21,10 @@ impl CommissionBackendHooks for OuroborosHooks {
         &TMC_CONFIG
     }
 
+    fn commission_feedback_configs() -> &'static [foci_firmware::config::FeedbackConfig] {
+        &crate::board_config::FEEDBACK_CONFIGS
+    }
+
     fn commission_elapsed_us() -> u64 {
         // Microseconds since Mono start. Returned as u64 so deadline
         // comparisons in commission.rs never wrap across the 51-second

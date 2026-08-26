@@ -85,3 +85,11 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     resistance_max_expected_current_count: 1600,
     resistance_scale_metadata_validated: false,
 };
+
+/// Per-channel feedback wiring. Every board channel is ABN-only today; see
+/// the spec for the analog-encoder-enablement follow-up.
+pub(crate) const FEEDBACK_CONFIGS: [foci_firmware::config::FeedbackConfig; TMC_CHANNEL_COUNT as usize] =
+    [foci_firmware::config::FeedbackConfig {
+        phi_e_source: foci_firmware::config::FeedbackSource::Abn,
+        position_source: foci_firmware::config::FeedbackSource::Abn,
+    }; TMC_CHANNEL_COUNT as usize];
