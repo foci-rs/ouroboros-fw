@@ -11,6 +11,7 @@ mod board_config {
 #[cfg(test)]
 mod commissioning_board_contract_tests {
     const MAIN: &str = include_str!("../../src/main.rs");
+    const TMC_DISPATCH: &str = include_str!("../../src/tmc_dispatch.rs");
     const REQUEST: &str = include_str!("../../src/tmc_control/request.rs");
     const REPLIES: &str = include_str!("../../src/ankyra/replies.rs");
     const CONSTANTS: &str = include_str!("../../src/ankyra/constants.rs");
@@ -265,6 +266,30 @@ mod commissioning_board_contract_tests {
                 "band_position_q: u16",
             ],
         );
+    }
+
+    #[test]
+    fn dump_registers_emits_velocity_clamp_values_after_sub_registers() {
+        let sub_registers = TMC_DISPATCH
+            .find("DUMP_SUB_REGISTERS")
+            .expect("dump dispatch must read the sub-register table");
+        let clamp_values = TMC_DISPATCH
+            .find("clamp_dump_values")
+            .expect("dump dispatch must emit the velocity-clamp values");
+        let done = TMC_DISPATCH
+            .find("FociDumpDone")
+            .expect("dump dispatch must send the done reply");
+
+        assert!(
+            sub_registers < clamp_values,
+            "clamp values must be emitted after the sub-register loop"
+        );
+        assert!(
+            clamp_values < done,
+            "clamp values must be emitted before the done reply"
+        );
+        assert!(TMC_DISPATCH.contains("velocity_clamp_latched()"));
+        assert!(TMC_DISPATCH.contains("velocity_clamp_count()"));
     }
 }
 

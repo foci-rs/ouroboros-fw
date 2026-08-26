@@ -149,6 +149,21 @@ pub(crate) async fn handle_tmc_request(
                     value: u32 = value,
                 );
             }
+            let clamp_values = foci_firmware::dump::clamp_dump_values(
+                tmc_state.velocity_clamp_latched(),
+                tmc_state.velocity_clamp_count(),
+            );
+            for &(addr, value) in &clamp_values {
+                Mono::delay(1.millis()).await;
+
+                ::ankyra::klipper_reply_from!(
+                    &mut crate::_ankyra_config::Sender,
+                    foci_firmware::ankyra::replies::FociDumpValue,
+                    oid: u8 = oid,
+                    addr: u8 = addr,
+                    value: u32 = value,
+                );
+            }
             Mono::delay(1.millis()).await;
             ::ankyra::klipper_reply_from!(
                 &mut crate::_ankyra_config::Sender,
