@@ -152,12 +152,11 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         started_low: u32, started_high: u32, completed_low: u32, completed_high: u32);
     forward_commission_reply!(foci_acceptance_matrix_plan, FociAcceptanceMatrixPlan,
         oid: u8, fragment: u8, payload: &[u8]);
-    forward_commission_reply!(foci_acceptance_matrix_terminal, FociAcceptanceMatrixTerminal,
-        oid: u8, payload: &[u8]);
-    forward_commission_reply!(foci_robustness_cycle_evidence, FociRobustnessCycleEvidence,
-        oid: u8, payload: &[u8]);
     forward_commission_reply!(foci_robustness_reversal_terminal, FociRobustnessReversalTerminal,
         oid: u8, payload: &[u8]);
+    foci_firmware::__commission_reply_manifest!(
+        foci_firmware_macros::commission_reply_forwarding_impls
+    );
 
     fn foci_commission_detail(
         &mut self,
@@ -184,27 +183,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             oid: u8 = oid,
             phase: u8 = phase,
             status: u8 = status,
-        );
-    }
-
-    fn foci_commission_timing(
-        &mut self,
-        report: foci_firmware::tmc_diagnostics::CommissionTimingReport,
-    ) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociCommissionTiming,
-            oid: u8 = report.oid,
-            method: u8 = report.method,
-            status: u8 = report.status,
-            requested_period_us: u16 = report.requested_period_us,
-            valid_samples: u16 = report.valid_samples,
-            missed_samples: u16 = report.missed_samples,
-            max_consecutive_misses: u8 = report.max_consecutive_misses,
-            max_lateness_us: u32 = report.max_lateness_us,
-            max_interval_us: u32 = report.max_interval_us,
-            max_poll_wall_us: u32 = report.max_poll_wall_us,
-            max_spi_wall_us: u32 = report.max_spi_wall_us,
         );
     }
 

@@ -26,6 +26,8 @@ mod commissioning_board_contract_tests {
     const SHARED_INTEGRAL_PLAN: &str = include_str!(
         "../../../../shared/foci-firmware/src/commissioning/outer/velocity/integral_plan.rs"
     );
+    const SHARED_COMMISSION_REPLY_MANIFEST: &str =
+        include_str!("../../../../shared/foci-firmware/src/commission_dispatch/replies.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -130,11 +132,30 @@ mod commissioning_board_contract_tests {
             "foci_velocity_integral_terminal_core",
             "foci_velocity_integral_terminal_identity",
             "foci_velocity_integral_terminal_timing",
-            "foci_robustness_cycle_evidence",
             "foci_robustness_reversal_terminal",
         ] {
             assert!(REPLIES.contains(method), "missing board reply {method}");
         }
+    }
+
+    #[test]
+    fn board_forwards_robustness_cycle_evidence_via_the_manifest() {
+        assert!(
+            SHARED_COMMISSION_REPLY_MANIFEST.contains("name: foci_robustness_cycle_evidence"),
+            "missing manifest entry foci_robustness_cycle_evidence"
+        );
+    }
+
+    #[test]
+    fn board_invokes_the_shared_commission_reply_manifest() {
+        assert!(
+            REPLIES.contains("commission_reply_forwarding_impls"),
+            "board no longer wires the shared CommissionReplySink manifest \
+             (foci_firmware::__commission_reply_manifest!/\
+             foci_firmware_macros::commission_reply_forwarding_impls) -- \
+             a board that stops calling it silently drops every \
+             manifest-driven reply"
+        );
     }
 
     #[test]
