@@ -48,6 +48,41 @@ mod commissioning_board_contract_tests {
         }
     }
 
+    /// Same contract `assert_reply_contract` checks, against the shared
+    /// manifest's `entry { ... }` text instead of a board's compiled
+    /// REPLIES -- valid because `entry { name: <method>, ..., reply:
+    /// <Type>, ..., fields: { <field>: <ty>, ... } }` contains the method
+    /// name, then (searching forward) the reply type, then each field in
+    /// order, the same shape `assert_reply_contract` already expects.
+    fn assert_manifest_entry(method: &str, reply: &str, fields: &[&str]) {
+        let start = SHARED_COMMISSION_REPLY_MANIFEST
+            .find(&std::format!("name: {method}"))
+            .unwrap_or_else(|| panic!("missing manifest entry {method}"));
+        let after = &SHARED_COMMISSION_REPLY_MANIFEST[start..];
+        // Bound the search to this one entry: many entries share common
+        // field names (`oid: u8` alone appears in most of them), so without
+        // an upper bound a missing/misordered field in this entry could be
+        // silently satisfied by a *later* entry's matching text instead --
+        // the check would pass while proving nothing about this method.
+        // `after` starts at "name: <method>", i.e. strictly after this
+        // entry's own opening "entry {", so the next occurrence of
+        // "entry {" (if any) is the following entry's, never this one's.
+        let entry_end = after.find("entry {").unwrap_or(after.len());
+        let body = &after[..entry_end];
+        assert!(
+            body.contains(reply),
+            "{method} manifest entry does not declare {reply}"
+        );
+
+        let mut cursor = 0;
+        for field in fields {
+            let offset = body[cursor..]
+                .find(field)
+                .unwrap_or_else(|| panic!("{method} manifest entry missing field {field}"));
+            cursor += offset + field.len();
+        }
+    }
+
     fn assert_wire_budget(name: &str, field_widths: &[usize]) {
         let encoded = field_widths.iter().sum::<usize>() + REPLY_ID_WORST_CASE_BYTES;
         assert!(
@@ -134,7 +169,10 @@ mod commissioning_board_contract_tests {
             "foci_velocity_integral_terminal_timing",
             "foci_robustness_reversal_terminal",
         ] {
-            assert!(REPLIES.contains(method), "missing board reply {method}");
+            assert!(
+                SHARED_COMMISSION_REPLY_MANIFEST.contains(&std::format!("name: {method}")),
+                "missing manifest entry {method}"
+            );
         }
     }
 
@@ -160,7 +198,7 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn board_forwards_integral_authority_without_narrowing() {
-        assert_reply_contract(
+        assert_manifest_entry(
             "foci_velocity_integral_plan_authority",
             "FociVelocityIntegralPlanAuthority",
             &[
@@ -170,12 +208,12 @@ mod commissioning_board_contract_tests {
                 "reduced_margin: u8",
             ],
         );
-        assert_reply_contract(
+        assert_manifest_entry(
             "foci_velocity_integral_run_summary",
             "FociVelocityIntegralRunSummary",
             &["opening_available_mask: u8", "bookend_available_mask: u8"],
         );
-        assert_reply_contract(
+        assert_manifest_entry(
             "foci_velocity_integral_stage_b_comparison",
             "FociVelocityIntegralStageBComparison",
             &["direction: u8", "available: u8"],
@@ -209,7 +247,7 @@ mod commissioning_board_contract_tests {
             SHARED_INTEGRAL_REPORTING
                 .contains("TERMINAL_PROBE_CONSTRAINED_TEST_POINT: u8 = 1 << 3")
         );
-        assert_reply_contract(
+        assert_manifest_entry(
             "foci_commissioning_workflow_plan",
             "FociCommissioningWorkflowPlan",
             &["shape: u8"],
@@ -224,7 +262,10 @@ mod commissioning_board_contract_tests {
             "foci_rung_origin_recovery_summary",
             "foci_velocity_integral_plan_recovery",
         ] {
-            assert!(REPLIES.contains(method), "missing board reply {method}");
+            assert!(
+                SHARED_COMMISSION_REPLY_MANIFEST.contains(&std::format!("name: {method}")),
+                "missing manifest entry {method}"
+            );
         }
         for retired in [
             "foci_rung_origin_recovery_core",
@@ -234,7 +275,7 @@ mod commissioning_board_contract_tests {
         ] {
             assert!(!REPLIES.contains(retired), "retained board reply {retired}");
         }
-        assert_reply_contract(
+        assert_manifest_entry(
             "foci_rung_origin_recovery_summary",
             "FociRungOriginRecoverySummary",
             &[
