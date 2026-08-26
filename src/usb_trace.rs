@@ -701,6 +701,7 @@ pub(crate) async fn sample_tick<B>(
         accel_feedforward_gain_permille: inputs.accel_feedforward_gain_permille,
         accel_feedforward_flags: inputs.accel_feedforward_flags,
         cached_velocity_transient_offset: inputs.cached_velocity_transient_offset,
+        cached_velocity_clamped: inputs.cached_velocity_clamped,
     };
     let mut payload = [0u8; CRITICAL_PAYLOAD_LEN];
     encode_critical_payload(&critical, &mut payload);
