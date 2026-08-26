@@ -28,6 +28,7 @@ mod commissioning_board_contract_tests {
     );
     const SHARED_COMMISSION_REPLY_MANIFEST: &str =
         include_str!("../../../../shared/foci-firmware/src/commission_dispatch/replies.rs");
+    const BOARD_CARGO_TOML: &str = include_str!("../../Cargo.toml");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -193,6 +194,15 @@ mod commissioning_board_contract_tests {
              foci_firmware_macros::commission_reply_forwarding_impls) -- \
              a board that stops calling it silently drops every \
              manifest-driven reply"
+        );
+    }
+
+    #[test]
+    fn board_cargo_toml_depends_on_foci_firmware_macros() {
+        assert!(
+            BOARD_CARGO_TOML.contains("foci-firmware-macros"),
+            "board's Cargo.toml no longer depends on foci-firmware-macros, \
+             so the shared manifest invocation above cannot resolve"
         );
     }
 
