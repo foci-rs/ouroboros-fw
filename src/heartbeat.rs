@@ -193,6 +193,12 @@ fn emit_stepper_diagnostics_pass() {
             stepper_load_lateness_max_ticks: u32 = snapshot.stepper_load_lateness_max_ticks,
             stepper_load_lateness_last_ticks: i32 = snapshot.stepper_load_lateness_last_ticks,
             build_trace_enabled: u8 = snapshot.build_trace_enabled as u8,
+            shutdown_site_count: u32 = snapshot.shutdown_site_count,
+            shutdown_site_max_cycles: u32 = snapshot.shutdown_site_max_cycles,
+            reset_site_count: u32 = snapshot.reset_site_count,
+            reset_site_max_cycles: u32 = snapshot.reset_site_max_cycles,
+            trigger_stop_site_count: u32 = snapshot.trigger_stop_site_count,
+            trigger_stop_site_max_cycles: u32 = snapshot.trigger_stop_site_max_cycles,
         );
     }
 }
