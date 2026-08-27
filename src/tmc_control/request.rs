@@ -24,7 +24,7 @@ use crate::helpers::dev::{do_test_spin, tmc_enter_openloop};
 use crate::helpers::stepper::apply_stepper_post_action;
 use crate::state::stepper::{
     isr_stepper, motion_scale_install_admitted, replace_motion_scale_mapper,
-    reset_mapper_observables, step_queue,
+    reset_mapper_observables,
 };
 use crate::tmc_control::board::{
     TmcEnablePins, TmcRuntimes, enable_pin, next_commission_trace_seq, ouroboros_backend,
@@ -94,8 +94,7 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
     }
 
     fn motion_scale_queue_empty(&self) -> bool {
-        // SAFETY: The TMC request runs at P1 and only observes queue state.
-        unsafe { step_queue(self.channel).is_some_and(|queue| queue.is_empty()) }
+        crate::state::stepper::STEP_QUEUE_CHANNELS[self.channel as usize].is_empty()
     }
 
     fn install_motion_scale_mapper(
@@ -105,7 +104,7 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         with_trigger_domain(|td| {
             let motor_armed = tmc_state(self.channel).motor_armed.load(Ordering::Relaxed);
             let queue_empty =
-                unsafe { step_queue(self.channel).is_some_and(|queue| queue.is_empty()) };
+                crate::state::stepper::STEP_QUEUE_CHANNELS[self.channel as usize].is_empty();
             let timer_active = td.timer_active(self.channel as usize);
             let admitted = motion_scale_install_admitted(motor_armed, queue_empty, timer_active);
 

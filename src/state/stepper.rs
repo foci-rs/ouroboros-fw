@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use foci_firmware::step_pulse::StepPulseTiming;
 use foci_klipper::pulse_mapper::PulseMapperConfig;
-use foci_klipper::stepper::{HardwareStepper, LogicalStepEvent, MotionScaleConfigError, StepMove};
+use foci_klipper::stepper::{HardwareStepper, LogicalStepEvent, MotionScaleConfigError};
 
 /// Ouroboros TIM5 input clock in hertz.
 pub(crate) const STEP_TIMER_HZ: u32 = 260_000_000;
@@ -34,17 +34,65 @@ pub(crate) static PHYSICAL_PULSE_COUNTS: [AtomicU32; STEPPER_CHANNEL_COUNT] =
 pub(crate) static MAPPER_PHASES: [AtomicI32; STEPPER_CHANNEL_COUNT] =
     [const { AtomicI32::new(0) }; STEPPER_CHANNEL_COUNT];
 
-/// Lock-free move queues for hardware step/dir.
-///
-/// P2 enqueues, P3 dequeues. When timer is disabled, P1/P2 may drain.
-///
-/// SAFETY: Access protocol enforced by RTIC priorities:
-/// - Timer active: P2 enqueues only (Producer), P3 dequeues only (Consumer)
-/// - Timer disabled: P1/P2 may drain (Consumer side safe, P3 quiesced)
-pub(crate) static mut STEP_QUEUES: [heapless::spsc::Queue<
-    foci_klipper::stepper::StepMove,
+/// Lock-free step/dir move queues with explicit producer/consumer ownership.
+/// Split once at RTIC `init` via `crate::main::init` -- never touched
+/// through the old unsafe accessor again.
+pub(crate) static STEP_QUEUE_CHANNELS: [foci_klipper::step_queue::StepQueueChannel<
     STEP_QUEUE_DEPTH,
->; STEPPER_CHANNEL_COUNT] = [const { heapless::spsc::Queue::new() }; STEPPER_CHANNEL_COUNT];
+>; STEPPER_CHANNEL_COUNT] =
+    [const { foci_klipper::step_queue::StepQueueChannel::new() }; STEPPER_CHANNEL_COUNT];
+
+/// P2-owned producer handles, populated once by `init_step_queues`. Nothing
+/// else ever touches them, so aliasing is inexpressible.
+pub(crate) static mut STEP_QUEUE_PRODUCERS: [Option<
+    foci_klipper::step_queue::Producer<'static, foci_klipper::stepper::StepMove>,
+>; STEPPER_CHANNEL_COUNT] = [const { None }; STEPPER_CHANNEL_COUNT];
+
+/// Split each `STEP_QUEUE_CHANNELS` entry once and store its producer half.
+/// Must be called exactly once, from RTIC `init`, before any other stepper
+/// task runs.
+///
+/// # Safety
+/// Caller (RTIC `init`) guarantees this runs exactly once, before any
+/// other task touches `STEP_QUEUE_PRODUCERS`/`STEP_QUEUE_CHANNELS`.
+pub(crate) unsafe fn init_step_queues() {
+    // SAFETY: `init` runs once, before any other task starts. `addr_of_mut!`
+    // plus a raw-pointer element write avoids the edition-2024
+    // `static_mut_refs` lint (never spells `&mut STEP_QUEUE_PRODUCERS`
+    // directly), matching this file's existing `P2_STEPPERS`/`ISR_STEPPERS`
+    // accessor pattern.
+    let base = core::ptr::addr_of_mut!(STEP_QUEUE_PRODUCERS).cast::<Option<
+        foci_klipper::step_queue::Producer<'static, foci_klipper::stepper::StepMove>,
+    >>();
+    for (idx, channel) in STEP_QUEUE_CHANNELS.iter().enumerate() {
+        unsafe {
+            *base.add(idx) = Some(channel.split_once());
+        }
+    }
+}
+
+/// Borrow the P2-owned producer for `channel`. Returns `None` for an
+/// out-of-range channel or if `init_step_queues` has not yet run.
+///
+/// # Safety
+/// Callable only from P2 (the sole owner of `STEP_QUEUE_PRODUCERS`).
+pub(crate) unsafe fn step_queue_producer(
+    channel: u8,
+) -> Option<&'static mut foci_klipper::step_queue::Producer<'static, foci_klipper::stepper::StepMove>>
+{
+    let idx = channel as usize;
+    if idx >= STEPPER_CHANNEL_COUNT {
+        return None;
+    }
+    // SAFETY: idx was bounds-checked above; caller guarantees P2-only
+    // access; `init_step_queues` has run by the time any P2 command
+    // handler executes. `addr_of_mut!` avoids the edition-2024
+    // `static_mut_refs` lint the same way as `init_step_queues` above.
+    let base = core::ptr::addr_of_mut!(STEP_QUEUE_PRODUCERS).cast::<Option<
+        foci_klipper::step_queue::Producer<'static, foci_klipper::stepper::StepMove>,
+    >>();
+    (unsafe { &mut *base.add(idx) }).as_mut()
+}
 
 /// P2-local HardwareStepper state (direction tracking, prepare_move).
 /// Only accessed from usb_task (P2) command handlers.
@@ -56,28 +104,6 @@ pub(crate) static mut P2_STEPPERS: [foci_klipper::stepper::HardwareStepper; STEP
 pub(crate) static mut ISR_STEPPERS: [foci_klipper::stepper::HardwareStepper;
     STEPPER_CHANNEL_COUNT] =
     [const { foci_klipper::stepper::HardwareStepper::new() }; STEPPER_CHANNEL_COUNT];
-
-/// Return the hardware step queue for `channel`.
-///
-/// # Safety
-///
-/// Callers must uphold Ouroboros' per-channel RTIC access discipline for
-/// the returned queue and must not create overlapping mutable references to
-/// the same channel.
-#[inline]
-pub(crate) unsafe fn step_queue(
-    channel: u8,
-) -> Option<&'static mut heapless::spsc::Queue<foci_klipper::stepper::StepMove, STEP_QUEUE_DEPTH>> {
-    let idx = channel as usize;
-    if idx >= STEPPER_CHANNEL_COUNT {
-        return None;
-    }
-    let ptr = core::ptr::addr_of_mut!(STEP_QUEUES)
-        .cast::<heapless::spsc::Queue<foci_klipper::stepper::StepMove, STEP_QUEUE_DEPTH>>();
-    // SAFETY: idx was bounds-checked above. The caller guarantees exclusive
-    // mutable access to this channel under the board's RTIC access discipline.
-    Some(unsafe { &mut *ptr.add(idx) })
-}
 
 /// Return the P2-local hardware stepper state for `channel`.
 ///
@@ -176,22 +202,6 @@ pub(crate) const fn motion_scale_install_admitted(
     !motor_armed && queue_empty && !timer_active
 }
 
-/// Prepare and enqueue without consuming P2 direction when the queue is full.
-pub(crate) fn prepare_and_enqueue<const N: usize>(
-    stepper: &mut HardwareStepper,
-    queue: &mut heapless::spsc::Queue<StepMove, N>,
-    move_: StepMove,
-) -> Result<usize, usize> {
-    if queue.is_full() {
-        return Err(queue.len());
-    }
-    let prepared = stepper.prepare_move(move_);
-    // P2 is the only producer, so a consumer can only create more space after
-    // the full check. Enqueue therefore cannot fail after direction changes.
-    queue.enqueue(prepared).map_err(|_| queue.len())?;
-    Ok(queue.len())
-}
-
 /// Publish mapper-observable state after a channel's complete pulse train is low.
 pub(crate) fn publish_logical_event(
     channel: u8,
@@ -276,19 +286,5 @@ mod tests {
             assert!(replace_motion_scale_mapper(&mut stepper, replacement, admitted).is_err());
             assert!(!stepper.motion_scale_configured());
         }
-    }
-
-    #[test]
-    fn queue_full_does_not_consume_pending_direction_change() {
-        let mut stepper = foci_klipper::stepper::HardwareStepper::new();
-        stepper.set_next_step_dir(false);
-        let mut queue = heapless::spsc::Queue::<StepMove, 2>::new();
-        queue.enqueue(StepMove::new(100, 1, 0)).unwrap();
-
-        assert_eq!(
-            prepare_and_enqueue(&mut stepper, &mut queue, StepMove::new(100, 1, 0)),
-            Err(1)
-        );
-        assert!(stepper.next_move_changes_direction());
     }
 }

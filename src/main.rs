@@ -161,8 +161,9 @@ mod app {
     }
 
     // TriggerDomain, PHYSICAL_STEPPER_INDICES, TRIGGER_TIMER_MIN_LEAD_TICKS,
-    // TRIGGER_DOMAIN, with_trigger_domain(), and stop_physical_stepper_no_lock()
-    // live in crate::trigger_domain and are re-imported below.
+    // TRIGGER_DOMAIN, with_trigger_domain(), stop_physical_stepper_unmasked(),
+    // and stop_physical_stepper_masked() live in crate::trigger_domain and
+    // are re-imported below.
 
     // ---- Klipper constants ----
     // Declared in `crate::ankyra::constants` and registered into the data
@@ -205,6 +206,11 @@ mod app {
     fn init(ctx: init::Context) -> (Shared, Local) {
         foci_firmware::diagnostic::recover_last_boot_breakaway_breadcrumb();
         defmt::info!("FOCI Ouroboros starting");
+
+        // SAFETY: init runs exactly once, before any other task starts.
+        unsafe {
+            crate::state::stepper::init_step_queues();
+        }
 
         let p = embassy_stm32::init(crate::board_init::rcc_config());
         defmt::info!("SYSCLK: 520 MHz, USB: 48 MHz");
@@ -1863,7 +1869,7 @@ mod app {
         // SAFETY: P3 is the sole consumer of this channel's queue. P3 ISRs
         // cannot preempt each other on Cortex-M.
         let next_move =
-            unsafe { crate::state::stepper::step_queue(channel).and_then(|queue| queue.dequeue()) };
+            unsafe { crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].isr_dequeue() };
         let Some(move_) = next_move else {
             crate::state::stepper_diag::record_queue_empty(channel);
             if HOMING_STATE.load(Relaxed) != 0 {
@@ -2081,12 +2087,7 @@ mod app {
         }
 
         fn queue_has_moves(&self, channel: u8) -> bool {
-            // SAFETY: P2 is the sole producer while the timer is inactive.
-            unsafe {
-                crate::state::stepper::step_queue(channel)
-                    .map(|queue| !queue.is_empty())
-                    .unwrap_or(false)
-            }
+            !crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].is_empty()
         }
 
         fn arm_check_timer(
@@ -2264,7 +2265,18 @@ mod app {
                                         .oversample(read_pin(), wake_clock)
                                     {
                                         EndstopSampleResult::Triggered { trsync_oid, reason } => {
-                                            td.trigger(trsync_oid, reason, now);
+                                            {
+                                                let trigger_start =
+                                                    cortex_m::peripheral::DWT::cycle_count();
+                                                td.trigger(trsync_oid, reason, now);
+                                                let trigger_cycles =
+                                                    cortex_m::peripheral::DWT::cycle_count()
+                                                        .wrapping_sub(trigger_start);
+                                                crate::state::stepper_diag::record_critical_section(
+                                                    crate::state::stepper_diag::PERF_SITE_TRIGGER_STOP,
+                                                    trigger_cycles,
+                                                );
+                                            }
                                             need_report = true;
                                         }
                                         EndstopSampleResult::Reschedule { next_clock } => {
@@ -2284,7 +2296,18 @@ mod app {
                                     }
                                 }
                                 EndstopSampleResult::Triggered { trsync_oid, reason } => {
-                                    td.trigger(trsync_oid, reason, now);
+                                    {
+                                        let trigger_start =
+                                            cortex_m::peripheral::DWT::cycle_count();
+                                        td.trigger(trsync_oid, reason, now);
+                                        let trigger_cycles =
+                                            cortex_m::peripheral::DWT::cycle_count()
+                                                .wrapping_sub(trigger_start);
+                                        crate::state::stepper_diag::record_critical_section(
+                                            crate::state::stepper_diag::PERF_SITE_TRIGGER_STOP,
+                                            trigger_cycles,
+                                        );
+                                    }
                                     need_report = true;
                                 }
                                 EndstopSampleResult::Reschedule { next_clock } => {
@@ -2314,7 +2337,16 @@ mod app {
                                 .map(|(&oid, _)| oid);
                             if let Some(oid) = oid {
                                 let expire_reason = td.trsync[trsync_idx].expire_reason();
-                                td.trigger(oid, expire_reason, now);
+                                {
+                                    let trigger_start = cortex_m::peripheral::DWT::cycle_count();
+                                    td.trigger(oid, expire_reason, now);
+                                    let trigger_cycles = cortex_m::peripheral::DWT::cycle_count()
+                                        .wrapping_sub(trigger_start);
+                                    crate::state::stepper_diag::record_critical_section(
+                                        crate::state::stepper_diag::PERF_SITE_TRIGGER_STOP,
+                                        trigger_cycles,
+                                    );
+                                }
                                 need_report = true;
                             }
                         }

@@ -30,6 +30,16 @@ static mut STEPPER_PERF_EVENTS: StepperDiagnosticQueue<
 pub(crate) const PERF_SITE_TRIGGER_DOMAIN: u8 = 0;
 pub(crate) const PERF_SITE_QUEUE_STEP: u8 = 1;
 pub(crate) const PERF_SITE_TIM5: u8 = 2;
+/// Shutdown trigger-domain critical section site.
+pub(crate) const PERF_SITE_SHUTDOWN: u8 = 3;
+/// Reset trigger-domain critical section site.
+pub(crate) const PERF_SITE_RESET: u8 = 4;
+/// Trigger-dispatch stop measurement site (recorded as a direct DWT
+/// sample within the TIM5 dispatch loop's own critical section -- never
+/// its own `with_trigger_domain_site` acquisition, which would recreate
+/// a nested `&mut TriggerDomain` from inside a closure that already
+/// holds one).
+pub(crate) const PERF_SITE_TRIGGER_STOP: u8 = 5;
 
 pub(crate) fn push_event(event: StepperDiagnosticEvent) {
     cortex_m::interrupt::free(|_| {

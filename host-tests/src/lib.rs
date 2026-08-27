@@ -29,6 +29,7 @@ mod commissioning_board_contract_tests {
     const SHARED_COMMISSION_REPLY_MANIFEST: &str =
         include_str!("../../../../shared/foci-firmware/src/commission_dispatch/replies.rs");
     const BOARD_CARGO_TOML: &str = include_str!("../../Cargo.toml");
+    const TRIGGER_DOMAIN: &str = include_str!("../../src/trigger_domain.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -362,6 +363,108 @@ mod commissioning_board_contract_tests {
         );
         assert!(TMC_DISPATCH.contains("velocity_clamp_latched()"));
         assert!(TMC_DISPATCH.contains("velocity_clamp_count()"));
+    }
+
+    #[test]
+    fn p1_unmasked_drain_never_reacquires_a_critical_section() {
+        let unmasked_start = TRIGGER_DOMAIN
+            .find("QueueAccess::Unmasked => {")
+            .expect("stop_physical_stepper_inner must branch on QueueAccess::Unmasked");
+        let locked_start = TRIGGER_DOMAIN
+            .find("QueueAccess::LockedInPlace => {")
+            .expect("the Unmasked arm must be followed by the LockedInPlace arm");
+        assert!(unmasked_start < locked_start);
+        let unmasked_arm = &TRIGGER_DOMAIN[unmasked_start..locked_start];
+
+        let detach_pos = unmasked_arm
+            .find("detach_consumer(")
+            .expect("the unmasked arm must detach the consumer before draining");
+        let dequeue_pos = unmasked_arm.find("consumer.dequeue()").expect(
+            "the unmasked arm must actually drain the detached consumer, \
+                     not just call detach/attach with nothing in between",
+        );
+        let attach_pos = unmasked_arm
+            .find("attach_consumer(")
+            .expect("the unmasked arm must reattach the consumer after draining");
+
+        assert!(
+            detach_pos < dequeue_pos,
+            "the drain loop must run after detaching the consumer, not before"
+        );
+        assert!(
+            dequeue_pos < attach_pos,
+            "the drain loop must run before reattaching the consumer, not after"
+        );
+        assert!(
+            !unmasked_arm.contains("interrupt::free"),
+            "the unmasked arm must never reacquire a critical section directly -- \
+             masking belongs only inside detach_consumer/attach_consumer, not the drain loop"
+        );
+    }
+
+    /// Return the index of the `}` matching the `{` at `open_brace_pos`
+    /// (which must itself be a `{` character), by counting brace depth.
+    /// Comment- and string-literal-blind, like every other source-contract
+    /// check in this module -- adequate for this crate's existing use of
+    /// `include_str!` guards, not a real parser.
+    fn find_matching_close_brace(text: &str, open_brace_pos: usize) -> usize {
+        let mut depth = 0i32;
+        for (offset, ch) in text[open_brace_pos..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return open_brace_pos + offset;
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("no matching closing brace found for the brace at byte {open_brace_pos}");
+    }
+
+    #[test]
+    fn stop_physical_stepper_side_effects_are_not_duplicated_per_queue_access_branch() {
+        assert_eq!(
+            TRIGGER_DOMAIN.matches("record_physical_stop(").count(),
+            1,
+            "diagnostic recording must be shared after the QueueAccess branch, not \
+             duplicated per arm -- duplicated tail logic can silently diverge between arms"
+        );
+        let locked_open_marker = TRIGGER_DOMAIN
+            .find("QueueAccess::LockedInPlace => {")
+            .expect("stop_physical_stepper_inner must branch on QueueAccess::LockedInPlace");
+        let locked_open_brace = locked_open_marker + "QueueAccess::LockedInPlace => ".len();
+        assert_eq!(
+            &TRIGGER_DOMAIN[locked_open_brace..locked_open_brace + 1],
+            "{"
+        );
+        let locked_close_brace = find_matching_close_brace(TRIGGER_DOMAIN, locked_open_brace);
+
+        let record_pos = TRIGGER_DOMAIN
+            .find("record_physical_stop(")
+            .expect("stop_physical_stepper_inner must record the stop");
+        let reset_idle_pos = TRIGGER_DOMAIN
+            .find("stepper_pins::reset_idle(")
+            .expect("stop_physical_stepper_inner must reset STEP/DIR GPIOs to idle");
+
+        assert!(
+            locked_close_brace < record_pos,
+            "diagnostic recording must run after the LockedInPlace arm's actual \
+             closing brace, not nested inside it"
+        );
+        assert!(
+            locked_close_brace < reset_idle_pos,
+            "the GPIO idle reset must run after the LockedInPlace arm's actual \
+             closing brace, not nested inside it"
+        );
+        assert!(
+            record_pos < reset_idle_pos,
+            "diagnostic recording must run before the GPIO idle reset, both \
+             unconditionally outside the branch -- so both happen regardless of \
+             whether the locked path observed None"
+        );
     }
 }
 

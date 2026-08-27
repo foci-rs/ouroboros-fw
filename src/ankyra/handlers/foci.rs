@@ -24,7 +24,7 @@ use foci_firmware::shutdown::ShutdownReason;
 
 use crate::firmware_ctx::FirmwareCtx;
 use crate::helpers::tmc::{FociTuneParams, foci_tune_inner};
-use crate::state::stepper::{step_pulse_timing, step_queue};
+use crate::state::stepper::step_pulse_timing;
 use crate::tmc_control::board::{stepper_state, tmc_state};
 use crate::trigger_domain::with_trigger_domain;
 
@@ -103,11 +103,9 @@ fn stepper_execution_snapshot(
     };
 
     let (timer_active, queue_len) = with_trigger_domain(|td| {
-        let queue_len = unsafe {
-            step_queue(channel)
-                .map(|queue| queue.len().min(u16::MAX as usize) as u16)
-                .unwrap_or(0)
-        };
+        let queue_len = crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize]
+            .len()
+            .min(u16::MAX as usize) as u16;
         (td.timer_active(channel as usize), queue_len)
     });
     let position = foci_firmware::state::stepper::stepper_channel(channel)

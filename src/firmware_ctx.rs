@@ -35,7 +35,7 @@ use crate::helpers::stepper::arm_step_timer_if_earlier;
 use crate::helpers::stepper_diag::record_stepper_event;
 use crate::helpers::tmc::OuroborosTmcQueue;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
-use crate::state::stepper::{isr_stepper, p2_stepper, prepare_and_enqueue, step_queue};
+use crate::state::stepper::{isr_stepper, p2_stepper};
 use crate::trigger_domain::{
     OuroborosDispatchBoard, PHYSICAL_STEPPER_INDICES, disarm_trigger_scheduler, reprogram_cc2,
     set_timer_active, with_trigger_domain, with_trigger_domain_site,
@@ -99,9 +99,10 @@ impl StepperQueueBoard for OuroborosStepperBoard {
     }
 
     fn queue_was_empty(&self, channel: u8) -> Result<bool, CommandError> {
-        // SAFETY: P2 is the sole producer. Queue len read is safe from P2.
-        let queue = unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
-        Ok(queue.is_empty())
+        if channel as usize >= crate::state::stepper::STEPPER_CHANNEL_COUNT {
+            return Err(CommandError::InvalidChannel(channel));
+        }
+        Ok(crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].is_empty())
     }
 
     fn motion_scale_configured(&self, channel: u8) -> Result<bool, CommandError> {
@@ -117,13 +118,23 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         channel: u8,
         move_: foci_klipper::stepper::StepMove,
     ) -> Result<usize, usize> {
-        // SAFETY: P2 owns the direction state and is the sole queue producer.
-        let Some((stepper, queue)) =
-            (unsafe { p2_stepper(channel) }).zip(unsafe { step_queue(channel) })
+        // SAFETY: P2 owns both the direction state and the queue producer.
+        let Some((stepper, producer)) = (unsafe { p2_stepper(channel) })
+            .zip(unsafe { crate::state::stepper::step_queue_producer(channel) })
         else {
             return Err(0);
         };
-        prepare_and_enqueue(stepper, queue, move_)
+        // heapless::spsc::Producer has no `is_full()` -- only the un-split
+        // `Queue` does. `!producer.ready()` is the producer-side equivalent
+        // (`ready()` is true iff there is room to enqueue).
+        if !producer.ready() {
+            return Err(producer.len());
+        }
+        let prepared = stepper.prepare_move(move_);
+        // P2 is the only producer, so a consumer can only create more space
+        // after the full check above -- enqueue therefore cannot fail here.
+        producer.enqueue(prepared).map_err(|_| producer.len())?;
+        Ok(producer.len())
     }
 
     fn motor_armed(&self, _channel: u8) -> bool {
@@ -175,12 +186,20 @@ impl StepperResetBoard for OuroborosStepperBoard {
     }
 
     fn drain_step_queue(&mut self, channel: u8) -> Result<StepperDrainStats, CommandError> {
-        // SAFETY: Timer is not active (checked by shared policy), P3 is quiesced.
-        let queue = unsafe { step_queue(channel).ok_or(CommandError::InvalidChannel(channel))? };
+        if channel as usize >= crate::state::stepper::STEPPER_CHANNEL_COUNT {
+            return Err(CommandError::InvalidChannel(channel));
+        }
         let mut stats = StepperDrainStats::ZERO;
-        while let Some(m) = queue.dequeue() {
-            stats.segments = stats.segments.saturating_add(1);
-            stats.steps = stats.steps.saturating_add(u32::from(m.count));
+        let drained = crate::trigger_domain::with_consumer_locked(channel, |consumer| {
+            while let Some(m) = consumer.dequeue() {
+                stats.segments = stats.segments.saturating_add(1);
+                stats.steps = stats.steps.saturating_add(u32::from(m.count));
+            }
+        });
+        if drained.is_none() {
+            // A concurrent P1 unmasked drain holds the consumer detached;
+            // it already owns draining this queue. Report zero additional
+            // drained work for this reset -- see the spec's recovery rule.
         }
         Ok(stats)
     }
@@ -294,7 +313,7 @@ pub(crate) fn enter_shutdown(state: &mut State) -> bool {
 
     let entered = foci_firmware::helpers::lifecycle::enter_shutdown(state);
     if entered {
-        with_trigger_domain(|td| {
+        with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_SHUTDOWN, |td| {
             let mut board = OuroborosTrsyncBoard { state: &*state };
             trsync::shutdown_quiesce(td.state_mut(), &mut board);
         });
@@ -412,7 +431,7 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
         let tmc_state = foci_firmware::state::tmc::tmc_channel(channel)
             .ok_or(CommandError::InvalidChannel(channel))?;
 
-        with_trigger_domain(|td| {
+        with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_RESET, |td| {
             let mut board = OuroborosStepperBoard {
                 tmc_state: Some(tmc_state),
             };
@@ -562,8 +581,7 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
         {
             return Err(foci_firmware::motion_scale::MotionScaleRejection::MotorArmed);
         }
-        // SAFETY: P2 is the sole producer and only observes queue emptiness.
-        if !unsafe { step_queue(channel).is_some_and(|queue| queue.is_empty()) } {
+        if !crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].is_empty() {
             return Err(foci_firmware::motion_scale::MotionScaleRejection::QueueNotEmpty);
         }
         if stepper_state
@@ -587,5 +605,25 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
             stage: u8 = foci_firmware::motion_scale::MOTION_SCALE_REJECTION_STAGE_P2,
             reason: u8 = rejection.code(),
         );
+    }
+}
+
+#[cfg(test)]
+mod prepare_and_enqueue_tests {
+    use foci_klipper::stepper::{HardwareStepper, StepMove};
+
+    #[test]
+    fn queue_full_does_not_consume_pending_direction_change() {
+        let mut queue = heapless::spsc::Queue::<StepMove, 2>::new();
+        let (mut producer, _consumer) = queue.split();
+        let mut stepper = HardwareStepper::new();
+        stepper.set_next_step_dir(false);
+        producer.enqueue(StepMove::new(100, 1, 0)).unwrap();
+
+        assert!(!producer.ready());
+        assert_eq!(producer.len(), 1);
+        // Mirrors OuroborosStepperBoard::prepare_and_enqueue's full-check
+        // short-circuit: direction is not consumed when the producer is full.
+        assert!(stepper.next_move_changes_direction());
     }
 }

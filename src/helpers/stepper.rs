@@ -2,7 +2,7 @@
 //! Promoted from `mod app` in `main.rs` by Task 8c so handlers and the
 //! step-timer ISR share a single implementation.
 
-use crate::trigger_domain::stop_physical_stepper_no_lock;
+use crate::trigger_domain::stop_physical_stepper_unmasked;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use foci_firmware::commission_dispatch::{
@@ -114,7 +114,7 @@ pub(crate) fn arm_step_timer_if_earlier(clock: u32) {
 /// `TriggerDomain`.
 ///
 /// P1 performs the physical quiesce immediately (CC1 disable, queue drain via
-/// `stop_physical_stepper_no_lock`) then requests P2 reconciliation to update
+/// `stop_physical_stepper_unmasked`) then requests P2 reconciliation to update
 /// the authoritative `timer_active` inside `TriggerDomain`. P1 must never enter
 /// `TriggerDomain` per spec.
 pub(crate) fn stepper_stop_from_p1(channel: u8) {
@@ -129,7 +129,7 @@ pub(crate) fn stepper_stop_from_p1(channel: u8) {
     tmc_state
         .motor_armed
         .store(false, core::sync::atomic::Ordering::Relaxed);
-    stop_physical_stepper_no_lock(channel as usize, StepperEventReason::P1Stop);
+    stop_physical_stepper_unmasked(channel as usize, StepperEventReason::P1Stop);
     crate::helpers::stepper_diag::record_stepper_event(
         StepperEventReason::P1Stop,
         channel,
