@@ -373,6 +373,7 @@ pub(crate) async fn run_diagnostic_request<'spi>(
                 saved_voltage_limit,
             },
             tmc_config: &crate::board_config::TMC_CONFIG,
+            feedback_config: crate::board_config::FEEDBACK_CONFIGS[channel as usize],
         },
     )
     .await;
