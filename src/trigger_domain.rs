@@ -19,8 +19,16 @@ use foci_klipper::stepper::StepMove;
 /// independent critical section, for a caller about to drain it outside
 /// any masked region. Returns `None` if already detached.
 fn detach_consumer(channel: u8) -> Option<Consumer<'static, StepMove>> {
-    cortex_m::interrupt::free(|_| unsafe {
-        crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].take_consumer()
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: this critical section provides the exclusive access
+        // `take_consumer` requires. It is independent of
+        // `with_trigger_domain` (never touches `TriggerDomain`), so it is
+        // safe to nest inside an outer `interrupt::free` region if the
+        // caller happens to be in one. `channel` is a valid
+        // `STEP_QUEUE_CHANNELS` index because every caller (physical
+        // stepper indices, or an explicit `STEPPER_CHANNEL_COUNT` bounds
+        // check) validates it before reaching here.
+        unsafe { crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].take_consumer() }
     })
 }
 
@@ -29,8 +37,17 @@ fn detach_consumer(channel: u8) -> Option<Consumer<'static, StepMove>> {
 /// caller is the function that just called `detach_consumer` and is
 /// handing its own local variable straight back.
 fn attach_consumer(channel: u8, consumer: Consumer<'static, StepMove>) {
-    cortex_m::interrupt::free(|_| unsafe {
-        crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].give_consumer(consumer)
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: exclusive access from the critical section; `channel` is
+        // a valid `STEP_QUEUE_CHANNELS` index (see detach_consumer), and
+        // `consumer` is that same channel's own value per this function's
+        // contract -- the only correct caller just detached it from this
+        // exact channel and is handing it straight back. `Consumer` carries
+        // no channel identity of its own, so giving a different channel's
+        // consumer here would silently corrupt that channel's queue.
+        unsafe {
+            crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].give_consumer(consumer)
+        }
     })
 }
 
@@ -46,8 +63,12 @@ pub(crate) fn with_consumer_locked<R>(
     channel: u8,
     f: impl FnOnce(&mut Consumer<'static, StepMove>) -> R,
 ) -> Option<R> {
-    cortex_m::interrupt::free(|_| unsafe {
-        crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].borrow_consumer_mut(f)
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: see detach_consumer -- same critical section and
+        // channel-validity argument, applied to `borrow_consumer_mut`.
+        unsafe {
+            crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].borrow_consumer_mut(f)
+        }
     })
 }
 
