@@ -59,12 +59,21 @@ pub fn rcc_config() -> embassy_stm32::Config {
     // bits, the same as F407; RTIC's cortex_logical2hw maps its logical
     // priorities to raw NVIC bytes as P3 -> 0xD0, P2 -> 0xE0, P1 -> 0xF0.
     // Embassy's `Priority` enum uses the same byte encoding (`Priority::P13`
-    // = 0xD0, `P14` = 0xE0, `P15` = 0xF0), so `Priority::P14` puts SPI DMA
-    // completion at the RTIC-P2 level: strictly below P3 (cannot preempt
-    // TIM5/USB/STATUS) but above P1 tmc_control, so SPI transfers complete
-    // promptly regardless of what P1 work is running.
-    // `board_init::verify_dma_interrupt_priority` checks this at boot.
-    config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P14;
+    // = 0xD0, `P14` = 0xE0, `P15` = 0xF0).
+    //
+    // Use P15 (RTIC-P1 level), not P14. Same-priority interrupts never
+    // preempt each other on Cortex-M, so DMA at P14 (RTIC-P2) would have to
+    // wait behind any of usb_task/stop_check/arm_check/report_task/
+    // stepper_diag_task currently running rather than a bounded time --
+    // usb_task's per-wake loop in particular has no yield bound, so it can
+    // stall SPI completion for however long its current burst takes. P15
+    // shares tmc_control's own priority instead, which is safe because
+    // tmc_control's async model returns from its ISR at every await point
+    // rather than holding the CPU, so it never blocks a same-priority DMA
+    // completion the way an unbounded synchronous P2 loop can.
+    // `board_init::verify_dma_interrupt_priority` checks the programmed
+    // priority stays below P3 at boot.
+    config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P15;
 
     config
 }
