@@ -61,16 +61,21 @@ pub fn rcc_config() -> embassy_stm32::Config {
     // Embassy's `Priority` enum uses the same byte encoding (`Priority::P13`
     // = 0xD0, `P14` = 0xE0, `P15` = 0xF0).
     //
-    // Use P15 (RTIC-P1 level), not P14. Same-priority interrupts never
-    // preempt each other on Cortex-M, so DMA at P14 (RTIC-P2) would have to
-    // wait behind any of usb_task/stop_check/arm_check/report_task/
-    // stepper_diag_task currently running rather than a bounded time --
-    // usb_task's per-wake loop in particular has no yield bound, so it can
-    // stall SPI completion for however long its current burst takes. P15
-    // shares tmc_control's own priority instead, which is safe because
-    // tmc_control's async model returns from its ISR at every await point
-    // rather than holding the CPU, so it never blocks a same-priority DMA
-    // completion the way an unbounded synchronous P2 loop can.
+    // Use P15 (RTIC-P1 level), not P14 (RTIC-P2 level): P14 can preempt P1
+    // tasks, including tmc_control itself, mid-execution; P15 cannot, since
+    // equal-priority interrupts never preempt each other on Cortex-M, so a
+    // P15 DMA completion can only run in a gap between tmc_control's own
+    // execution slices, never inside one. P14 does not eliminate contention
+    // with the P2 tasks either way -- P14 sits at the exact same priority as
+    // usb_task and the other P2 tasks (so it cannot preempt them), and P15
+    // sits strictly below P2 (so it cannot preempt them either); neither
+    // choice bounds usb_task's unyielding per-wake loop. Live homing testing
+    // on the sibling OpenFFBoard firmware correlated P14 with an intermittent
+    // TMC4671 current-loop/encoder-read disruption that did not reproduce at
+    // P15 across repeated trials; the full causal mechanism is not yet
+    // instrumented and this should be revisited with per-source
+    // DMA/USB/TIM5 activation-and-duration counters if further tuning is
+    // needed.
     // `board_init::verify_dma_interrupt_priority` checks the programmed
     // priority stays below P3 at boot.
     config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P15;
