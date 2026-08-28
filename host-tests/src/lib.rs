@@ -168,22 +168,7 @@ mod commissioning_board_contract_tests {
             "foci_velocity_integral_plan_timing",
             "foci_velocity_integral_plan_travel",
             "foci_velocity_integral_plan_rung",
-            "foci_velocity_integral_observation_core",
-            "foci_velocity_integral_observation_rate",
-            "foci_velocity_integral_observation_quality",
-            "foci_velocity_integral_rung_core",
-            "foci_velocity_integral_rung_component",
-            "foci_velocity_integral_run_summary",
-            "foci_velocity_integral_curve_interval",
-            "foci_velocity_integral_drift",
-            "foci_velocity_integral_stage_b_comparison",
-            "foci_velocity_integral_reproduction_core",
-            "foci_velocity_integral_reproduction_mask",
-            "foci_velocity_integral_reproduction_interval",
-            "foci_velocity_integral_reproduction_digest",
-            "foci_velocity_integral_terminal_core",
-            "foci_velocity_integral_terminal_identity",
-            "foci_velocity_integral_terminal_timing",
+            "foci_velocity_integral_terminal",
             "foci_robustness_reversal_terminal",
         ] {
             assert!(
@@ -235,14 +220,9 @@ mod commissioning_board_contract_tests {
             ],
         );
         assert_manifest_entry(
-            "foci_velocity_integral_run_summary",
-            "FociVelocityIntegralRunSummary",
-            &["opening_available_mask: u8", "bookend_available_mask: u8"],
-        );
-        assert_manifest_entry(
-            "foci_velocity_integral_stage_b_comparison",
-            "FociVelocityIntegralStageBComparison",
-            &["direction: u8", "available: u8"],
+            "foci_velocity_integral_terminal",
+            "FociVelocityIntegralTerminal",
+            &["oid: u8", "payload: &[u8]"],
         );
     }
 
@@ -283,42 +263,23 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_forwards_rung_origin_recovery() {
-        for method in [
-            "foci_rung_origin_recovery_summary",
-            "foci_velocity_integral_plan_recovery",
-        ] {
-            assert!(
-                SHARED_COMMISSION_REPLY_MANIFEST.contains(&std::format!("name: {method}")),
-                "missing manifest entry {method}"
-            );
-        }
+    fn board_forwards_recovery_plan_geometry_but_not_the_retired_recovery_reply() {
+        assert!(
+            SHARED_COMMISSION_REPLY_MANIFEST.contains("name: foci_velocity_integral_plan_recovery"),
+            "missing manifest entry foci_velocity_integral_plan_recovery"
+        );
         for retired in [
             "foci_rung_origin_recovery_core",
             "foci_rung_origin_recovery_position",
             "foci_rung_origin_recovery_timing",
             "foci_rung_origin_recovery_limits",
+            "foci_rung_origin_recovery_summary",
         ] {
             assert!(!REPLIES.contains(retired), "retained board reply {retired}");
         }
-        assert_manifest_entry(
-            "foci_rung_origin_recovery_summary",
-            "FociRungOriginRecoverySummary",
-            &[
-                "oid: u8",
-                "run_sequence: u32",
-                "evidence_sequence: u16",
-                "stage: u8",
-                "rung_index: u8",
-                "p_raw: u16",
-                "binding_source: u8",
-                "outcome: u8",
-            ],
-        );
         assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
         assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 13;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
-        assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_REST_SELECTION_DIAGNOSTIC: u16 = 151"));
         assert!(!REPLIES.contains("rest_selection"));
     }
 
