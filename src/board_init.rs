@@ -51,6 +51,21 @@ pub fn rcc_config() -> embassy_stm32::Config {
     config.rcc.apb3_pre = APBPrescaler::DIV2;
     config.rcc.apb4_pre = APBPrescaler::DIV2;
     config.rcc.sys = Sysclk::PLL1_P;
+
+    // SPI2 RX/TX DMA completion (DMA1_STREAM0/DMA1_STREAM1) defaults to
+    // Embassy's Priority::P0, the highest hardware priority on this part --
+    // above every RTIC task, including the P3 TIM5/USB/STATUS handlers RTIC
+    // treats as the hard-real-time ceiling. H723 implements 4 NVIC priority
+    // bits, the same as F407; RTIC's cortex_logical2hw maps its logical
+    // priorities to raw NVIC bytes as P3 -> 0xD0, P2 -> 0xE0, P1 -> 0xF0.
+    // Embassy's `Priority` enum uses the same byte encoding (`Priority::P13`
+    // = 0xD0, `P14` = 0xE0, `P15` = 0xF0), so `Priority::P14` puts SPI DMA
+    // completion at the RTIC-P2 level: strictly below P3 (cannot preempt
+    // TIM5/USB/STATUS) but above P1 tmc_control, so SPI transfers complete
+    // promptly regardless of what P1 work is running.
+    // `board_init::verify_dma_interrupt_priority` checks this at boot.
+    config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P14;
+
     config
 }
 
@@ -155,4 +170,30 @@ pub fn enable_dwt_cyccnt() {
         dwt.cyccnt.write(0);
         dwt.ctrl.modify(|v| v | 1); // CYCCNTENA
     }
+}
+
+/// Confirm the SPI2 RX/TX DMA completion interrupts (DMA1_STREAM0,
+/// DMA1_STREAM1) are configured below the RTIC P3 hard-real-time ceiling
+/// (TIM5 CC1/CC2, OTG HS, EXTI2 STATUS -- raw NVIC priority `0xD0` on this
+/// 4-priority-bit part, `Priority::P13` in Embassy's encoding).
+///
+/// Panics if either DMA interrupt is at or above that level: that would let
+/// SPI DMA completion preempt STEP/DIR dispatch on either channel, the exact
+/// regression this check exists to catch (a future embassy-stm32 upgrade
+/// could reintroduce it by changing the default, or a later edit could
+/// remove the explicit override in `rcc_config`).
+pub fn verify_dma_interrupt_priority() {
+    use embassy_stm32::interrupt::{Interrupt, InterruptExt, Priority};
+
+    let rx = Interrupt::DMA1_STREAM0.get_priority();
+    let tx = Interrupt::DMA1_STREAM1.get_priority();
+    defmt::info!(
+        "SPI DMA NVIC priority: DMA1_STREAM0={} DMA1_STREAM1={}",
+        rx,
+        tx
+    );
+    assert!(
+        rx > Priority::P13 && tx > Priority::P13,
+        "SPI DMA interrupt priority is at or above RTIC P3 (TIM5/USB/STATUS)"
+    );
 }

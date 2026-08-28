@@ -30,6 +30,7 @@ mod commissioning_board_contract_tests {
         include_str!("../../../../shared/foci-firmware/src/commission_dispatch/replies.rs");
     const BOARD_CARGO_TOML: &str = include_str!("../../Cargo.toml");
     const TRIGGER_DOMAIN: &str = include_str!("../../src/trigger_domain.rs");
+    const BOARD_INIT: &str = include_str!("../../src/board_init.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -90,6 +91,20 @@ mod commissioning_board_contract_tests {
         assert!(
             encoded <= KLIPPER_PAYLOAD_WITH_ID_MAX,
             "{name} worst-case payload with id is {encoded} bytes"
+        );
+    }
+
+    #[test]
+    fn spi_dma_interrupt_priority_is_explicit_and_below_hard_real_time() {
+        assert!(
+            BOARD_INIT.contains(
+                "config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P14;"
+            ),
+            "rcc_config() must set dma_interrupt_priority explicitly to P14, not inherit Embassy's P0 default"
+        );
+        assert!(
+            MAIN.contains("board_init::verify_dma_interrupt_priority();"),
+            "init() must call verify_dma_interrupt_priority() to check the programmed NVIC priority at boot"
         );
     }
 
