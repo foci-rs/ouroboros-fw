@@ -215,6 +215,7 @@ mod app {
         let p = embassy_stm32::init(crate::board_init::rcc_config());
         defmt::info!("SYSCLK: 520 MHz, USB: 48 MHz");
         crate::board_init::verify_dma_interrupt_priority();
+        crate::board_init::enable_debug_clock_during_sleep();
 
         crate::board_init::init_tim5_clock();
         #[cfg(feature = "trace")]
