@@ -8,6 +8,22 @@ mod board_config {
     pub(crate) const TMC_CHANNEL_COUNT: u8 = 2;
 }
 
+mod ankyra {
+    pub(crate) mod constants {
+        pub(crate) const CLOCK_FREQ: u32 = 260_000_000;
+    }
+}
+
+mod tmc_control {
+    pub(crate) mod board {
+        pub(crate) fn tmc_state(
+            channel: u8,
+        ) -> &'static foci_firmware::state::tmc::TmcChannelState {
+            foci_firmware::state::tmc::tmc_channel(channel).expect("validated TMC channel")
+        }
+    }
+}
+
 #[cfg(test)]
 mod commissioning_board_contract_tests {
     const MAIN: &str = include_str!("../../src/main.rs");
@@ -485,7 +501,7 @@ mod containment_tests {
 
         for (shutdown, flush, disable, fault, expected) in cases {
             assert_eq!(
-                classify_commission_wait_precheck(shutdown, flush, disable, fault),
+                classify_commission_wait_precheck(shutdown, flush, disable, fault, false),
                 CommissionWaitPrecheck::Exit(expected),
             );
         }
@@ -494,7 +510,7 @@ mod containment_tests {
     #[test]
     fn clear_containment_snapshot_permits_status_fallback() {
         assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false),
+            classify_commission_wait_precheck(false, false, false, false, false),
             CommissionWaitPrecheck::PollCriticalStatus,
         );
     }
