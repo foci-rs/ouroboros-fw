@@ -60,6 +60,9 @@ pub(crate) enum CommissionWaitExit {
     QueueFlush,
     /// Enter GPIO-first emergency-disable handling.
     EmergencyDisable,
+    /// The host-liveness lease has expired; enter the shutdown safe-state
+    /// path exactly like `Shutdown` above.
+    ClockSyncExpired,
 }
 
 /// Decision made before the optional channel-1 critical-STATUS fallback.
@@ -77,6 +80,7 @@ pub(crate) const fn classify_commission_wait_exit(
     queue_flush: bool,
     emergency_disable: bool,
     critical_status: bool,
+    clock_sync_expired: bool,
 ) -> Option<CommissionWaitExit> {
     if emergency_disable || critical_status {
         Some(CommissionWaitExit::EmergencyDisable)
@@ -84,19 +88,31 @@ pub(crate) const fn classify_commission_wait_exit(
         Some(CommissionWaitExit::Shutdown)
     } else if queue_flush {
         Some(CommissionWaitExit::QueueFlush)
+    } else if clock_sync_expired {
+        Some(CommissionWaitExit::ClockSyncExpired)
     } else {
         None
     }
 }
 
 /// Decide whether a containment snapshot permits the fallback STATUS read.
+/// A clock-sync expiry is decided here too, before any SPI -- same
+/// motivation as the existing fault/shutdown/queue-flush prechecks: skip
+/// the channel-1 poll when a cheap flag already says to exit.
 pub(crate) const fn classify_commission_wait_precheck(
     shutdown: bool,
     queue_flush: bool,
     emergency_disable: bool,
     fault_active: bool,
+    clock_sync_expired: bool,
 ) -> CommissionWaitPrecheck {
-    match classify_commission_wait_exit(shutdown, queue_flush, emergency_disable, fault_active) {
+    match classify_commission_wait_exit(
+        shutdown,
+        queue_flush,
+        emergency_disable,
+        fault_active,
+        clock_sync_expired,
+    ) {
         Some(exit) => CommissionWaitPrecheck::Exit(exit),
         None => CommissionWaitPrecheck::PollCriticalStatus,
     }
@@ -237,6 +253,62 @@ mod tests {
         assert_eq!(
             classify_lease_check(true, false),
             LeaseCheckDisposition::Proceed
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_reports_clock_sync_expired() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, false, false, true),
+            Some(CommissionWaitExit::ClockSyncExpired)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_emergency_disable_takes_priority_over_clock_sync() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, true, false, true),
+            Some(CommissionWaitExit::EmergencyDisable)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_critical_status_takes_priority_over_clock_sync() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, false, true, true),
+            Some(CommissionWaitExit::EmergencyDisable)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_shutdown_takes_priority_over_clock_sync() {
+        assert_eq!(
+            classify_commission_wait_exit(true, false, false, false, true),
+            Some(CommissionWaitExit::Shutdown)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_none_when_nothing_set() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_precheck_exits_on_clock_sync_without_polling() {
+        assert_eq!(
+            classify_commission_wait_precheck(false, false, false, false, true),
+            CommissionWaitPrecheck::Exit(CommissionWaitExit::ClockSyncExpired)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_precheck_polls_when_clock_sync_not_expired() {
+        assert_eq!(
+            classify_commission_wait_precheck(false, false, false, false, false),
+            CommissionWaitPrecheck::PollCriticalStatus
         );
     }
 }

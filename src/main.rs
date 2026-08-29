@@ -778,6 +778,8 @@ mod app {
 
             macro_rules! handle_commission_wait_exit {
                 () => {{
+                    let clock_sync_expired =
+                        crate::tmc_control::containment::lease_expired(read_tim5());
                     let (shutdown, queue_flush, emergency_disable, fault_active) =
                         commission_wait_containment_snapshot!();
                     let precheck = crate::tmc_control::effects::classify_commission_wait_precheck(
@@ -785,6 +787,7 @@ mod app {
                         queue_flush,
                         emergency_disable,
                         fault_active,
+                        clock_sync_expired,
                     );
                     if let crate::tmc_control::effects::CommissionWaitPrecheck::Exit(exit) =
                         precheck
@@ -807,6 +810,7 @@ mod app {
                         queue_flush,
                         emergency_disable,
                         critical_status || fault_active,
+                        clock_sync_expired,
                     );
                     if let Some(exit) = exit {
                         if matches!(

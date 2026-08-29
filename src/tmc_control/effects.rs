@@ -342,8 +342,13 @@ mod tests {
         let channel_cases = [(0, true, false), (1, false, true)];
 
         for (channel, interrupt_disable, critical_status) in channel_cases {
-            let exit =
-                classify_commission_wait_exit(false, false, interrupt_disable, critical_status);
+            let exit = classify_commission_wait_exit(
+                false,
+                false,
+                interrupt_disable,
+                critical_status,
+                false,
+            );
 
             assert_eq!(
                 exit,
@@ -363,7 +368,8 @@ mod tests {
         ];
 
         for (channel, shutdown, flush, disable, critical_status, gpio_first) in cases {
-            let exit = classify_commission_wait_exit(shutdown, flush, disable, critical_status);
+            let exit =
+                classify_commission_wait_exit(shutdown, flush, disable, critical_status, false);
             let dispatch = exit.is_none();
             let reply = dispatch;
             let trace = dispatch;
