@@ -182,8 +182,6 @@ mod tests {
 
     #[test]
     fn lease_expired_stays_armed_when_one_of_two_channels_disarms() {
-        // Shared-lease semantics: channel 1 disarming does not drop the
-        // lease while channel 0 remains enabled.
         let _guard = reset_lease_state();
         crate::tmc_control::board::tmc_state(0)
             .enable_pin_asserted
