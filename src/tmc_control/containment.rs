@@ -1,5 +1,56 @@
 //! Pure containment decisions for commissioning wait boundaries.
 
+const CLOCK_SYNC_TIMEOUT_TICKS: u32 = 5 * crate::ankyra::constants::CLOCK_FREQ;
+
+/// Whether the host-liveness lease has expired: any channel is
+/// physically enabled, and either no valid `get_clock` has ever been
+/// received, or more than `CLOCK_SYNC_TIMEOUT_TICKS` have elapsed since
+/// the last one. `now` must be a freshly sampled `read_tim5()` at the
+/// call site — never a value captured once and reused across iterations.
+/// The lease is shared across both channels: it is armed whenever *any*
+/// channel is enabled, and does not disarm just because one of two
+/// channels disables while the other remains enabled.
+pub(crate) fn lease_expired(now: u32) -> bool {
+    use core::sync::atomic::Ordering::Relaxed;
+    use foci_firmware::state::lifecycle::{HAS_RECEIVED_VALID_CLOCK, LAST_HOST_LIVENESS_TICKS};
+
+    let any_enabled = (0..crate::board_config::TMC_CHANNEL_COUNT).any(|channel| {
+        crate::tmc_control::board::tmc_state(channel)
+            .enable_pin_asserted
+            .load(Relaxed)
+    });
+    if !any_enabled {
+        return false;
+    }
+    if !HAS_RECEIVED_VALID_CLOCK.load(Relaxed) {
+        return true;
+    }
+    let elapsed = now.wrapping_sub(LAST_HOST_LIVENESS_TICKS.load(Relaxed));
+    elapsed > CLOCK_SYNC_TIMEOUT_TICKS
+}
+
+/// What the P1 loop should do with the clock-sync lease this iteration.
+/// Checking the lease while shutdown is already active would re-enter
+/// shutdown every tick and starve the safe-state application above this
+/// check from ever completing, so this always resolves to `Proceed` in
+/// that case regardless of `lease_expired`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeaseCheckDisposition {
+    EnterClockSyncShutdown,
+    Proceed,
+}
+
+pub(crate) const fn classify_lease_check(
+    shutdown_active: bool,
+    lease_expired: bool,
+) -> LeaseCheckDisposition {
+    if !shutdown_active && lease_expired {
+        LeaseCheckDisposition::EnterClockSyncShutdown
+    } else {
+        LeaseCheckDisposition::Proceed
+    }
+}
+
 /// Board signal that interrupts an absolute commissioning wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommissionWaitExit {
@@ -48,5 +99,144 @@ pub(crate) const fn classify_commission_wait_precheck(
     match classify_commission_wait_exit(shutdown, queue_flush, emergency_disable, fault_active) {
         Some(exit) => CommissionWaitPrecheck::Exit(exit),
         None => CommissionWaitPrecheck::PollCriticalStatus,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::sync::atomic::Ordering::Relaxed;
+    use foci_firmware::state::lifecycle::{HAS_RECEIVED_VALID_CLOCK, LAST_HOST_LIVENESS_TICKS};
+
+    /// Serializes every test in this module that touches the global
+    /// liveness atomics or either channel's `enable_pin_asserted` --
+    /// neither is otherwise synchronized, and `cargo test` runs this
+    /// module's tests in parallel by default.
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn reset_lease_state() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().expect("lease test lock is available");
+        HAS_RECEIVED_VALID_CLOCK.store(false, Relaxed);
+        LAST_HOST_LIVENESS_TICKS.store(0, Relaxed);
+        for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
+            crate::tmc_control::board::tmc_state(channel)
+                .enable_pin_asserted
+                .store(false, Relaxed);
+        }
+        guard
+    }
+
+    #[test]
+    fn lease_expired_false_when_no_channel_enabled() {
+        let _guard = reset_lease_state();
+        HAS_RECEIVED_VALID_CLOCK.store(true, Relaxed);
+        assert!(!lease_expired(CLOCK_SYNC_TIMEOUT_TICKS + 1));
+    }
+
+    #[test]
+    fn lease_expired_true_when_only_channel_1_enabled_and_stale() {
+        let _guard = reset_lease_state();
+        crate::tmc_control::board::tmc_state(1)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        HAS_RECEIVED_VALID_CLOCK.store(true, Relaxed);
+        LAST_HOST_LIVENESS_TICKS.store(100, Relaxed);
+        assert!(lease_expired(100 + CLOCK_SYNC_TIMEOUT_TICKS + 1));
+    }
+
+    #[test]
+    fn lease_expired_false_when_only_channel_0_enabled_and_recent() {
+        let _guard = reset_lease_state();
+        crate::tmc_control::board::tmc_state(0)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        HAS_RECEIVED_VALID_CLOCK.store(true, Relaxed);
+        LAST_HOST_LIVENESS_TICKS.store(100, Relaxed);
+        assert!(!lease_expired(100 + CLOCK_SYNC_TIMEOUT_TICKS - 1));
+    }
+
+    #[test]
+    fn lease_expired_true_when_enabled_and_no_clock_ever_received() {
+        let _guard = reset_lease_state();
+        crate::tmc_control::board::tmc_state(0)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        assert!(lease_expired(0));
+    }
+
+    #[test]
+    fn lease_expired_stays_armed_when_one_of_two_channels_disarms() {
+        // Shared-lease semantics: channel 1 disarming does not drop the
+        // lease while channel 0 remains enabled.
+        let _guard = reset_lease_state();
+        crate::tmc_control::board::tmc_state(0)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        crate::tmc_control::board::tmc_state(1)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        HAS_RECEIVED_VALID_CLOCK.store(true, Relaxed);
+        LAST_HOST_LIVENESS_TICKS.store(100, Relaxed);
+        crate::tmc_control::board::tmc_state(1)
+            .enable_pin_asserted
+            .store(false, Relaxed);
+        assert!(lease_expired(100 + CLOCK_SYNC_TIMEOUT_TICKS + 1));
+    }
+
+    #[test]
+    fn lease_expired_transitions_true_across_an_advancing_sequence() {
+        let _guard = reset_lease_state();
+        crate::tmc_control::board::tmc_state(0)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        HAS_RECEIVED_VALID_CLOCK.store(true, Relaxed);
+        LAST_HOST_LIVENESS_TICKS.store(0, Relaxed);
+
+        let slice_ticks = 1_000 * (crate::ankyra::constants::CLOCK_FREQ / 1_000_000);
+        let mut now = 0u32;
+        let mut saw_expired = false;
+        for _ in 0..(CLOCK_SYNC_TIMEOUT_TICKS / slice_ticks + 2) {
+            if lease_expired(now) {
+                saw_expired = true;
+                break;
+            }
+            now = now.wrapping_add(slice_ticks);
+        }
+        assert!(
+            saw_expired,
+            "lease_expired never fired across an advancing sequence"
+        );
+    }
+
+    #[test]
+    fn classify_lease_check_enters_shutdown_when_not_active_and_expired() {
+        assert_eq!(
+            classify_lease_check(false, true),
+            LeaseCheckDisposition::EnterClockSyncShutdown
+        );
+    }
+
+    #[test]
+    fn classify_lease_check_proceeds_when_not_active_and_not_expired() {
+        assert_eq!(
+            classify_lease_check(false, false),
+            LeaseCheckDisposition::Proceed
+        );
+    }
+
+    #[test]
+    fn classify_lease_check_proceeds_when_active_and_expired() {
+        assert_eq!(
+            classify_lease_check(true, true),
+            LeaseCheckDisposition::Proceed
+        );
+    }
+
+    #[test]
+    fn classify_lease_check_proceeds_when_active_and_not_expired() {
+        assert_eq!(
+            classify_lease_check(true, false),
+            LeaseCheckDisposition::Proceed
+        );
     }
 }
