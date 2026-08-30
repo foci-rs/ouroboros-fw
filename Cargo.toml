@@ -54,6 +54,7 @@ heapless = { version = "0.9", features = ["defmt"] }
 [features]
 dev = ["foci-firmware/dev"]
 dev-flash = []
+usb-p1-probe = []
 trace = ["foci-firmware/trace", "foci-usb-stm32/trace"]
 trace-current-path = ["trace"]
 trace-velocity-limit-latch-test = [

@@ -100,6 +100,14 @@ mod app {
         foci_firmware::usb_pump::UsbPumpCounters::new();
     static USB_PUMP_EMITTER: crate::usb_task::Emitter = crate::usb_task::Emitter::new();
 
+    #[cfg(feature = "usb-p1-probe")]
+    static P1_PROBE_ITERS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+    #[cfg(feature = "usb-p1-probe")]
+    static P1_PROBE_MAX_GAP_US: core::sync::atomic::AtomicU32 =
+        core::sync::atomic::AtomicU32::new(0);
+    #[cfg(feature = "usb-p1-probe")]
+    static P1_PROBE_LAST_US: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
     use foci_firmware::diagnostic::StepperEventReason;
     use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 
@@ -622,6 +630,17 @@ mod app {
         // Position is read from stepper_state().position_target atomic (updated
         // by usb_receive at P2) — no shared resource lock needed.
         'control_loop: loop {
+            #[cfg(feature = "usb-p1-probe")]
+            {
+                use core::sync::atomic::Ordering::Relaxed;
+                let now = Mono::now().ticks() as u32;
+                let last = P1_PROBE_LAST_US.swap(now, Relaxed);
+                if last != 0 {
+                    P1_PROBE_MAX_GAP_US.fetch_max(now.wrapping_sub(last), Relaxed);
+                }
+                P1_PROBE_ITERS.fetch_add(1, Relaxed);
+            }
+
             use embassy_futures::select::{Either, select};
 
             // A terminal restore cancelled by a commissioning-loop exit still
