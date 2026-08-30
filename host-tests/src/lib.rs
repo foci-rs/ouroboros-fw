@@ -168,10 +168,34 @@ mod commissioning_board_contract_tests {
     fn board_owns_one_channel_checked_stage_c_candidate() {
         assert_eq!(MAIN.matches("StageCCandidateSlot::new()").count(), 1);
         assert_eq!(MAIN.matches("stage_c_candidate.observe_fault()").count(), 2);
-        assert!(MAIN.contains("CommissionTerminalContext::new"));
+        assert!(MAIN.contains("CommissionRetention::new"));
         assert!(REQUEST.contains("handle_tmc_control_request_with_stages"));
         assert!(REQUEST.contains("stage_c_candidate"));
         assert!(!MAIN.contains("[StageCCandidateSlot"));
+    }
+
+    #[test]
+    fn board_polls_the_terminal_restore_and_cancels_it_on_every_exit() {
+        // The per-channel terminal restore is a poll-driven machine on each
+        // runtime, not an awaited chain inside this task's future. Every
+        // commissioning-loop exit must latch a cancel, and the loop must drain
+        // that latch before touching the channel again.
+        assert!(
+            !MAIN.contains("drive_commissioning_poll_with_stages"),
+            "the board must not await the whole terminal chain in one future"
+        );
+        assert!(MAIN.contains("begin_commissioning_poll_with_stages"));
+        assert!(MAIN.contains("poll_commissioning_terminal"));
+        assert!(MAIN.contains("is_restore_pending"));
+        assert!(
+            MAIN.contains("restore_cancel_pending") && MAIN.contains("drive_restore_cancel"),
+            "the loop must drain a latched restore cancel"
+        );
+        assert_eq!(
+            MAIN.matches("request_restore_cancel").count(),
+            10,
+            "every commissioning-loop exit must latch a restore cancel"
+        );
     }
 
     #[test]

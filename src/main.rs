@@ -620,6 +620,25 @@ mod app {
         'control_loop: loop {
             use embassy_futures::select::{Either, select};
 
+            // A terminal restore cancelled by a commissioning-loop exit still
+            // owns its channel. Drive it to safe state before anything else
+            // touches that channel; only this drain retires its slots.
+            for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
+                let channel_idx = channel as usize;
+                if !runtimes[channel_idx].restore_cancel_pending() {
+                    continue;
+                }
+                let Some(device) = ctx.local.tmc_mux.device(channel) else {
+                    continue;
+                };
+                let mut tmc = tmc_driver(device);
+                let mut backend =
+                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                let _ = runtimes[channel_idx]
+                    .drive_restore_cancel(&mut backend, tmc_state(channel), stepper_state(channel))
+                    .await;
+            }
+
             macro_rules! quiesce_and_report_tmc_fault {
                 () => {{
                     quiesce_all_channels(&mut runtimes, enable_pins);
@@ -793,6 +812,9 @@ mod app {
                     if let crate::tmc_control::effects::CommissionWaitPrecheck::Exit(exit) =
                         precheck
                     {
+                        for runtime in runtimes.iter_mut() {
+                            runtime.request_restore_cancel();
+                        }
                         if matches!(
                             exit,
                             crate::tmc_control::effects::CommissionWaitExit::EmergencyDisable
@@ -814,6 +836,9 @@ mod app {
                         clock_sync_expired,
                     );
                     if let Some(exit) = exit {
+                        for runtime in runtimes.iter_mut() {
+                            runtime.request_restore_cancel();
+                        }
                         if matches!(
                             exit,
                             crate::tmc_control::effects::CommissionWaitExit::EmergencyDisable
@@ -970,6 +995,78 @@ mod app {
                 'commission_poll: loop {
                     handle_commission_wait_exit!();
 
+                    // A terminal restore owns this channel until it reports its
+                    // terminal: advance it one backend operation per pass
+                    // instead of stepping the engine again.
+                    if runtimes[channel_idx].is_restore_pending() {
+                        let action = {
+                            let Some(device) = ctx.local.tmc_mux.device(channel) else {
+                                ctx.shared.app_state.lock(|state| {
+                                    if crate::firmware_ctx::enter_shutdown(state) {
+                                        ::ankyra::klipper_shutdown_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            "Invalid TMC channel",
+                                            read_tim5(),
+                                        );
+                                    }
+                                });
+                                runtimes[channel_idx].request_restore_cancel();
+                                continue 'commission_channel;
+                            };
+                            let mut tmc = tmc_driver(device);
+                            let mut backend = ouroboros_backend(
+                                channel,
+                                &mut tmc,
+                                enable_pin(enable_pins, channel),
+                            );
+                            let mut retention =
+                                foci_firmware::commission_dispatch::CommissionRetention::new(
+                                    &mut *stage_c_candidate,
+                                );
+                            runtimes[channel_idx]
+                                .poll_commissioning_terminal(
+                                    &mut backend,
+                                    &mut retention,
+                                    tmc_state(channel),
+                                    stepper_state(channel),
+                                )
+                                .await
+                        };
+                        match action {
+                            None => continue 'commission_poll,
+                            Some(
+                                foci_firmware::tmc_control::ScheduledCommissionTickAction::Terminal {
+                                    reply,
+                                    actions,
+                                },
+                            ) => {
+                                #[cfg(feature = "trace")]
+                                {
+                                    commission_trace_phase[channel_idx] = None;
+                                }
+                                {
+                                    let runtime = &mut runtimes[channel_idx];
+                                    let mut state = runtime.dispatch_state(
+                                        tmc_state(channel),
+                                        stepper_state(channel),
+                                    );
+                                    apply_stepper_post_action(actions.stepper, &mut state, channel);
+                                }
+                                emit_terminal_reply(reply);
+                                defmt::info!(
+                                    "commissioning channel {} terminal max tick cycles: {}",
+                                    channel,
+                                    commission_tick_max_cycles[channel_idx],
+                                );
+                                commission_measurement_active[channel_idx] = false;
+                                break 'commission_poll;
+                            }
+                            Some(_) => {
+                                unreachable!("terminal restore produced a nonterminal action")
+                            }
+                        }
+                    }
+
                     #[cfg(feature = "trace")]
                     let engine_tick_deadline =
                         Mono::now() + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
@@ -989,6 +1086,7 @@ mod app {
                                     );
                                 }
                             });
+                            runtimes[channel_idx].request_restore_cancel();
                             continue 'commission_channel;
                         };
                         let mut tmc = tmc_driver(device);
@@ -1034,36 +1132,24 @@ mod app {
                     }
 
                     let action = {
-                        let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                            continue 'commission_channel;
-                        };
-                        let mut tmc = tmc_driver(device);
-                        let runtime = &mut runtimes[channel_idx];
-                        let mut backend =
-                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        let action = runtime
-                            .drive_commissioning_poll_with_stages(
-                                poll,
-                                &mut backend,
-                                foci_firmware::commission_dispatch::CommissionTerminalContext::new(
-                                    &mut *stage_c_candidate,
-                                    crate::ankyra::replies::emit_terminal_reply,
-                                ),
-                                tmc_state(channel),
-                                stepper_state(channel),
-                                &tmc_control_config,
-                            )
-                            .await;
-                        action.expect("active commissioning poll produces an action")
+                        let mut retention =
+                            foci_firmware::commission_dispatch::CommissionRetention::new(
+                                &mut *stage_c_candidate,
+                            );
+                        runtimes[channel_idx].begin_commissioning_poll_with_stages(
+                            poll,
+                            &mut retention,
+                            &tmc_control_config,
+                        )
+                    };
+                    let Some(action) = action else {
+                        // A terminal poll starts the restore machine instead of
+                        // producing an action; the drain block above advances it.
+                        assert!(
+                            runtimes[channel_idx].is_restore_pending(),
+                            "active commissioning poll produces an action"
+                        );
+                        continue 'commission_poll;
                     };
                     let tick_cycles =
                         cortex_m::peripheral::DWT::cycle_count().wrapping_sub(tick_start);
@@ -1153,6 +1239,7 @@ mod app {
                                         );
                                     }
                                 });
+                                runtimes[channel_idx].request_restore_cancel();
                                 continue 'control_loop;
                             };
                             let mut tmc = tmc_driver(device);
@@ -1182,6 +1269,7 @@ mod app {
                             ) {
                                 foci_firmware::tmc_control::PollDriverAction::PollNow
                                 | foci_firmware::tmc_control::PollDriverAction::YieldNow => {
+                                    runtimes[channel_idx].request_restore_cancel();
                                     continue 'control_loop;
                                 }
                                 foci_firmware::tmc_control::PollDriverAction::WaitUntil(
@@ -1214,6 +1302,7 @@ mod app {
                                                             );
                                                         }
                                                     });
+                                                    runtimes[channel_idx].request_restore_cancel();
                                                     continue 'control_loop;
                                                 }
 
@@ -1241,6 +1330,7 @@ mod app {
                                                             );
                                                         }
                                                     });
+                                                    runtimes[channel_idx].request_restore_cancel();
                                                     continue 'control_loop;
                                                 };
                                                 let mut request_tmc = tmc_driver(device);
@@ -1275,6 +1365,7 @@ mod app {
                                                     cancel_route,
                                                     crate::tmc_control::effects::CommissionWaitCancelRoute::Current
                                                 ) {
+                                                    runtimes[channel_idx].request_restore_cancel();
                                                     continue 'control_loop;
                                                 }
                                             }
@@ -1314,6 +1405,7 @@ mod app {
                                             Err(_) => {
                                                 lower_all_enable_pins(enable_pins);
                                                 TMC_DISABLE_SIGNAL.signal(());
+                                                runtimes[channel_idx].request_restore_cancel();
                                                 continue 'control_loop;
                                             }
                                         }
