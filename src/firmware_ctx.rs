@@ -593,6 +593,11 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
         Ok(())
     }
 
+    fn motion_quiescent(&self) -> bool {
+        (0..crate::board_config::TMC_CHANNEL_COUNT)
+            .all(|channel| self.motion_scale_idle(channel).is_ok())
+    }
+
     fn report_motion_scale_rejection(
         &mut self,
         oid: u8,
