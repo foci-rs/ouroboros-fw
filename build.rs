@@ -14,14 +14,40 @@ fn main() {
     };
     fs::copy(memory_x, out_dir.join("memory.x")).unwrap();
 
-    // Generate CCMRAM linker section supplement
+    // Generate CCMRAM linker section supplement. The allowlist admits only the
+    // one named no-init diagnostic record (Ouroboros has no panic-capture
+    // record); any other `.ccmram*` input section becomes an orphan and is
+    // rejected by --orphan-handling=error below rather than silently absorbed
+    // into this section.
     let ccmram_x = out_dir.join("ccmram.x");
     fs::write(
         &ccmram_x,
         "SECTIONS {\n\
          \x20 .ccmram (NOLOAD) : ALIGN(4) {\n\
-         \x20   *(.ccmram .ccmram.*)\n\
+         \x20   *(.ccmram.diag.breakaway)\n\
          \x20 } > CCMRAM\n\
+         }\n\
+         /* The breakaway breadcrumb's AtomicU32. */\n\
+         ASSERT(SIZEOF(.ccmram) == 4, \"unexpected CCMRAM contents\");\n\
+         \n\
+         /* --orphan-handling=error hard-errors on any input section the script\n\
+          * does not place explicitly, including debug/symbol metadata GNU ld\n\
+          * otherwise places implicitly. Route those here so the flag only ever\n\
+          * fires on an unexpected `.ccmram*` input. */\n\
+         SECTIONS {\n\
+         \x20 .debug_loc 0 : { *(.debug_loc) }\n\
+         \x20 .debug_abbrev 0 : { *(.debug_abbrev) }\n\
+         \x20 .debug_info 0 : { *(.debug_info) }\n\
+         \x20 .debug_aranges 0 : { *(.debug_aranges) }\n\
+         \x20 .debug_ranges 0 : { *(.debug_ranges) }\n\
+         \x20 .debug_str 0 : { *(.debug_str) }\n\
+         \x20 .debug_frame 0 : { *(.debug_frame) }\n\
+         \x20 .debug_line 0 : { *(.debug_line) }\n\
+         \x20 .comment 0 : { *(.comment) }\n\
+         \x20 .ARM.attributes 0 : { *(.ARM.attributes) }\n\
+         \x20 .symtab 0 : { *(.symtab) }\n\
+         \x20 .strtab 0 : { *(.strtab) }\n\
+         \x20 .shstrtab 0 : { *(.shstrtab) }\n\
          }\n",
     )
     .expect("failed to write ccmram.x");
@@ -30,6 +56,7 @@ fn main() {
 
     // Linker configuration
     println!("cargo:rustc-link-arg-bins=--nmagic");
+    println!("cargo:rustc-link-arg-bins=--orphan-handling=error");
     println!("cargo:rustc-link-arg-bins=-Tlink.x");
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
     println!("cargo:rustc-link-arg-bins=-Tccmram.x");
