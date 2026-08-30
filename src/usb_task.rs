@@ -30,6 +30,7 @@ pub struct OuroborosUsbBackend<'a, L: FnMut(&mut dyn FnMut(&mut State))> {
 }
 
 impl<'a, L: FnMut(&mut dyn FnMut(&mut State))> OuroborosUsbBackend<'a, L> {
+    /// Construct the backend from the board's shared-resource lock closure and the statics it borrows.
     pub fn new(
         lock_app_state: L,
         report_pending: &'a AtomicBool,
@@ -114,6 +115,7 @@ pub struct Emitter {
 }
 
 impl Emitter {
+    /// Construct a fresh emitter with no prior emission recorded.
     pub const fn new() -> Self {
         Self {
             last_emit_ticks: AtomicU32::new(0),
