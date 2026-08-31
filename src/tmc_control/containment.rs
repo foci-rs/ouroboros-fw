@@ -25,7 +25,8 @@ pub(crate) fn lease_expired(now: u32) -> bool {
     if !HAS_RECEIVED_VALID_CLOCK.load(Relaxed) {
         return true;
     }
-    let elapsed = now.wrapping_sub(LAST_HOST_LIVENESS_TICKS.load(Relaxed));
+    let elapsed =
+        foci_firmware::helpers::clock::elapsed_ticks(now, LAST_HOST_LIVENESS_TICKS.load(Relaxed));
     elapsed > CLOCK_SYNC_TIMEOUT_TICKS
 }
 
@@ -178,6 +179,17 @@ mod tests {
             .enable_pin_asserted
             .store(true, Relaxed);
         assert!(lease_expired(0));
+    }
+
+    #[test]
+    fn lease_expired_false_when_last_liveness_races_ahead_of_now() {
+        let _guard = reset_lease_state();
+        crate::tmc_control::board::tmc_state(0)
+            .enable_pin_asserted
+            .store(true, Relaxed);
+        HAS_RECEIVED_VALID_CLOCK.store(true, Relaxed);
+        LAST_HOST_LIVENESS_TICKS.store(1_000, Relaxed);
+        assert!(!lease_expired(999));
     }
 
     #[test]
