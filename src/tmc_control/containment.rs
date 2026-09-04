@@ -64,9 +64,9 @@ pub(crate) enum CommissionWaitExit {
     /// The host-liveness lease has expired; enter the shutdown safe-state
     /// path exactly like `Shutdown` above.
     ClockSyncExpired,
-    /// The operator requested cancellation; return to the outer commissioning
-    /// path. Never suppressed by or suppresses shutdown/queue-flush/clock-sync,
-    /// but always yields to genuine emergency-disable/critical-status.
+    /// An operator-requested cancel reached this checkpoint. Distinct from
+    /// `Shutdown`: the MCU stays running and the run reports a graceful
+    /// `Cancelled` terminal instead of requiring `FIRMWARE_RESTART`.
     Cancelled,
 }
 
