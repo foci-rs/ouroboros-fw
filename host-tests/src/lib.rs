@@ -47,6 +47,10 @@ mod commissioning_board_contract_tests {
     const BOARD_CARGO_TOML: &str = include_str!("../../Cargo.toml");
     const TRIGGER_DOMAIN: &str = include_str!("../../src/trigger_domain.rs");
     const BOARD_INIT: &str = include_str!("../../src/board_init.rs");
+    const SHARED_AUTOTUNE_TYPES: &str =
+        include_str!("../../../../shared/foci-firmware/src/autotune/types.rs");
+    const SHARED_CALIBRATION: &str =
+        include_str!("../../../../shared/foci-firmware/src/calibration.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -330,6 +334,30 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_recognizes_commission_cancel_status_code_74() {
+        assert!(
+            SHARED_AUTOTUNE_TYPES.contains("Cancelled"),
+            "CommissionError::Cancelled must exist"
+        );
+        assert!(
+            SHARED_AUTOTUNE_TYPES.contains("Self::Cancelled => 74"),
+            "CommissionError::Cancelled must have status code 74"
+        );
+    }
+
+    #[test]
+    fn board_recognizes_calibration_cancel_status_code_10() {
+        assert!(
+            SHARED_CALIBRATION.contains("Cancelled"),
+            "CalibrationError::Cancelled must exist"
+        );
+        assert!(
+            SHARED_CALIBRATION.contains("Self::Cancelled => 10"),
+            "CalibrationError::Cancelled must have status code 10"
+        );
+    }
+
+    #[test]
     fn board_forwards_the_tune_result_provenance_fields() {
         assert_reply_contract(
             "foci_tune_result",
@@ -525,7 +553,7 @@ mod containment_tests {
 
         for (shutdown, flush, disable, fault, expected) in cases {
             assert_eq!(
-                classify_commission_wait_precheck(shutdown, flush, disable, fault, false),
+                classify_commission_wait_precheck(shutdown, flush, disable, fault, false, false),
                 CommissionWaitPrecheck::Exit(expected),
             );
         }
@@ -534,7 +562,7 @@ mod containment_tests {
     #[test]
     fn clear_containment_snapshot_permits_status_fallback() {
         assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, false),
+            classify_commission_wait_precheck(false, false, false, false, false, false),
             CommissionWaitPrecheck::PollCriticalStatus,
         );
     }
