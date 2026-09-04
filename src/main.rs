@@ -831,6 +831,7 @@ mod app {
                         emergency_disable,
                         fault_active,
                         clock_sync_expired,
+                        false,
                     );
                     if let crate::tmc_control::effects::CommissionWaitPrecheck::Exit(exit) =
                         precheck
@@ -857,6 +858,7 @@ mod app {
                         emergency_disable,
                         critical_status || fault_active,
                         clock_sync_expired,
+                        false,
                     );
                     if let Some(exit) = exit {
                         for runtime in runtimes.iter_mut() {

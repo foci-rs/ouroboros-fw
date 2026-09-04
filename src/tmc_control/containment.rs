@@ -64,6 +64,10 @@ pub(crate) enum CommissionWaitExit {
     /// The host-liveness lease has expired; enter the shutdown safe-state
     /// path exactly like `Shutdown` above.
     ClockSyncExpired,
+    /// The operator requested cancellation; return to the outer commissioning
+    /// path. Never suppressed by or suppresses shutdown/queue-flush/clock-sync,
+    /// but always yields to genuine emergency-disable/critical-status.
+    Cancelled,
 }
 
 /// Decision made before the optional channel-1 critical-STATUS fallback.
@@ -82,9 +86,12 @@ pub(crate) const fn classify_commission_wait_exit(
     emergency_disable: bool,
     critical_status: bool,
     clock_sync_expired: bool,
+    cancel_requested: bool,
 ) -> Option<CommissionWaitExit> {
     if emergency_disable || critical_status {
         Some(CommissionWaitExit::EmergencyDisable)
+    } else if cancel_requested {
+        Some(CommissionWaitExit::Cancelled)
     } else if shutdown {
         Some(CommissionWaitExit::Shutdown)
     } else if queue_flush {
@@ -106,6 +113,7 @@ pub(crate) const fn classify_commission_wait_precheck(
     emergency_disable: bool,
     fault_active: bool,
     clock_sync_expired: bool,
+    cancel_requested: bool,
 ) -> CommissionWaitPrecheck {
     match classify_commission_wait_exit(
         shutdown,
@@ -113,6 +121,7 @@ pub(crate) const fn classify_commission_wait_precheck(
         emergency_disable,
         fault_active,
         clock_sync_expired,
+        cancel_requested,
     ) {
         Some(exit) => CommissionWaitPrecheck::Exit(exit),
         None => CommissionWaitPrecheck::PollCriticalStatus,
@@ -269,7 +278,7 @@ mod tests {
     #[test]
     fn classify_commission_wait_exit_reports_clock_sync_expired() {
         assert_eq!(
-            classify_commission_wait_exit(false, false, false, false, true),
+            classify_commission_wait_exit(false, false, false, false, true, false),
             Some(CommissionWaitExit::ClockSyncExpired)
         );
     }
@@ -277,7 +286,7 @@ mod tests {
     #[test]
     fn classify_commission_wait_exit_emergency_disable_takes_priority_over_clock_sync() {
         assert_eq!(
-            classify_commission_wait_exit(false, false, true, false, true),
+            classify_commission_wait_exit(false, false, true, false, true, false),
             Some(CommissionWaitExit::EmergencyDisable)
         );
     }
@@ -285,7 +294,7 @@ mod tests {
     #[test]
     fn classify_commission_wait_exit_critical_status_takes_priority_over_clock_sync() {
         assert_eq!(
-            classify_commission_wait_exit(false, false, false, true, true),
+            classify_commission_wait_exit(false, false, false, true, true, false),
             Some(CommissionWaitExit::EmergencyDisable)
         );
     }
@@ -293,7 +302,7 @@ mod tests {
     #[test]
     fn classify_commission_wait_exit_shutdown_takes_priority_over_clock_sync() {
         assert_eq!(
-            classify_commission_wait_exit(true, false, false, false, true),
+            classify_commission_wait_exit(true, false, false, false, true, false),
             Some(CommissionWaitExit::Shutdown)
         );
     }
@@ -301,15 +310,63 @@ mod tests {
     #[test]
     fn classify_commission_wait_exit_none_when_nothing_set() {
         assert_eq!(
-            classify_commission_wait_exit(false, false, false, false, false),
+            classify_commission_wait_exit(false, false, false, false, false, false),
             None
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_cancel_requested_returns_cancelled() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, false, false, false, true),
+            Some(CommissionWaitExit::Cancelled)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_emergency_disable_takes_priority_over_cancel_requested() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, true, false, false, true),
+            Some(CommissionWaitExit::EmergencyDisable)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_critical_status_takes_priority_over_cancel_requested() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, false, true, false, true),
+            Some(CommissionWaitExit::EmergencyDisable)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_cancel_requested_takes_priority_over_shutdown() {
+        assert_eq!(
+            classify_commission_wait_exit(true, false, false, false, false, true),
+            Some(CommissionWaitExit::Cancelled)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_cancel_requested_takes_priority_over_queue_flush() {
+        assert_eq!(
+            classify_commission_wait_exit(false, true, false, false, false, true),
+            Some(CommissionWaitExit::Cancelled)
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_exit_cancel_requested_takes_priority_over_clock_sync() {
+        assert_eq!(
+            classify_commission_wait_exit(false, false, false, false, true, true),
+            Some(CommissionWaitExit::Cancelled)
         );
     }
 
     #[test]
     fn classify_commission_wait_precheck_exits_on_clock_sync_without_polling() {
         assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, true),
+            classify_commission_wait_precheck(false, false, false, false, true, false),
             CommissionWaitPrecheck::Exit(CommissionWaitExit::ClockSyncExpired)
         );
     }
@@ -317,8 +374,16 @@ mod tests {
     #[test]
     fn classify_commission_wait_precheck_polls_when_clock_sync_not_expired() {
         assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, false),
+            classify_commission_wait_precheck(false, false, false, false, false, false),
             CommissionWaitPrecheck::PollCriticalStatus
+        );
+    }
+
+    #[test]
+    fn classify_commission_wait_precheck_exits_on_cancel_requested_without_polling() {
+        assert_eq!(
+            classify_commission_wait_precheck(false, false, false, false, false, true),
+            CommissionWaitPrecheck::Exit(CommissionWaitExit::Cancelled)
         );
     }
 }
