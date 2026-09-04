@@ -658,8 +658,54 @@ mod app {
                 let mut backend =
                     ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
                 let _ = runtimes[channel_idx]
-                    .drive_restore_cancel(&mut backend, tmc_state(channel), stepper_state(channel))
+                    .drive_restore_cancel(
+                        &mut backend,
+                        tmc_state(channel),
+                        stepper_state(channel),
+                        foci_firmware::autotune::CommissionError::Shutdown,
+                    )
                     .await;
+            }
+
+            for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
+                let channel_idx = channel as usize;
+                if !tmc_state(channel)
+                    .cancel_requested
+                    .load(core::sync::atomic::Ordering::Relaxed)
+                {
+                    continue;
+                }
+                let Some(device) = ctx.local.tmc_mux.device(channel) else {
+                    continue;
+                };
+                let mut tmc = tmc_driver(device);
+                let mut backend =
+                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
+                if let Some(foci_firmware::commission_dispatch::CommissionOutcome::Terminal {
+                    reply,
+                    actions,
+                }) = runtimes[channel_idx]
+                    .drive_operator_cancel(
+                        &mut backend,
+                        tmc_state(channel),
+                        stepper_state(channel),
+                        TMC_CONFIG.pwm_maxcnt,
+                    )
+                    .await
+                {
+                    #[cfg(feature = "trace")]
+                    {
+                        commission_trace_phase[channel_idx] = None;
+                    }
+                    {
+                        let runtime = &mut runtimes[channel_idx];
+                        let mut state =
+                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
+                        apply_stepper_post_action(actions.stepper, &mut state, channel);
+                    }
+                    emit_terminal_reply(reply);
+                    commission_measurement_active[channel_idx] = false;
+                }
             }
 
             macro_rules! quiesce_and_report_tmc_fault {
@@ -820,7 +866,7 @@ mod app {
             }
 
             macro_rules! handle_commission_wait_exit {
-                () => {{
+                ($channel:expr) => {{
                     let clock_sync_expired =
                         crate::tmc_control::containment::lease_expired(read_tim5());
                     let (shutdown, queue_flush, emergency_disable, fault_active) =
@@ -836,8 +882,13 @@ mod app {
                     if let crate::tmc_control::effects::CommissionWaitPrecheck::Exit(exit) =
                         precheck
                     {
-                        for runtime in runtimes.iter_mut() {
-                            runtime.request_restore_cancel();
+                        if !matches!(
+                            exit,
+                            crate::tmc_control::effects::CommissionWaitExit::Cancelled
+                        ) {
+                            for runtime in runtimes.iter_mut() {
+                                runtime.request_restore_cancel();
+                            }
                         }
                         if matches!(
                             exit,
@@ -858,11 +909,18 @@ mod app {
                         emergency_disable,
                         critical_status || fault_active,
                         clock_sync_expired,
-                        false,
+                        tmc_state($channel)
+                            .cancel_requested
+                            .load(core::sync::atomic::Ordering::Relaxed),
                     );
                     if let Some(exit) = exit {
-                        for runtime in runtimes.iter_mut() {
-                            runtime.request_restore_cancel();
+                        if !matches!(
+                            exit,
+                            crate::tmc_control::effects::CommissionWaitExit::Cancelled
+                        ) {
+                            for runtime in runtimes.iter_mut() {
+                                runtime.request_restore_cancel();
+                            }
                         }
                         if matches!(
                             exit,
@@ -1018,7 +1076,7 @@ mod app {
                 }
 
                 'commission_poll: loop {
-                    handle_commission_wait_exit!();
+                    handle_commission_wait_exit!(channel);
 
                     // A terminal restore owns this channel until it reports its
                     // terminal: advance it one backend operation per pass
@@ -1153,7 +1211,7 @@ mod app {
                     ) {
                         Mono::delay(foci_firmware::tmc_control::FORCED_READY_YIELD_US.micros())
                             .await;
-                        handle_commission_wait_exit!();
+                        handle_commission_wait_exit!(channel);
                     }
 
                     let action = {
@@ -1180,7 +1238,7 @@ mod app {
                         cortex_m::peripheral::DWT::cycle_count().wrapping_sub(tick_start);
                     commission_tick_max_cycles[channel_idx] =
                         commission_tick_max_cycles[channel_idx].max(tick_cycles);
-                    handle_commission_wait_exit!();
+                    handle_commission_wait_exit!(channel);
 
                     use foci_firmware::tmc_control::ScheduledCommissionTickAction;
                     match action {
@@ -1301,7 +1359,7 @@ mod app {
                                     deadline_us,
                                 ) => {
                                     loop {
-                                        handle_commission_wait_exit!();
+                                        handle_commission_wait_exit!(channel);
 
                                         if let Ok(req) = rx.try_recv() {
                                             use foci_firmware::tmc_control::CommissionWaitRequestDisposition;
@@ -1408,7 +1466,7 @@ mod app {
                                         }
                                         }
 
-                                        handle_commission_wait_exit!();
+                                        handle_commission_wait_exit!(channel);
                                         let now_us = Mono::now().duration_since_epoch().to_micros();
                                         match foci_firmware::tmc_control::classify_absolute_wait(
                                             now_us,
