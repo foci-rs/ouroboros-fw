@@ -51,6 +51,8 @@ mod commissioning_board_contract_tests {
         include_str!("../../../../shared/foci-firmware/src/autotune/types.rs");
     const SHARED_CALIBRATION: &str =
         include_str!("../../../../shared/foci-firmware/src/calibration.rs");
+    const SHARED_FOCI_HANDLERS: &str =
+        include_str!("../../../../shared/foci-firmware/src/ankyra/handlers/foci.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -354,6 +356,18 @@ mod commissioning_board_contract_tests {
         assert!(
             SHARED_CALIBRATION.contains("Self::Cancelled => 10"),
             "CalibrationError::Cancelled must have status code 10"
+        );
+    }
+
+    #[test]
+    fn board_references_the_foci_commission_cancel_command() {
+        assert!(
+            SHARED_FOCI_HANDLERS.contains("pub fn foci_commission_cancel"),
+            "foci_commission_cancel command handler must be defined"
+        );
+        assert!(
+            SHARED_FOCI_HANDLERS.contains("#[klipper_command]\npub fn foci_commission_cancel"),
+            "foci_commission_cancel must be marked with #[klipper_command]"
         );
     }
 
