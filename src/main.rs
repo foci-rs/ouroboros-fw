@@ -871,6 +871,9 @@ mod app {
                         crate::tmc_control::containment::lease_expired(read_tim5());
                     let (shutdown, queue_flush, emergency_disable, fault_active) =
                         commission_wait_containment_snapshot!();
+                    // Cancel fast-path stays off: a genuine fault must still win the
+                    // channel-1 critical-STATUS poll below, so this is `false` until
+                    // that priority is revisited.
                     let precheck = crate::tmc_control::effects::classify_commission_wait_precheck(
                         shutdown,
                         queue_flush,
