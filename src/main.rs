@@ -728,15 +728,22 @@ mod app {
                             continue;
                         };
                         let mut report_tmc = tmc_driver(device);
-                        let report_flags = report_tmc
+                        let report_status = report_tmc
                             .read_register(foci_tmc4671::registers::STATUS_FLAGS)
                             .await
-                            .unwrap_or(0);
-                        defmt::error!(
-                            "TMC4671 channel {} emergency disable: STATUS={:#010x}",
-                            report_channel,
-                            report_flags
-                        );
+                            .map_err(|_| ());
+                        let report_flags = report_status.unwrap_or(0);
+                        match report_status {
+                            Ok(report_flags) => defmt::error!(
+                                "TMC4671 channel {} emergency disable: STATUS={:#010x}",
+                                report_channel,
+                                report_flags
+                            ),
+                            Err(_) => defmt::error!(
+                                "TMC4671 channel {} emergency disable: STATUS read failed",
+                                report_channel
+                            ),
+                        }
                         record_stepper_event(
                             StepperEventReason::TmcDisableSignal,
                             report_channel,
@@ -745,7 +752,7 @@ mod app {
                             report_flags,
                             0,
                         );
-                        if report_flags & STATUS_ADC_I_CLIPPED != 0 {
+                        if foci_firmware::tmc_control::is_adc_current_clipped(report_status) {
                             reported_shutdown = true;
                             ctx.shared.app_state.lock(|state| {
                                 if crate::firmware_ctx::enter_shutdown(state) {
