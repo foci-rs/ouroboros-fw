@@ -3,9 +3,14 @@
 //! Board-specific hooks provide `Mono`, shutdown signal, configuration, and
 //! trace integration to the shared firmware commissioning backend core.
 
+use core::sync::atomic::Ordering::Relaxed;
+
 use embassy_stm32::gpio::Output;
-use foci_firmware::commissioning::backend::{CommissionBackendHooks, SharedCommissioningBackend};
+use foci_firmware::commissioning::backend::{
+    CommissionBackendHooks, SharedCommissioningBackend, shutdown_requested_from,
+};
 use foci_firmware::config::TmcConfig;
+use foci_firmware::state::lifecycle::{FAULT_ACTIVE, SHUTDOWN_ACTIVE};
 use foci_firmware::state::tmc::TMC_DISABLE_SIGNAL;
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;
@@ -13,6 +18,8 @@ use rtic_monotonics::fugit::ExtU64;
 use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
 use crate::board_config::TMC_CONFIG;
+use crate::helpers::lifecycle::read_tim5;
+use crate::tmc_control::containment::lease_expired;
 
 pub(crate) struct OuroborosHooks;
 
@@ -35,12 +42,18 @@ impl CommissionBackendHooks for OuroborosHooks {
     }
 
     fn commission_is_shutdown_requested() -> bool {
-        if TMC_DISABLE_SIGNAL.try_take().is_some() {
+        let disable_signal = if TMC_DISABLE_SIGNAL.try_take().is_some() {
             TMC_DISABLE_SIGNAL.signal(());
             true
         } else {
             false
-        }
+        };
+        shutdown_requested_from(
+            disable_signal,
+            lease_expired(read_tim5()),
+            SHUTDOWN_ACTIVE.load(Relaxed),
+            FAULT_ACTIVE.load(Relaxed),
+        )
     }
 
     async fn commission_delay_us(us: u32) {
