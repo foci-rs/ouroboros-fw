@@ -517,7 +517,7 @@ pub(crate) fn emit_velocity_integral_plan(
 }
 
 /// Emit a `FociCommissionPhase` reply for a phase transition.
-pub(crate) fn emit_phase_reply(oid: u8, phase_id: foci_firmware::autotune::PhaseId) {
+pub(crate) fn emit_phase_reply(oid: u8, phase_id: foci_firmware::autotune::CommissionPhase) {
     let mut sink = BoardCommissionReplySink;
     foci_firmware::commission_dispatch::emit_phase_reply(&mut sink, oid, phase_id);
 }

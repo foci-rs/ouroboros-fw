@@ -44,7 +44,7 @@ mod app {
     use embassy_stm32::wdg::IndependentWatchdog;
     use embassy_stm32::{bind_interrupts, peripherals};
     #[cfg(feature = "trace")]
-    use foci_firmware::autotune::PhaseId;
+    use foci_firmware::autotune::CommissionPhase;
     #[cfg(feature = "trace")]
     use foci_firmware::commissioning::types::EngineKind;
     use foci_klipper::state::State;
@@ -613,7 +613,7 @@ mod app {
         let mut commission_measurement_active =
             [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
         #[cfg(feature = "trace")]
-        let mut commission_trace_phase: [Option<(EngineKind, PhaseId)>;
+        let mut commission_trace_phase: [Option<(EngineKind, CommissionPhase)>;
             crate::board_config::TMC_CHANNEL_COUNT as usize] =
             [None; crate::board_config::TMC_CHANNEL_COUNT as usize];
 
