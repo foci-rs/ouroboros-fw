@@ -527,6 +527,14 @@ mod commissioning_board_contract_tests {
              whether the locked path observed None"
         );
     }
+
+    #[test]
+    fn step_dispatch_holds_while_homing_preparation_is_pending() {
+        assert!(
+            MAIN.matches("HOMING_STATE.load(Relaxed) == 1").count() >= 3,
+            "every step-dispatch entry must defer while HOMING_STATE == 1"
+        );
+    }
 }
 
 #[path = "../../src/state/stepper.rs"]

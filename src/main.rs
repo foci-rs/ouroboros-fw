@@ -2106,6 +2106,11 @@ mod app {
             next_event_clocks[idx] = None;
             return StepDispatchOutcome::Continue;
         }
+        if HOMING_STATE.load(Relaxed) == 1 {
+            // P1 has not finished homing preparation; re-check in 1 ms.
+            next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
+            return StepDispatchOutcome::Continue;
+        }
         let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
             return StepDispatchOutcome::Continue;
@@ -2211,6 +2216,11 @@ mod app {
             next_event_clocks[idx] = None;
             return StepDispatchOutcome::Continue;
         }
+        if HOMING_STATE.load(Relaxed) == 1 {
+            // P1 has not finished homing preparation; re-check in 1 ms.
+            next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
+            return StepDispatchOutcome::Continue;
+        }
         let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
             return StepDispatchOutcome::Continue;
@@ -2287,10 +2297,15 @@ mod app {
     fn refresh_step_channels(
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
     ) -> StepDispatchOutcome {
+        use core::sync::atomic::Ordering::Relaxed;
+
         for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
             let channel = idx as u8;
             if !channel_stepper_ready(channel) {
                 next_event_clocks[idx] = None;
+            } else if HOMING_STATE.load(Relaxed) == 1 {
+                // P1 has not finished homing preparation; re-check in 1 ms.
+                next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
             } else if next_event_clocks[idx].is_none()
                 && load_next_step_move(channel, next_event_clocks) == StepDispatchOutcome::Fatal
             {
