@@ -171,13 +171,13 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_owns_one_channel_checked_stage_c_candidate() {
-        assert_eq!(MAIN.matches("StageCCandidateSlot::new()").count(), 1);
-        assert_eq!(MAIN.matches("stage_c_candidate.observe_fault()").count(), 2);
+    fn board_owns_one_channel_checked_integral_candidate() {
+        assert_eq!(MAIN.matches("IntegralRetentionSlot::new()").count(), 1);
+        assert_eq!(MAIN.matches("integral_candidate.observe_fault()").count(), 2);
         assert!(MAIN.contains("CommissionRetention::new"));
         assert!(REQUEST.contains("handle_tmc_control_request_with_stages"));
-        assert!(REQUEST.contains("stage_c_candidate"));
-        assert!(!MAIN.contains("[StageCCandidateSlot"));
+        assert!(REQUEST.contains("integral_candidate"));
+        assert!(!MAIN.contains("[IntegralRetentionSlot"));
     }
 
     #[test]
@@ -205,7 +205,7 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_forwards_the_complete_stage_c_reply_family() {
+    fn board_forwards_the_complete_integral_reply_family() {
         for method in [
             "foci_commissioning_workflow_plan",
             "foci_velocity_integral_plan_core",
@@ -273,21 +273,21 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_publishes_the_stage_c_schema_and_geometry_constants() {
+    fn board_publishes_the_integral_schema_and_geometry_constants() {
         for declaration in [
-            "pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 13;",
-            "pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;",
-            "pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
-            "pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;",
+            "pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;",
+            "pub const INTEGRAL_MAX_POSITIVE_RUNGS: u32 = 30;",
+            "pub const INTEGRAL_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
+            "pub const INTEGRAL_OBSERVATIONS_PER_RUNG: u32 = 8;",
         ] {
             assert!(CONSTANTS.contains(declaration), "missing {declaration}");
         }
         for constant in [
             "STAGE_B_EVIDENCE_SCHEMA_REVISION",
-            "STAGE_C_EVIDENCE_SCHEMA_REVISION",
-            "STAGE_C_MAX_POSITIVE_RUNGS",
-            "STAGE_C_OBSERVATIONS_PER_DIRECTION",
-            "STAGE_C_OBSERVATIONS_PER_RUNG",
+            "INTEGRAL_EVIDENCE_SCHEMA_REVISION",
+            "INTEGRAL_MAX_POSITIVE_RUNGS",
+            "INTEGRAL_OBSERVATIONS_PER_DIRECTION",
+            "INTEGRAL_OBSERVATIONS_PER_RUNG",
         ] {
             assert!(PROVIDER.contains(constant), "provider omits {constant}");
         }
@@ -324,7 +324,7 @@ mod commissioning_board_contract_tests {
             assert!(!REPLIES.contains(retired), "retained board reply {retired}");
         }
         assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
-        assert!(CONSTANTS.contains("pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 13;"));
+        assert!(CONSTANTS.contains("pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
         assert!(!REPLIES.contains("rest_selection"));
     }

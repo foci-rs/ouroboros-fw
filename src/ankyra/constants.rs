@@ -47,10 +47,10 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_C_EVIDENCE_SCHEMA_REVISION: u32 = 13;
+pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;
 const _: () = assert!(
-    STAGE_C_EVIDENCE_SCHEMA_REVISION
-        == foci_firmware::commissioning::outer::velocity::combined_plan::STAGE_C_PLAN_SCHEMA_REVISION
+    INTEGRAL_EVIDENCE_SCHEMA_REVISION
+        == foci_firmware::commissioning::outer::velocity::combined_plan::INTEGRAL_PLAN_SCHEMA_REVISION
             as u32
 );
 
@@ -62,26 +62,26 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_C_MAX_POSITIVE_RUNGS: u32 = 30;
+pub const INTEGRAL_MAX_POSITIVE_RUNGS: u32 = 30;
 const _: () = assert!(
-    STAGE_C_MAX_POSITIVE_RUNGS
-        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_MAX_POSITIVE_RUNGS
+    INTEGRAL_MAX_POSITIVE_RUNGS
+        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_MAX_POSITIVE_RUNGS
             as u32
 );
 
 #[klipper_constant]
-pub const STAGE_C_OBSERVATIONS_PER_DIRECTION: u32 = 4;
+pub const INTEGRAL_OBSERVATIONS_PER_DIRECTION: u32 = 4;
 const _: () = assert!(
-    STAGE_C_OBSERVATIONS_PER_DIRECTION
-        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_OBSERVATIONS_PER_DIRECTION
+    INTEGRAL_OBSERVATIONS_PER_DIRECTION
+        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_OBSERVATIONS_PER_DIRECTION
             as u32
 );
 
 #[klipper_constant]
-pub const STAGE_C_OBSERVATIONS_PER_RUNG: u32 = 8;
+pub const INTEGRAL_OBSERVATIONS_PER_RUNG: u32 = 8;
 const _: () = assert!(
-    STAGE_C_OBSERVATIONS_PER_RUNG
-        == foci_firmware::commissioning::outer::velocity::integral_plan::STAGE_C_OBSERVATIONS_PER_RUNG
+    INTEGRAL_OBSERVATIONS_PER_RUNG
+        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_OBSERVATIONS_PER_RUNG
 );
 
 #[allow(dead_code)]

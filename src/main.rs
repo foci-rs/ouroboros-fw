@@ -196,10 +196,10 @@ mod app {
     /// Persistent Stage-C candidate slot carried across `tmc_control` task calls.
     ///
     /// Retains the Stage-C authority a `breakaway_seeded` campaign hands off to
-    /// `stage_c_resume`, so the production build runs the full autotune
+    /// `integral_resume`, so the production build runs the full autotune
     /// hand-off exactly as the trace build does.
-    type StageCCandidateTaskLocal =
-        foci_firmware::commissioning::outer::velocity::integral_reproduction::StageCCandidateSlot;
+    type IntegralCandidateTaskLocal =
+        foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot;
 
     #[local]
     struct Local {
@@ -207,7 +207,7 @@ mod app {
         tmc_enable: TmcEnablePins,
         tmc_rx: Receiver<'static, TmcRequest, TMC_CHANNEL_SIZE>,
         wdg: IndependentWatchdog<'static, peripherals::IWDG1>,
-        stage_c_candidate: StageCCandidateTaskLocal,
+        integral_candidate: IntegralCandidateTaskLocal,
     }
 
     #[init(local = [
@@ -334,8 +334,8 @@ mod app {
                 tmc_enable,
                 tmc_rx,
                 wdg,
-                stage_c_candidate:
-                    foci_firmware::commissioning::outer::velocity::integral_reproduction::StageCCandidateSlot::new(),
+                integral_candidate:
+                    foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot::new(),
             },
         )
     }
@@ -363,12 +363,12 @@ mod app {
     #[task(
         priority = 1,
         shared = [app_state],
-        local = [tmc_mux, tmc_enable, tmc_rx, stage_c_candidate]
+        local = [tmc_mux, tmc_enable, tmc_rx, integral_candidate]
     )]
     async fn tmc_control(mut ctx: tmc_control::Context) {
         let enable_pins = ctx.local.tmc_enable;
         let rx = ctx.local.tmc_rx;
-        let stage_c_candidate = ctx.local.stage_c_candidate;
+        let integral_candidate = ctx.local.integral_candidate;
 
         // NOTE: auto-init disabled - motor current regulation not yet safe
         // tmc_init_open_loop(tmc, enable_pin(enable_pins, channel)).await;
@@ -1015,7 +1015,7 @@ mod app {
                             .store(false, core::sync::atomic::Ordering::Relaxed);
                     }
                     shutdown_handled = all_shutdown_safe_state_complete;
-                    stage_c_candidate.observe_fault();
+                    integral_candidate.observe_fault();
                 }
                 Mono::delay(1.millis()).await;
                 continue;
@@ -1047,7 +1047,7 @@ mod app {
             // Drain stale requests after config_reset
             if TMC_QUEUE_FLUSH.swap(false, core::sync::atomic::Ordering::Relaxed) {
                 commission_measurement_active.fill(false);
-                stage_c_candidate.observe_fault();
+                integral_candidate.observe_fault();
                 while rx.try_recv().is_ok() {}
                 let mut needs_disarm = [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
                 for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
@@ -1143,7 +1143,7 @@ mod app {
                             );
                             let mut retention =
                                 foci_firmware::commission_dispatch::CommissionRetention::new(
-                                    &mut *stage_c_candidate,
+                                    &mut *integral_candidate,
                                 );
                             runtimes[channel_idx]
                                 .poll_commissioning_terminal(
@@ -1256,7 +1256,7 @@ mod app {
                     let action = {
                         let mut retention =
                             foci_firmware::commission_dispatch::CommissionRetention::new(
-                                &mut *stage_c_candidate,
+                                &mut *integral_candidate,
                             );
                         runtimes[channel_idx].begin_commissioning_poll_with_stages(
                             poll,
@@ -1466,7 +1466,7 @@ mod app {
                                                         tmc: &mut request_tmc,
                                                         enable_pins,
                                                         commission_trace_engine_seq: &mut commission_trace_engine_seq,
-                                                        stage_c_candidate: &mut *stage_c_candidate,
+                                                        integral_candidate: &mut *integral_candidate,
                                                     },
                                                 )
                                                 .await;
@@ -1634,7 +1634,7 @@ mod app {
                             tmc: &mut tmc,
                             enable_pins,
                             commission_trace_engine_seq: &mut commission_trace_engine_seq,
-                            stage_c_candidate: &mut *stage_c_candidate,
+                            integral_candidate: &mut *integral_candidate,
                         },
                     )
                     .await;

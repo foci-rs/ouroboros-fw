@@ -496,10 +496,10 @@ pub(crate) fn emit_breakaway_campaign_event(
     );
 }
 
-/// Emit the exact Stage-C plan an accepted breakaway campaign handed off to.
+/// Emit the exact velocity-integral plan an accepted breakaway campaign handed off to.
 ///
-/// The host assembler refuses every Stage-C observation until it has seen a
-/// complete plan, and a breakaway hand-off reaches Stage C on the
+/// The host assembler refuses every velocity-integral observation until it has seen a
+/// complete plan, and a breakaway hand-off reaches the integral phase on the
 /// scheduled-tick path, which carries the plan as a `CommissionEvent` rather
 /// than through a dispatch reply.
 pub(crate) fn emit_velocity_integral_plan(

@@ -233,7 +233,7 @@ pub(crate) struct TmcControlRequestContext<'a, 'spi> {
     pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     pub(crate) enable_pins: &'a mut TmcEnablePins,
     pub(crate) commission_trace_engine_seq: &'a mut [u32; TMC_CHANNEL_COUNT as usize],
-    pub(crate) stage_c_candidate: &'a mut foci_firmware::commissioning::outer::velocity::integral_reproduction::StageCCandidateSlot,
+    pub(crate) integral_candidate: &'a mut foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot,
 }
 
 pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
@@ -248,7 +248,7 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         tmc,
         enable_pins,
         commission_trace_engine_seq,
-        stage_c_candidate,
+        integral_candidate,
     } = context;
     let runtime = &mut runtimes[channel as usize];
 
@@ -262,7 +262,7 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         req,
         disposition,
         runtime,
-        stage_c_candidate,
+        integral_candidate,
         tmc,
         &mut board,
     )
