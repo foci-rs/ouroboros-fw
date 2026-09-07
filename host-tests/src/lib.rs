@@ -166,8 +166,8 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_publishes_the_stage_b_schema_revision() {
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
+    fn board_publishes_the_proportional_schema_revision() {
+        assert!(CONSTANTS.contains("pub const PROPORTIONAL_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod commissioning_board_contract_tests {
             assert!(CONSTANTS.contains(declaration), "missing {declaration}");
         }
         for constant in [
-            "STAGE_B_EVIDENCE_SCHEMA_REVISION",
+            "PROPORTIONAL_EVIDENCE_SCHEMA_REVISION",
             "INTEGRAL_EVIDENCE_SCHEMA_REVISION",
             "INTEGRAL_MAX_POSITIVE_RUNGS",
             "INTEGRAL_OBSERVATIONS_PER_DIRECTION",
@@ -323,7 +323,7 @@ mod commissioning_board_contract_tests {
         ] {
             assert!(!REPLIES.contains(retired), "retained board reply {retired}");
         }
-        assert!(CONSTANTS.contains("pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
+        assert!(CONSTANTS.contains("pub const PROPORTIONAL_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
         assert!(CONSTANTS.contains("pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
         assert!(!REPLIES.contains("rest_selection"));

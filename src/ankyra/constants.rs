@@ -39,10 +39,10 @@ const _: () = assert!(
 );
 
 #[klipper_constant]
-pub const STAGE_B_EVIDENCE_SCHEMA_REVISION: u32 = 14;
+pub const PROPORTIONAL_EVIDENCE_SCHEMA_REVISION: u32 = 14;
 const _: () = assert!(
-    STAGE_B_EVIDENCE_SCHEMA_REVISION
-        == foci_firmware::commissioning::outer::velocity::combined_plan::STAGE_B_PLAN_SCHEMA_REVISION
+    PROPORTIONAL_EVIDENCE_SCHEMA_REVISION
+        == foci_firmware::commissioning::outer::velocity::combined_plan::PROPORTIONAL_PLAN_SCHEMA_REVISION
             as u32
 );
 
