@@ -714,6 +714,7 @@ mod app {
                     #[cfg(feature = "trace")]
                     commission_trace_phase.fill(None);
                     let mut reported_shutdown = false;
+                    let mut any_status_read_failed = false;
                     for report_channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(report_channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -729,7 +730,7 @@ mod app {
                         };
                         let mut report_tmc = tmc_driver(device);
                         let report_status = report_tmc
-                            .read_register(foci_tmc4671::registers::STATUS_FLAGS)
+                            .read_register_retried(foci_tmc4671::registers::STATUS_FLAGS)
                             .await
                             .map_err(|_| ());
                         let report_flags = report_status.unwrap_or(0);
@@ -739,10 +740,13 @@ mod app {
                                 report_channel,
                                 report_flags
                             ),
-                            Err(_) => defmt::error!(
-                                "TMC4671 channel {} emergency disable: STATUS read failed",
-                                report_channel
-                            ),
+                            Err(_) => {
+                                any_status_read_failed = true;
+                                defmt::error!(
+                                    "TMC4671 channel {} emergency disable: STATUS read failed",
+                                    report_channel
+                                );
+                            }
                         }
                         record_stepper_event(
                             StepperEventReason::TmcDisableSignal,
@@ -768,11 +772,19 @@ mod app {
                     if !reported_shutdown {
                         ctx.shared.app_state.lock(|state| {
                             if crate::firmware_ctx::enter_shutdown(state) {
-                                ::ankyra::klipper_shutdown_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    "TMC4671 fault",
-                                    read_tim5(),
-                                );
+                                if any_status_read_failed {
+                                    ::ankyra::klipper_shutdown_from!(
+                                        &mut crate::_ankyra_config::Sender,
+                                        "TMC4671: STATUS_FLAGS read failed",
+                                        read_tim5(),
+                                    );
+                                } else {
+                                    ::ankyra::klipper_shutdown_from!(
+                                        &mut crate::_ankyra_config::Sender,
+                                        "TMC4671 fault",
+                                        read_tim5(),
+                                    );
+                                }
                             }
                         });
                     }
@@ -2752,7 +2764,10 @@ foci_firmware::foci_ankyra_config! {
         foci_firmware::ankyra::provider::FOCI_FIRMWARE_PROVIDER,
         crate::ankyra::provider::BOARD_PROVIDER,
     ],
-    board_static_strings = ["TMC4671 PI representation failed at boot"],
+    board_static_strings = [
+        "TMC4671 PI representation failed at boot",
+        "TMC4671: STATUS_FLAGS read failed",
+    ],
     app = "foci",
     version = env!("CARGO_PKG_VERSION"),
     build_versions = "",
