@@ -713,8 +713,8 @@ mod app {
                     quiesce_all_channels(&mut runtimes, enable_pins);
                     #[cfg(feature = "trace")]
                     commission_trace_phase.fill(None);
-                    let mut reported_shutdown = false;
-                    let mut any_status_read_failed = false;
+                    let mut fault = foci_firmware::tmc_control::EmergencyDisableFault::Generic;
+                    let mut shutdown_reported = false;
                     for report_channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                         let Some(device) = ctx.local.tmc_mux.device(report_channel) else {
                             ctx.shared.app_state.lock(|state| {
@@ -734,19 +734,25 @@ mod app {
                             .await
                             .map_err(|_| ());
                         let report_flags = report_status.unwrap_or(0);
+                        let channel_fault =
+                            foci_firmware::tmc_control::classify_emergency_disable_fault(
+                                report_status,
+                            );
+                        fault =
+                            foci_firmware::tmc_control::combine_emergency_disable_fault(
+                                fault,
+                                channel_fault,
+                            );
                         match report_status {
                             Ok(report_flags) => defmt::error!(
                                 "TMC4671 channel {} emergency disable: STATUS={:#010x}",
                                 report_channel,
                                 report_flags
                             ),
-                            Err(_) => {
-                                any_status_read_failed = true;
-                                defmt::error!(
-                                    "TMC4671 channel {} emergency disable: STATUS read failed",
-                                    report_channel
-                                );
-                            }
+                            Err(_) => defmt::error!(
+                                "TMC4671 channel {} emergency disable: STATUS read failed",
+                                report_channel
+                            ),
                         }
                         record_stepper_event(
                             StepperEventReason::TmcDisableSignal,
@@ -756,8 +762,11 @@ mod app {
                             report_flags,
                             0,
                         );
-                        if foci_firmware::tmc_control::is_adc_current_clipped(report_status) {
-                            reported_shutdown = true;
+                        if channel_fault
+                            == foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped
+                            && !shutdown_reported
+                        {
+                            shutdown_reported = true;
                             ctx.shared.app_state.lock(|state| {
                                 if crate::firmware_ctx::enter_shutdown(state) {
                                     ::ankyra::klipper_shutdown_from!(
@@ -769,21 +778,29 @@ mod app {
                             });
                         }
                     }
-                    if !reported_shutdown {
+                    if !shutdown_reported {
                         ctx.shared.app_state.lock(|state| {
                             if crate::firmware_ctx::enter_shutdown(state) {
-                                if any_status_read_failed {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "TMC4671: STATUS_FLAGS read failed",
-                                        read_tim5(),
-                                    );
-                                } else {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "TMC4671 fault",
-                                        read_tim5(),
-                                    );
+                                match fault {
+                                    foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped => {
+                                        unreachable!(
+                                            "shutdown_reported is set in the same loop iteration that classifies AdcCurrentClipped"
+                                        )
+                                    }
+                                    foci_firmware::tmc_control::EmergencyDisableFault::StatusReadFailed => {
+                                        ::ankyra::klipper_shutdown_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            "TMC4671: STATUS_FLAGS read failed",
+                                            read_tim5(),
+                                        );
+                                    }
+                                    foci_firmware::tmc_control::EmergencyDisableFault::Generic => {
+                                        ::ankyra::klipper_shutdown_from!(
+                                            &mut crate::_ankyra_config::Sender,
+                                            "TMC4671 fault",
+                                            read_tim5(),
+                                        );
+                                    }
                                 }
                             }
                         });
