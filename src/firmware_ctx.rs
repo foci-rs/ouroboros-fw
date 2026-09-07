@@ -448,6 +448,15 @@ impl<'a> EndstopHost for FirmwareCtx<'a> {
     fn read_pin(&self, pin: u8) -> bool {
         gpio_read_pin(pin)
     }
+
+    fn stall_channel_for_pin(&self, pin: u8) -> Option<u8> {
+        use crate::ankyra::enumerations::Pins;
+        match Pins::try_from(pin) {
+            Ok(Pins::STALL0) => Some(0),
+            Ok(Pins::STALL1) => Some(1),
+            _ => None,
+        }
+    }
 }
 
 impl<'a> TrsyncHost for FirmwareCtx<'a> {

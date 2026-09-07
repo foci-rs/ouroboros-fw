@@ -29,5 +29,7 @@
         STEP1,
         DIR1,
         ENA1,
+        STALL0,
+        STALL1,
     }
 }
