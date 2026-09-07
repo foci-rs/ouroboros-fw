@@ -811,7 +811,7 @@ pub(crate) async fn sample_tick<B>(
 }
 
 /// Sample the selected channel during commissioning closed-loop entry.
-pub(crate) async fn sample_commission_closed_loop_entry<B, R, D>(
+pub(crate) async fn sample_commission_closed_loop_activation<B, R, D>(
     tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
     context: TraceSampleContext<'_>,
     control_tick: u32,

@@ -234,13 +234,13 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
-    fn foci_closed_loop_entry(
+    fn foci_closed_loop_activation(
         &mut self,
-        report: foci_firmware::tmc_diagnostics::ClosedLoopEntryReport,
+        report: foci_firmware::tmc_diagnostics::ClosedLoopActivationReport,
     ) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociClosedLoopEntry,
+            foci_firmware::ankyra::replies::FociClosedLoopActivation,
             oid: u8 = report.oid,
             entry_status: u8 = report.entry_status,
             position_1: i32 = report.position_1,

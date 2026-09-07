@@ -1308,7 +1308,7 @@ mod app {
                             #[cfg(feature = "trace")]
                         if let Some((engine_kind, phase_id)) =
                             commission_trace_phase[channel_idx]
-                            && foci_firmware::trace::commissioning::commission_trace_phase_samples_closed_loop_entry(
+                            && foci_firmware::trace::commissioning::commission_trace_phase_samples_closed_loop_activation(
                                 engine_kind,
                                 phase_id,
                             ) {
@@ -1336,7 +1336,7 @@ mod app {
                                 continue 'control_loop;
                             };
                             let mut tmc = tmc_driver(device);
-                            crate::usb_trace::sample_commission_closed_loop_entry(
+                            crate::usb_trace::sample_commission_closed_loop_activation(
                                 &mut tmc,
                                 crate::usb_trace::TraceSampleContext {
                                     channel,
