@@ -1851,12 +1851,32 @@ mod app {
                 }
 
                 let homing_result = runtime
-                    .apply_slow_channel_maintenance_tick(&mut tmc, refs, homing)
+                    .apply_slow_channel_maintenance_tick(
+                        &mut tmc,
+                        refs,
+                        &tmc_control_config,
+                        homing,
+                    )
                     .await;
-                let homing_ready = matches!(homing_result, HomingMaintenanceResult::ReadyToAdvance);
-                all_channels_ready_for_homing_advance &= homing_ready;
-                if !homing_ready {
-                    continue;
+                match homing_result {
+                    HomingMaintenanceResult::ReadyToAdvance => {}
+                    HomingMaintenanceResult::RetryCurrentState => {
+                        all_channels_ready_for_homing_advance = false;
+                        continue;
+                    }
+                    HomingMaintenanceResult::FailClosed => {
+                        defmt::error!(
+                            "TMC4671 channel {} homing failed closed, disabling motors",
+                            channel
+                        );
+                        refs.tmc
+                            .homing_clamp_active
+                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                        latch_tmc_fault();
+                        let _ = tmc;
+                        quiesce_and_report_tmc_fault!();
+                        continue 'control_loop;
+                    }
                 }
 
                 // TrSync and endstop polling have been replaced by the TIM5 CC2
