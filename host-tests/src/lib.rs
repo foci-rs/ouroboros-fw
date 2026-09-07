@@ -173,7 +173,10 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_owns_one_channel_checked_integral_candidate() {
         assert_eq!(MAIN.matches("IntegralRetentionSlot::new()").count(), 1);
-        assert_eq!(MAIN.matches("integral_candidate.observe_fault()").count(), 2);
+        assert_eq!(
+            MAIN.matches("integral_candidate.observe_fault()").count(),
+            2
+        );
         assert!(MAIN.contains("CommissionRetention::new"));
         assert!(REQUEST.contains("handle_tmc_control_request_with_stages"));
         assert!(REQUEST.contains("integral_candidate"));
