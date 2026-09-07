@@ -53,6 +53,7 @@ mod commissioning_board_contract_tests {
         include_str!("../../../../shared/foci-firmware/src/calibration.rs");
     const SHARED_FOCI_HANDLERS: &str =
         include_str!("../../../../shared/foci-firmware/src/ankyra/handlers/foci.rs");
+    const USB_TRACE: &str = include_str!("../../src/usb_trace.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -534,6 +535,63 @@ mod commissioning_board_contract_tests {
             MAIN.matches("HOMING_STATE.load(Relaxed) == 1").count() >= 3,
             "every step-dispatch entry must defer while HOMING_STATE == 1"
         );
+    }
+
+    #[test]
+    fn sampler_reads_position_error_right_after_position_actual() {
+        let body = USB_TRACE
+            .split("pub(crate) async fn sample_tick")
+            .nth(1)
+            .expect("sample_tick present");
+        let at = |needle: &str| {
+            body.find(needle)
+                .unwrap_or_else(|| panic!("missing {needle}"))
+        };
+        let step = at("refs.stepper.position.load(Relaxed)");
+        let actual = at("read_register_trace(tmc, PID_POSITION_ACTUAL");
+        let error = at("read_sub_register_trace(tmc, PID_ERROR_PID_POSITION_ERROR");
+        let velocity = at("read_register_trace(tmc, PID_VELOCITY_ACTUAL");
+        assert!(step < actual && actual < error && error < velocity);
+        assert!(!body.contains("step_position.wrapping_sub(position_actual)"));
+    }
+
+    #[test]
+    fn sampler_budget_is_recorded_once_per_control_iteration() {
+        let body = USB_TRACE
+            .split("pub(crate) async fn sample_tick")
+            .nth(1)
+            .expect("sample_tick present")
+            .split("pub(crate) async fn sample_commission_closed_loop_activation")
+            .next()
+            .expect("sample_tick body");
+        assert!(
+            !body.contains("record_spi_sample_cycles("),
+            "sample_tick must return cycles, not record them"
+        );
+        assert!(
+            USB_TRACE.contains("record_spi_sample_cycles(sample_tick(tmc, context, inputs).await)")
+        );
+
+        // Exactly one recording site in the control loop, placed after the
+        // channel loop that accumulates both channels' cycles.
+        assert_eq!(MAIN.matches("record_spi_sample_cycles(").count(), 1);
+        let add = MAIN
+            .find("trace_spi_cycles.saturating_add(")
+            .expect("accumulation present");
+        let loop_start = MAIN[..add]
+            .rfind("for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {")
+            .expect("accumulation sits inside the channel loop");
+        let loop_end =
+            find_matching_close_brace(MAIN, MAIN[loop_start..].find('{').unwrap() + loop_start);
+        let record = MAIN
+            .find("record_spi_sample_cycles(trace_spi_cycles)")
+            .expect("recording present");
+        assert!(
+            loop_start < add && add < loop_end,
+            "accumulation must be inside the channel loop"
+        );
+        assert!(record > loop_end, "recording must follow the channel loop");
+        assert!(MAIN[loop_end..record].matches("for channel in").count() == 0);
     }
 }
 

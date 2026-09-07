@@ -1715,6 +1715,9 @@ mod app {
                 None
             };
 
+            #[cfg(feature = "trace")]
+            let mut trace_spi_cycles: u32 = 0;
+
             for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
                 let Some(device) = ctx.local.tmc_mux.device(channel) else {
                     ctx.shared.app_state.lock(|state| {
@@ -1811,17 +1814,19 @@ mod app {
                             runtime.trace_state(),
                             trace_tick,
                         );
-                    crate::usb_trace::sample_tick(
-                        &mut tmc,
-                        crate::usb_trace::TraceSampleContext {
-                            channel,
-                            refs,
-                            motor_enabled: runtime.is_motor_enabled(),
-                            step_timing,
-                        },
-                        inputs,
-                    )
-                    .await;
+                    trace_spi_cycles = trace_spi_cycles.saturating_add(
+                        crate::usb_trace::sample_tick(
+                            &mut tmc,
+                            crate::usb_trace::TraceSampleContext {
+                                channel,
+                                refs,
+                                motor_enabled: runtime.is_motor_enabled(),
+                                step_timing,
+                            },
+                            inputs,
+                        )
+                        .await,
+                    );
                     if trace_tick.phase_advance_due {
                         crate::usb_trace::emit_phase_advance(
                             channel,
@@ -1914,6 +1919,11 @@ mod app {
                         defmt::warn!("TMC4671 channel {} STATUS: {:#010x}", channel, flags);
                     }
                 }
+            }
+
+            #[cfg(feature = "trace")]
+            if trace_spi_cycles != 0 {
+                crate::usb_trace::record_spi_sample_cycles(trace_spi_cycles);
             }
 
             #[cfg(feature = "trace")]

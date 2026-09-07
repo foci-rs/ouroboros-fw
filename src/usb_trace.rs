@@ -28,6 +28,8 @@ const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path
 // OpenFFBoard uses 120_000 cycles at 168 MHz, about 714 us. Scale that
 // wall-time budget to the 520 MHz H723 DWT clock: 120_000 * 520 / 168 =
 // 371_429, rounded up. Do not derive this from CLOCK_FREQ; CLOCK_FREQ is TIM5.
+// Both channels are sampled per control iteration, so this threshold applies
+// to their summed SPI cycles, not to either channel's sample alone.
 const TRACE_DETAIL_SKIP_THRESHOLD_CYCLES: u32 = 372_000;
 
 static mut TRACE_CLOCK_EXT: TraceClockExt = TraceClockExt::new();
@@ -630,11 +632,16 @@ pub(crate) struct TraceSampleContext<'a> {
     pub(crate) step_timing: Option<StepTimingSnapshot>,
 }
 
+/// Sample one channel's TMC state for the trace stream.
+///
+/// Returns the DWT cycles this sample spent; the caller sums both channels and records the
+/// iteration total against the threshold.
 pub(crate) async fn sample_tick<B>(
     tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
     context: TraceSampleContext<'_>,
     inputs: TraceSampleInputs,
-) where
+) -> u32
+where
     B: embedded_hal_async::spi::SpiDevice<u8>,
 {
     use core::sync::atomic::Ordering::Relaxed;
@@ -642,7 +649,7 @@ pub(crate) async fn sample_tick<B>(
     use foci_tmc4671::registers::*;
 
     if !is_configured() {
-        return;
+        return 0;
     }
 
     let channel = context.channel;
@@ -651,6 +658,8 @@ pub(crate) async fn sample_tick<B>(
     let mut flags = 0u8;
     let step_position = refs.stepper.position.load(Relaxed);
     let position_actual = read_register_trace(tmc, PID_POSITION_ACTUAL, &mut flags).await as i32;
+    let position_error =
+        read_sub_register_trace(tmc, PID_ERROR_PID_POSITION_ERROR, &mut flags).await as i32;
     let pid_velocity_actual =
         read_register_trace(tmc, PID_VELOCITY_ACTUAL, &mut flags).await as i32;
     let velocity_error =
@@ -679,7 +688,7 @@ pub(crate) async fn sample_tick<B>(
     let critical = CriticalSample {
         step_position,
         tmc_position_actual: position_actual,
-        position_error: step_position.wrapping_sub(position_actual),
+        position_error,
         target_velocity: inputs.command_velocity_reference,
         pid_velocity_actual,
         cached_pid_velocity_offset: inputs.cached_velocity_offset,
@@ -806,8 +815,7 @@ pub(crate) async fn sample_tick<B>(
         enqueue_frame(frame);
     }
 
-    let spi_sample_cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(spi_sample_start);
-    record_spi_sample_cycles(spi_sample_cycles);
+    cortex_m::peripheral::DWT::cycle_count().wrapping_sub(spi_sample_start)
 }
 
 /// Sample the selected channel during commissioning closed-loop entry.
@@ -844,7 +852,7 @@ pub(crate) async fn sample_commission_closed_loop_activation<B, R, D>(
                 .store(true, Ordering::Relaxed);
         }
         TraceSamplePlan::Sample(inputs) => {
-            sample_tick(tmc, context, inputs).await;
+            record_spi_sample_cycles(sample_tick(tmc, context, inputs).await);
         }
     }
 }
@@ -940,8 +948,6 @@ pub(crate) async fn emit_status_frames<B>(
     };
 
     if channel == 0 {
-        // Trace deadline pressure is telemetry degradation, so it is reported
-        // with endpoint-not-ready pressure instead of motion watchdog/step overruns.
         let board = StatusSample {
             status_flags,
             status_interrupt_count: counters.status_interrupt_count,
@@ -954,6 +960,8 @@ pub(crate) async fn emit_status_frames<B>(
             dropped_event_log_count: counters.dropped_event_log_count,
             endpoint_not_ready_count: counters.endpoint_not_ready_count,
             suppressed_status_change_count: counters.suppressed_status_change_count,
+            trace_deadline_pressure_count: counters.trace_deadline_pressure_count,
+            max_spi_sample_cycles: counters.max_spi_sample_cycles,
         };
         let usb = StatusSample {
             usb_trace_queue_high_water: counters.usb_trace_queue_high_water,
