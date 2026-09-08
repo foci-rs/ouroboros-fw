@@ -39,7 +39,7 @@ mod app {
     use core::sync::atomic::Ordering::Relaxed;
 
     use crate::ankyra::constants::CLOCK_FREQ;
-    use embassy_stm32::gpio::{Level, Output, Speed};
+    use embassy_stm32::gpio::{Input, Level, Output, Speed};
     use embassy_stm32::spi::Spi;
     use embassy_stm32::wdg::IndependentWatchdog;
     use embassy_stm32::{bind_interrupts, peripherals};
@@ -206,6 +206,7 @@ mod app {
         tmc_mux: crate::tmc_mux::TmcSpiMux,
         tmc_enable: TmcEnablePins,
         tmc_rx: Receiver<'static, TmcRequest, TMC_CHANNEL_SIZE>,
+        tmc_status0: Input<'static>,
         wdg: IndependentWatchdog<'static, peripherals::IWDG1>,
         integral_candidate: IntegralCandidateTaskLocal,
     }
@@ -248,7 +249,8 @@ mod app {
             Output::new(p.PD1, Level::Low, Speed::Low),
         ];
 
-        crate::board_init::init_tmc_status_pins(p.PE2, p.PA2);
+        let tmc_status0 = crate::board_init::init_tmc_status_pins(p.PE2, p.PA2);
+        crate::board_init::init_tim15_status_capture();
 
         // IWDG: 10-second timeout, kicked by the stats task every 5 seconds.
         let mut wdg = IndependentWatchdog::new(p.IWDG1, 10_000_000);
@@ -333,6 +335,7 @@ mod app {
                 tmc_mux,
                 tmc_enable,
                 tmc_rx,
+                tmc_status0,
                 wdg,
                 integral_candidate:
                     foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot::new(),
@@ -363,12 +366,24 @@ mod app {
     #[task(
         priority = 1,
         shared = [app_state],
-        local = [tmc_mux, tmc_enable, tmc_rx, integral_candidate]
+        local = [
+            tmc_mux,
+            tmc_enable,
+            tmc_status0,
+            tmc_rx,
+            integral_candidate,
+            drivers: [foci_firmware::tmc_control::ChannelDriver; 2] = [
+                foci_firmware::tmc_control::ChannelDriver::new(0),
+                foci_firmware::tmc_control::ChannelDriver::new(1),
+            ]
+        ]
     )]
     async fn tmc_control(mut ctx: tmc_control::Context) {
         let enable_pins = ctx.local.tmc_enable;
         let rx = ctx.local.tmc_rx;
         let integral_candidate = ctx.local.integral_candidate;
+        let _tmc_status0 = ctx.local.tmc_status0;
+        let _drivers = ctx.local.drivers;
 
         // NOTE: auto-init disabled - motor current regulation not yet safe
         // tmc_init_open_loop(tmc, enable_pin(enable_pins, channel)).await;
@@ -2749,6 +2764,16 @@ mod app {
     #[task(binds = EXTI2, priority = 3)]
     fn tmc_status_irq(_ctx: tmc_status_irq::Context) {
         crate::interrupts::tmc_status_irq(&FAULT_ACTIVE, &TMC_DISABLE_SIGNAL);
+    }
+
+    /// TMC4671 channel-1 STATUS pin interrupt (PA2, TIM15 CH1 input capture).
+    ///
+    /// PA2 cannot share EXTI line 2 with PE2, so channel 1's STATUS line is
+    /// routed to a TIM15 input-capture interrupt instead. Same disable path
+    /// as `tmc_status_irq`.
+    #[task(binds = TIM15, priority = 3)]
+    fn tmc_status1_irq(_ctx: tmc_status1_irq::Context) {
+        crate::interrupts::tmc_status1_irq(&FAULT_ACTIVE, &TMC_DISABLE_SIGNAL);
     }
 
     /// Single USB task replacing usb_pump, usb_receive, usb_send, usb_control.

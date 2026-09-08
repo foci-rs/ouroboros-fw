@@ -47,6 +47,7 @@ mod commissioning_board_contract_tests {
     const BOARD_CARGO_TOML: &str = include_str!("../../Cargo.toml");
     const TRIGGER_DOMAIN: &str = include_str!("../../src/trigger_domain.rs");
     const BOARD_INIT: &str = include_str!("../../src/board_init.rs");
+    const INTERRUPTS: &str = include_str!("../../src/interrupts.rs");
     const SHARED_AUTOTUNE_TYPES: &str =
         include_str!("../../../../shared/foci-firmware/src/autotune/types.rs");
     const SHARED_CALIBRATION: &str =
@@ -592,6 +593,26 @@ mod commissioning_board_contract_tests {
         );
         assert!(record > loop_end, "recording must follow the channel loop");
         assert!(MAIN[loop_end..record].matches("for channel in").count() == 0);
+    }
+
+    #[test]
+    fn board_owns_both_tmc_status_inputs_and_binds_the_tim15_capture() {
+        assert!(
+            BOARD_INIT.contains("-> Input<'static>"),
+            "PE2 STATUS input is returned"
+        );
+        assert!(!BOARD_INIT.contains("core::mem::forget(status0_pin)"));
+        assert!(BOARD_INIT.contains("pub fn status1_level() -> bool"));
+        assert!(BOARD_INIT.contains("pub fn init_tim15_status_capture()"));
+        assert!(
+            BOARD_INIT.contains("set_as_af_unchecked(4"),
+            "PA2 is TIM15_CH1 on AF4"
+        );
+        assert!(MAIN.contains("binds = TIM15"));
+        assert!(MAIN.contains("crate::interrupts::tmc_status1_irq("));
+        assert!(INTERRUPTS.contains("pub fn tmc_status_irq_body("));
+        assert!(!INTERRUPTS.contains("defmt::"), "ISR bodies never log");
+        assert!(MAIN.contains("tmc_status0: Input<'static>"));
     }
 }
 

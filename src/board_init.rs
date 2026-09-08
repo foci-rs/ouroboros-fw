@@ -146,17 +146,43 @@ pub fn init_stepdir_gpio() {
     }
 }
 
-/// Configure the TMC4671 STATUS lines as pulled-down inputs.
-/// EXTI interrupt is enabled later in `tmc_control` after `STATUS_MASK`
-/// is written to the TMC4671.
+/// Configure the two TMC4671 STATUS lines and return the channel-0 input.
+///
+/// PE2 (channel 0) is a plain pulled-down input; EXTI line 2 is armed later
+/// by `tmc_control` once `STATUS_MASK` is written. PA2 (channel 1) cannot
+/// share EXTI line 2, so it is routed to TIM15 channel 1 (AF4) for an
+/// input-capture interrupt; its level stays readable through GPIOA IDR.
 pub fn init_tmc_status_pins(
     pe2: Peri<'static, peripherals::PE2>,
     pa2: Peri<'static, peripherals::PA2>,
-) {
-    let status0_pin = Input::new(pe2, Pull::Down);
-    let status1_pin = Input::new(pa2, Pull::Down);
-    core::mem::forget(status0_pin);
-    core::mem::forget(status1_pin);
+) -> Input<'static> {
+    let mut status1 = Flex::new(pa2);
+    status1.set_as_af_unchecked(4, AfType::input(Pull::Down));
+    core::mem::forget(status1);
+    Input::new(pe2, Pull::Down)
+}
+
+/// Current level of the channel-1 STATUS line (PA2) via the input data register.
+#[allow(dead_code)]
+pub fn status1_level() -> bool {
+    embassy_stm32::pac::GPIOA.idr().read().idr(2) == embassy_stm32::pac::gpio::vals::Idr::HIGH
+}
+
+/// Clock TIM15 and arm channel 1 as a rising-edge input capture on PA2.
+///
+/// The capture interrupt (DIER.CC1IE) stays masked until channel 1's safety
+/// bootstrap has written `STATUS_MASK`.
+pub fn init_tim15_status_capture() {
+    embassy_stm32::rcc::enable_and_reset::<peripherals::TIM15>();
+    let tim = embassy_stm32::pac::TIM15;
+    tim.ccmr_input()
+        .modify(|w| w.set_ccs(0, embassy_stm32::pac::timer::vals::CcmrInputCcs::TI4));
+    tim.ccer().modify(|w| {
+        w.set_ccp(0, false);
+        w.set_ccnp(0, false);
+        w.set_cce(0, true);
+    });
+    tim.cr1().modify(|w| w.set_cen(true));
 }
 
 /// Configure PA11 (USB D-) and PA12 (USB D+) for USB OTG HS in FS mode.

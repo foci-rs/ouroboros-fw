@@ -16,7 +16,7 @@ pub fn otg_fs_irq() {
     USB_WAKE.signal(());
 }
 
-/// TMC4671 STATUS pin (PE2 / EXTI line 2) interrupt.
+/// Shared body for both TMC4671 STATUS pin interrupts.
 ///
 /// Fires when `STATUS_MASK`-enabled `adc_i_clipped` is asserted.
 ///
@@ -24,16 +24,13 @@ pub fn otg_fs_irq() {
 /// treated as a PLL-lock fault. Quiesces step generation immediately and
 /// signals `tmc_disable_signal` so `tmc_control` can read `STATUS_FLAGS` on its
 /// next tick and log the cause.
-pub fn tmc_status_irq(
+pub fn tmc_status_irq_body(
     fault_active: &core::sync::atomic::AtomicBool,
     tmc_disable_signal: &embassy_sync::signal::Signal<
         embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
         (),
     >,
 ) {
-    let exti = embassy_stm32::pac::EXTI;
-    exti.pr(0).write(|w| w.set_line(2, true));
-
     // Immediately quiesce step generation (same P3, atomic).
     fault_active.store(true, core::sync::atomic::Ordering::Relaxed);
     #[cfg(feature = "trace")]
@@ -45,4 +42,32 @@ pub fn tmc_status_irq(
     // No logging here: this P3 handler can fire repeatedly during energized
     // injection, and a reentrant defmt call panics in RttEncoder::acquire.
     // tmc_control logs the cause from STATUS_FLAGS on its next tick.
+}
+
+/// TMC4671 channel-0 STATUS pin (PE2 / EXTI line 2) interrupt.
+pub fn tmc_status_irq(
+    fault_active: &core::sync::atomic::AtomicBool,
+    tmc_disable_signal: &embassy_sync::signal::Signal<
+        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        (),
+    >,
+) {
+    embassy_stm32::pac::EXTI
+        .pr(0)
+        .write(|w| w.set_line(2, true));
+    tmc_status_irq_body(fault_active, tmc_disable_signal);
+}
+
+/// TMC4671 channel-1 STATUS pin (PA2 / TIM15 CH1 capture) interrupt.
+pub fn tmc_status1_irq(
+    fault_active: &core::sync::atomic::AtomicBool,
+    tmc_disable_signal: &embassy_sync::signal::Signal<
+        embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+        (),
+    >,
+) {
+    embassy_stm32::pac::TIM15
+        .sr()
+        .modify(|w| w.set_ccif(0, false));
+    tmc_status_irq_body(fault_active, tmc_disable_signal);
 }
