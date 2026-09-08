@@ -36,17 +36,12 @@ mod usb_trace;
 
 #[rtic::app(device = crate::pac, peripherals = true, dispatchers = [UART4, UART5, USART3])]
 mod app {
-    use core::sync::atomic::Ordering::Relaxed;
 
     use crate::ankyra::constants::CLOCK_FREQ;
     use embassy_stm32::gpio::{Input, Level, Output, Speed};
     use embassy_stm32::spi::Spi;
     use embassy_stm32::wdg::IndependentWatchdog;
     use embassy_stm32::{bind_interrupts, peripherals};
-    #[cfg(feature = "trace")]
-    use foci_firmware::autotune::CommissionPhase;
-    #[cfg(feature = "trace")]
-    use foci_firmware::commissioning::types::EngineKind;
     use foci_klipper::state::State;
     use rtic_monotonics::fugit::ExtU64;
     use rtic_monotonics::stm32::prelude::*;
@@ -58,9 +53,8 @@ mod app {
     use crate::state::tmc::*;
     use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
     use crate::tmc_control::board::{
-        TmcEnablePins, TmcRuntimes, channel_may_be_energized, channel_needs_safe_state,
-        commissioning_request_blocked, enable_pin, new_tmc_runtimes, ouroboros_backend,
-        refresh_velocity_scale, stepper_state, tmc_driver, tmc_state,
+        TmcEnablePins, channel_needs_safe_state, commissioning_request_blocked, enable_pin,
+        ouroboros_backend, refresh_velocity_scale, stepper_state, tmc_driver, tmc_state,
     };
     use crate::trigger_domain::{
         TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain, with_trigger_domain_site,
@@ -73,11 +67,9 @@ mod app {
     use foci_firmware::state::stepper::{NO_STEPPER_CHANNEL, STEPPER_DEADLINE_MISS_CHANNEL};
     use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
     use foci_firmware::state::trsync::*;
+    use foci_firmware::tmc_control::TmcControlRequestTail;
     use foci_firmware::tmc_control::request::TmcPreRequestDisposition;
-    use foci_firmware::tmc_control::{
-        BoardAction, BoardActions, HomingMaintenanceResult, StepperAction, TmcControlHomingRefs,
-        TmcControlRuntime, TmcControlStateRefs,
-    };
+    use foci_firmware::tmc_control::{BoardAction, BoardActions, StepperAction};
 
     bind_interrupts!(struct Irqs {
         DMA1_STREAM0 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH0>;
@@ -114,12 +106,6 @@ mod app {
     use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
     use crate::helpers::stepper_diag::{UNKNOWN_QUEUE_LEN, record_stepper_event};
 
-    const STATUS_ADC_I_CLIPPED: u32 = 1 << 26;
-    // TMC4671-LA Rev 1, 02/2024 Table 30 marks STATUS_FLAGS[19] reserved.
-    // Only ADC current clipping is routed as a STATUS critical fault.
-    const STATUS_CRITICAL_FAULT_MASK: u32 = STATUS_ADC_I_CLIPPED;
-    const CHANNEL1_STATUS_FALLBACK: u8 = 1;
-
     fn lower_all_enable_pins(enable_pins: &mut TmcEnablePins) {
         for pin in enable_pins {
             pin.set_low();
@@ -142,21 +128,21 @@ mod app {
         }
     }
 
-    fn quiesce_all_channels(runtimes: &mut TmcRuntimes, enable_pins: &mut TmcEnablePins) {
-        for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-            let actions = runtimes[channel as usize].prepare_shutdown_quiesce();
-            apply_runtime_stepper_actions(channel, actions);
-            tmc_state(channel)
-                .commission_in_flight
-                .store(false, core::sync::atomic::Ordering::Relaxed);
-        }
+    fn quiesce_all_channels(
+        drivers: &mut [foci_firmware::tmc_control::ChannelDriver; 2],
+        enable_pins: &mut TmcEnablePins,
+    ) {
+        let actions0 = drivers[0].runtime.prepare_shutdown_quiesce();
+        apply_runtime_stepper_actions(0, actions0);
+        tmc_state(0)
+            .commission_in_flight
+            .store(false, core::sync::atomic::Ordering::Relaxed);
+        let actions1 = drivers[1].runtime.prepare_shutdown_quiesce();
+        apply_runtime_stepper_actions(1, actions1);
+        tmc_state(1)
+            .commission_in_flight
+            .store(false, core::sync::atomic::Ordering::Relaxed);
         lower_all_enable_pins(enable_pins);
-    }
-
-    fn latch_tmc_fault() {
-        FAULT_ACTIVE.store(true, core::sync::atomic::Ordering::Relaxed);
-        let tim5 = embassy_stm32::pac::TIM5;
-        tim5.dier().modify(|w| w.set_ccie(0, false));
     }
 
     fn emit_invalid_channel_diagnostic(channel: u8) {
@@ -379,275 +365,87 @@ mod app {
         ]
     )]
     async fn tmc_control(mut ctx: tmc_control::Context) {
+        use crate::tmc_control::board::{
+            ChannelDevice, STATUS_CRITICAL_MASK, device_or_invalid, drive_ctx,
+            enable_status_capture_ch1, enable_status_exti_ch0, park_shutdown, status_levels,
+        };
+        use core::sync::atomic::Ordering::Relaxed;
+        use embassy_futures::select::{Either, select};
+        use foci_firmware::tmc_control::scheduler::{ChannelMode, ChannelScheduler, UnitClass};
+        use foci_firmware::tmc_control::{
+            AuditResult, CommissionNext, CommissionWaitRequestDisposition, UnitOutcome,
+        };
+
+        let mux = ctx.local.tmc_mux;
         let enable_pins = ctx.local.tmc_enable;
+        let status_pin0 = ctx.local.tmc_status0;
         let rx = ctx.local.tmc_rx;
         let integral_candidate = ctx.local.integral_candidate;
-        let _tmc_status0 = ctx.local.tmc_status0;
-        let _drivers = ctx.local.drivers;
+        let drivers = ctx.local.drivers;
 
-        // NOTE: auto-init disabled - motor current regulation not yet safe
-        // tmc_init_open_loop(tmc, enable_pin(enable_pins, channel)).await;
-
-        let mut bootstrap_results = [Ok(()); crate::board_config::TMC_CHANNEL_COUNT as usize];
-        for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-            let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                defmt::error!("Ouroboros TMC channel {} is not available", channel);
-                ctx.shared.app_state.lock(|state| {
-                    if crate::firmware_ctx::enter_shutdown(state) {
-                        ::ankyra::klipper_shutdown_from!(
-                            &mut crate::_ankyra_config::Sender,
-                            "Invalid TMC channel",
-                            read_tim5(),
-                        );
-                    }
-                });
-                return;
-            };
-            let mut tmc = tmc_driver(device);
-
-            // Verify TMC4671 chip identity — shutdown if SPI fails or wrong chip.
-            match tmc
-                .read_sub_register(foci_tmc4671::registers::CHIPINFO_SI_TYPE)
-                .await
-            {
-                Ok(chip_id) => {
-                    if chip_id == 0x3436_3731 {
-                        defmt::info!(
-                            "TMC4671 channel {} chip ID verified: {:#010x}",
-                            channel,
-                            chip_id
-                        );
-                    } else {
-                        defmt::error!(
-                            "TMC4671 channel {} chip ID mismatch: got {:#010x}",
-                            channel,
-                            chip_id
-                        );
-                        ctx.shared.app_state.lock(|state| {
-                            if crate::firmware_ctx::enter_shutdown(state) {
-                                ::ankyra::klipper_shutdown_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    "TMC4671 chip ID mismatch",
-                                    read_tim5(),
-                                );
-                            }
-                        });
-                        return;
-                    }
-                }
-                Err(_) => {
-                    defmt::error!("TMC4671 channel {} SPI communication failed", channel);
-                    ctx.shared.app_state.lock(|state| {
-                        if crate::firmware_ctx::enter_shutdown(state) {
-                            ::ankyra::klipper_shutdown_from!(
-                                &mut crate::_ankyra_config::Sender,
-                                "TMC4671 SPI failed at boot",
-                                read_tim5(),
-                            );
-                        }
-                    });
-                    return;
-                }
-            }
-
-            let Some(channel_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
-                lower_all_enable_pins(enable_pins);
-                ctx.shared.app_state.lock(|state| {
-                    if crate::firmware_ctx::enter_shutdown(state) {
-                        ::ankyra::klipper_shutdown_from!(
-                            &mut crate::_ankyra_config::Sender,
-                            "Invalid TMC channel",
-                            read_tim5(),
-                        );
-                    }
-                });
-                return;
-            };
-            let pi_representation = {
-                let mut backend =
-                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                foci_firmware::tmc_control::pi_representation::bootstrap_pi_representation(
-                    &mut backend,
-                    channel_state,
-                )
-                .await
-            };
-            if let Err(error) = pi_representation {
-                lower_all_enable_pins(enable_pins);
-                defmt::error!(
-                    "TMC4671 channel {} PI representation failed at boot: {:?}",
-                    channel,
-                    error
-                );
-                ctx.shared.app_state.lock(|state| {
-                    if crate::firmware_ctx::enter_shutdown(state) {
-                        ::ankyra::klipper_shutdown_from!(
-                            &mut crate::_ankyra_config::Sender,
-                            "TMC4671 PI representation failed at boot",
-                            read_tim5(),
-                        );
-                    }
-                });
-                return;
-            }
-
-            match foci_firmware::adc_vm::capture_adc_vm_offset(&mut tmc).await {
-                Ok(capture) => {
-                    if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
-                        tmc_state.store_adc_vm_offset(capture.offset_raw, capture.sample_count);
-                    }
-                    defmt::info!(
-                        "TMC4671 channel {} ADC_VM offset cached: raw={} samples={}",
-                        channel,
-                        capture.offset_raw,
-                        capture.sample_count
-                    );
-                }
-                Err(_) => {
-                    defmt::warn!(
-                        "TMC4671 ch {} ADC_VM offset failed; host rejects VM decode",
-                        channel
-                    );
-                }
-            }
-
-            // Disable TMC4671 brake chopper unconditionally.
-            //
-            // Write both ADC_VM_LIMIT_HIGH and ADC_VM_LIMIT_LOW to u16::MAX
-            // (0xFFFFFFFF). Since ADC_VM_RAW is a 16-bit value that can
-            // never exceed 0xFFFF, the comparison `ADC_VM > LIMIT_HIGH` is
-            // never true and the BRAKE pin never activates.
-            //
-            // WARNING: Do NOT write 0/0 to disable the brake, despite the
-            // TMC4671 rev 2.08 datasheet section 4.7.12 claim that "BRAKE can
-            // be deactivated by setting both registers to Zero". Bench testing
-            // on 2026-04-09 proved that writing 0/0 causes the brake to fire
-            // continuously — consistent with the comparison `ADC_VM > 0` being
-            // always true for any positive bus voltage. The "deactivation"
-            // language in the datasheet is either wrong or refers to stopping
-            // an already-firing brake (not the default state). The safe
-            // "disabled" pattern is 0xFFFFFFFF, not 0.
-            //
-            // The prior auto-configuration (sample VM at boot, set HIGH at +15%)
-            // had two fundamental issues:
-            //
-            //   1. Threshold too tight: 15% above nominal bus voltage leaves
-            //      insufficient margin for regen transients and PSU ripple. At
-            //      24V nominal, HIGH was ~26.65V - easily crossed during any
-            //      brief motor spin, causing continuous brake firing.
-            //   2. ADC_VM scaling is board-specific; production-v1 values are
-            //      not confirmed in this compile-only scaffold.
-            //
-            // Proper board-level overvoltage protection is intentionally not
-            // configured in this compile-only scaffold until the production-v1
-            // power-stage pins are verified.
-            // Configure STATUS_MASK: route ADC current clipping to the channel-local
-            // STATUS pin. PE2/channel 0 is routed to EXTI2 below. PA2/channel 1
-            // shares EXTI line 2 with PE2, and SYSCFG can select only one port for
-            // a given EXTI line, so channel 1 clipping is polled every tick
-            // while the channel may be energized.
-            let result = {
-                let mut backend =
-                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                foci_firmware::tmc_control::bootstrap_tmc_safety(
-                    &mut backend,
-                    STATUS_CRITICAL_FAULT_MASK,
-                )
-                .await
-            };
-            if let Err(failure) = result {
-                defmt::error!(
-                    "TMC4671 channel {} safety bootstrap failed: {:?}",
-                    channel,
-                    failure.stage
-                );
-            } else {
-                defmt::info!(
-                    "TMC4671 channel {} STATUS_MASK: {:#010x}",
-                    channel,
-                    STATUS_CRITICAL_FAULT_MASK
-                );
-            }
-            bootstrap_results[channel as usize] = result;
-        }
-
-        if let Some((channel, failure)) =
-            foci_firmware::tmc_control::first_tmc_safety_bootstrap_failure(&bootstrap_results)
-        {
-            lower_all_enable_pins(enable_pins);
-            let reason = failure.shutdown_reason(channel);
-            loop {
-                if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
-                    Mono::delay(1.millis()).await;
-                    continue;
-                }
-                let _request = rx.recv().await;
-                if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
-                    continue;
-                }
-                ctx.shared.app_state.lock(|state| {
-                    if crate::firmware_ctx::enter_shutdown(state) {
-                        foci_firmware::dispatch_shutdown!(
-                            reason,
-                            read_tim5(),
-                            &mut crate::_ankyra_config::Sender
-                        );
-                    }
-                });
-            }
-        }
-
-        let syscfg = embassy_stm32::pac::SYSCFG;
-        // EXTICR1[11:8] = 4 selects port E for EXTI line 2. This routes
-        // PE2/channel 0 to the interrupt. PA2/channel 1 cannot also be routed
-        // to EXTI2, so channel 1 uses the critical-fault polling fallback above.
-        syscfg.exticr(0).modify(|w| w.set_exti(2, 4));
-        let exti = embassy_stm32::pac::EXTI;
-        exti.rtsr(0).modify(|w| w.set_line(2, true));
-        exti.ftsr(0).modify(|w| w.set_line(2, false));
-        exti.pr(0).write(|w| w.set_line(2, true)); // Clear pending
-        exti.imr(0).modify(|w| w.set_line(2, true)); // Unmask
-        defmt::info!("TMC4671 STATUS EXTI2 enabled");
-
-        let mut runtimes = new_tmc_runtimes();
-        // Board constants bundled once and passed to runtime commissioning tick.
         let tmc_control_config = foci_firmware::tmc_control::TmcControlConfig::new(
             CLOCK_FREQ,
             TMC_CONFIG.pwm_freq_hz(),
             CURRENT_SCALE_MA_PER_LSB,
             TMC_CONFIG,
         );
-        let mut commission_trace_engine_seq =
-            [0u32; crate::board_config::TMC_CHANNEL_COUNT as usize];
-        let mut commission_poll_drivers = [
-            foci_firmware::tmc_control::CommissionPollDriver::new(),
-            foci_firmware::tmc_control::CommissionPollDriver::new(),
-        ];
-        let mut commission_tick_max_cycles =
-            [0u32; crate::board_config::TMC_CHANNEL_COUNT as usize];
-        let mut commission_measurement_active =
-            [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
-        #[cfg(feature = "trace")]
-        let mut commission_trace_phase: [Option<(EngineKind, CommissionPhase)>;
-            crate::board_config::TMC_CHANNEL_COUNT as usize] =
-            [None; crate::board_config::TMC_CHANNEL_COUNT as usize];
-
-        // Counter for 1s STATUS_FLAGS poll (1000 * slow-control ticks).
-        let mut status_poll_counters = [0u16; crate::board_config::TMC_CHANNEL_COUNT as usize];
-        let mut slow_control_accum_us = 0u16;
-
-        // Whether the shutdown safe-state has already been applied this
-        // shutdown cycle. Reset when shutdown clears.
+        let now_us = || Mono::now().duration_since_epoch().to_micros();
+        let mut scheduler = ChannelScheduler::<2>::new(now_us(), [1_000, 1_000]);
+        let mut group_all_ready = true;
         let mut shutdown_handled = false;
 
-        // Main loop: wait for channel message or 1ms timeout.
-        // On message: handle request. On timeout: write position target.
-        // Position is read from stepper_state().position_target atomic (updated
-        // by usb_receive at P2) — no shared resource lock needed.
+        macro_rules! shutdown {
+            ($msg:expr) => {
+                ctx.shared.app_state.lock(|state| {
+                    if crate::firmware_ctx::enter_shutdown(state) {
+                        ::ankyra::klipper_shutdown_from!(
+                            &mut crate::_ankyra_config::Sender,
+                            $msg,
+                            read_tim5(),
+                        );
+                    }
+                });
+            };
+        }
+
+        macro_rules! shutdown_reason {
+            ($reason:expr) => {
+                ctx.shared.app_state.lock(|state| {
+                    if crate::firmware_ctx::enter_shutdown(state) {
+                        foci_firmware::dispatch_shutdown!(
+                            $reason,
+                            read_tim5(),
+                            &mut crate::_ankyra_config::Sender
+                        );
+                    }
+                });
+            };
+        }
+
+        // Expand `$body` twice as two separate block scopes, channel 0 then
+        // channel 1. Each expansion binds `$ch: u8` and `$idx: usize`; every
+        // borrow taken inside ends with its block, so the second expansion
+        // starts with `drivers`, `mux`, and `enable_pins` free again. Labels
+        // and `continue` inside `$body` refer to the caller's loop because the
+        // tokens come from the call site.
+        macro_rules! per_channel {
+            (|$ch:ident, $idx:ident| $body:block) => {{
+                {
+                    let $ch: u8 = 0;
+                    let $idx: usize = 0;
+                    $body
+                }
+                {
+                    let $ch: u8 = 1;
+                    let $idx: usize = 1;
+                    $body
+                }
+            }};
+        }
+
         'control_loop: loop {
             #[cfg(feature = "usb-p1-probe")]
             {
-                use core::sync::atomic::Ordering::Relaxed;
                 let now = Mono::now().ticks() as u32;
                 let last = P1_PROBE_LAST_US.swap(now, Relaxed);
                 if last != 0 {
@@ -656,380 +454,107 @@ mod app {
                 P1_PROBE_ITERS.fetch_add(1, Relaxed);
             }
 
-            use embassy_futures::select::{Either, select};
+            let levels = status_levels(status_pin0);
+            tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
+            tmc_state(1).status_pin_asserted.store(levels[1], Relaxed);
 
-            // A terminal restore cancelled by a commissioning-loop exit still
-            // owns its channel. Drive it to safe state before anything else
-            // touches that channel; only this drain retires its slots.
-            for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                let channel_idx = channel as usize;
-                if !runtimes[channel_idx].restore_cancel_pending() {
-                    continue;
-                }
-                let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                    continue;
-                };
-                let mut tmc = tmc_driver(device);
-                let mut backend =
-                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                let _ = runtimes[channel_idx]
-                    .drive_restore_cancel(
-                        &mut backend,
-                        tmc_state(channel),
-                        stepper_state(channel),
-                        foci_firmware::autotune::CommissionError::Shutdown,
-                    )
-                    .await;
-            }
-
-            for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                let channel_idx = channel as usize;
-                if !tmc_state(channel)
-                    .cancel_requested
-                    .load(core::sync::atomic::Ordering::Relaxed)
-                {
-                    continue;
-                }
-                let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                    continue;
-                };
-                let mut tmc = tmc_driver(device);
-                let mut backend =
-                    ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                if let Some(foci_firmware::commission_dispatch::CommissionOutcome::Terminal {
-                    reply,
-                    actions,
-                }) = runtimes[channel_idx]
-                    .drive_operator_cancel(
-                        &mut backend,
-                        tmc_state(channel),
-                        stepper_state(channel),
-                        TMC_CONFIG.pwm_maxcnt,
-                    )
-                    .await
-                {
-                    #[cfg(feature = "trace")]
-                    {
-                        commission_trace_phase[channel_idx] = None;
-                    }
-                    {
-                        let runtime = &mut runtimes[channel_idx];
-                        let mut state =
-                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
-                        apply_stepper_post_action(actions.stepper, &mut state, channel);
-                    }
-                    emit_terminal_reply(reply);
-                    commission_measurement_active[channel_idx] = false;
-                }
-            }
-
-            macro_rules! quiesce_and_report_tmc_fault {
-                () => {{
-                    quiesce_all_channels(&mut runtimes, enable_pins);
-                    #[cfg(feature = "trace")]
-                    commission_trace_phase.fill(None);
-                    let mut fault = foci_firmware::tmc_control::EmergencyDisableFault::Generic;
-                    let mut shutdown_reported = false;
-                    for report_channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                        let Some(device) = ctx.local.tmc_mux.device(report_channel) else {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                            continue;
-                        };
-                        let mut report_tmc = tmc_driver(device);
-                        let report_status = report_tmc
-                            .read_register_retried(foci_tmc4671::registers::STATUS_FLAGS)
-                            .await
-                            .map_err(|_| ());
-                        let report_flags = report_status.unwrap_or(0);
-                        let channel_fault =
-                            foci_firmware::tmc_control::classify_emergency_disable_fault(
-                                report_status,
-                            );
-                        fault =
-                            foci_firmware::tmc_control::combine_emergency_disable_fault(
-                                fault,
-                                channel_fault,
-                            );
-                        match report_status {
-                            Ok(report_flags) => defmt::error!(
-                                "TMC4671 channel {} emergency disable: STATUS={:#010x}",
-                                report_channel,
-                                report_flags
-                            ),
-                            Err(_) => defmt::error!(
-                                "TMC4671 channel {} emergency disable: STATUS read failed",
-                                report_channel
-                            ),
+            per_channel!(|ch, idx| {
+                if drivers[idx].runtime.restore_cancel_pending() {
+                    match device_or_invalid(mux, ch) {
+                        ChannelDevice::Device(device) => {
+                            let mut tmc = tmc_driver(device);
+                            let mut backend =
+                                ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                            let _ = drivers[idx]
+                                .runtime
+                                .drive_restore_cancel(
+                                    &mut backend,
+                                    tmc_state(ch),
+                                    stepper_state(ch),
+                                    foci_firmware::autotune::CommissionError::Shutdown,
+                                )
+                                .await;
                         }
-                        record_stepper_event(
-                            StepperEventReason::TmcDisableSignal,
-                            report_channel,
-                            read_tim5(),
-                            UNKNOWN_QUEUE_LEN,
-                            report_flags,
-                            0,
-                        );
-                        if channel_fault
-                            == foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped
-                            && !shutdown_reported
-                        {
-                            shutdown_reported = true;
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "TMC4671: ADC current clipped (overcurrent)",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                        }
-                    }
-                    if !shutdown_reported {
-                        ctx.shared.app_state.lock(|state| {
-                            if crate::firmware_ctx::enter_shutdown(state) {
-                                match fault {
-                                    foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped => {
-                                        unreachable!(
-                                            "shutdown_reported is set in the same loop iteration that classifies AdcCurrentClipped"
-                                        )
-                                    }
-                                    foci_firmware::tmc_control::EmergencyDisableFault::StatusReadFailed => {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "TMC4671: STATUS_FLAGS read failed",
-                                            read_tim5(),
-                                        );
-                                    }
-                                    foci_firmware::tmc_control::EmergencyDisableFault::Generic => {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "TMC4671 fault",
-                                            read_tim5(),
-                                        );
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    FAULT_ACTIVE.store(false, core::sync::atomic::Ordering::Relaxed);
-                }};
-            }
-
-            macro_rules! handle_tmc_disable_signal {
-                () => {
-                    handle_tmc_disable_signal!({});
-                };
-                ($before_classification:block) => {{
-                    if TMC_DISABLE_SIGNAL.try_take().is_some() {
-                        $before_classification
-                        let deadline_channel =
-                            STEPPER_DEADLINE_MISS_CHANNEL.swap(NO_STEPPER_CHANNEL, Relaxed);
-                        if deadline_channel != NO_STEPPER_CHANNEL {
-                            quiesce_all_channels(&mut runtimes, enable_pins);
-                            #[cfg(feature = "trace")]
-                            commission_trace_phase.fill(None);
-                            let clock = read_tim5();
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    foci_firmware::dispatch_shutdown!(
-                                        foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast,
-                                        clock,
-                                        &mut crate::_ankyra_config::Sender
-                                    );
-                                }
-                            });
-                            FAULT_ACTIVE.store(false, Relaxed);
-                        } else {
-                            quiesce_and_report_tmc_fault!();
-                        }
-                        continue 'control_loop;
-                    }
-                }};
-            }
-
-            macro_rules! poll_channel1_critical_status {
-                () => {{
-                    let channel = CHANNEL1_STATUS_FALLBACK;
-                    let mut critical_fault = false;
-                    if channel < crate::board_config::TMC_CHANNEL_COUNT
-                        && channel_may_be_energized(channel, &runtimes[channel as usize])
-                    {
-                        let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
+                        ChannelDevice::Invalid => {
+                            shutdown!("Invalid TMC channel");
                             continue 'control_loop;
-                        };
-                        let mut tmc = tmc_driver(device);
-                        match tmc
-                            .read_register(foci_tmc4671::registers::STATUS_FLAGS)
-                            .await
-                        {
-                            Ok(flags) => {
-                                critical_fault = flags & STATUS_CRITICAL_FAULT_MASK != 0;
-                                if critical_fault {
-                                    defmt::error!(
-                                        "TMC4671 channel {} critical STATUS fault: {:#010x}",
-                                        channel,
-                                        flags
-                                    );
-                                    latch_tmc_fault();
+                        }
+                    }
+                }
+            });
+
+            per_channel!(|ch, idx| {
+                if tmc_state(ch).cancel_requested.load(Relaxed) {
+                    match device_or_invalid(mux, ch) {
+                        ChannelDevice::Device(device) => {
+                            let mut tmc = tmc_driver(device);
+                            let mut backend =
+                                ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                            if let Some(
+                                foci_firmware::commission_dispatch::CommissionOutcome::Terminal {
+                                    reply,
+                                    actions,
+                                },
+                            ) = drivers[idx]
+                                .runtime
+                                .drive_operator_cancel(
+                                    &mut backend,
+                                    tmc_state(ch),
+                                    stepper_state(ch),
+                                    TMC_CONFIG.pwm_maxcnt,
+                                )
+                                .await
+                            {
+                                #[cfg(feature = "trace")]
+                                {
+                                    drivers[idx].commission_trace_phase = None;
                                 }
+                                {
+                                    let mut state = drivers[idx]
+                                        .runtime
+                                        .dispatch_state(tmc_state(ch), stepper_state(ch));
+                                    apply_stepper_post_action(actions.stepper, &mut state, ch);
+                                }
+                                foci_firmware::diagnostic::mark_p1_reply_construction_start();
+                                emit_terminal_reply(reply);
+                                foci_firmware::diagnostic::mark_p1_reply_construction_end();
                             }
-                            Err(_) => {
-                                critical_fault = true;
-                                defmt::error!(
-                                    "TMC4671 channel {} critical STATUS fallback read failed",
-                                    channel
-                                );
-                                latch_tmc_fault();
-                            }
+                        }
+                        ChannelDevice::Invalid => {
+                            shutdown!("Invalid TMC channel");
+                            continue 'control_loop;
                         }
                     }
-                    critical_fault
-                }};
-            }
+                }
+            });
 
-            macro_rules! commission_wait_containment_snapshot {
-                () => {{
-                    (
-                        SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed),
-                        TMC_QUEUE_FLUSH.load(core::sync::atomic::Ordering::Relaxed),
-                        TMC_DISABLE_SIGNAL.try_take().is_some(),
-                        FAULT_ACTIVE.load(core::sync::atomic::Ordering::Relaxed),
-                    )
-                }};
-            }
-
-            macro_rules! handle_commission_wait_exit {
-                ($channel:expr) => {{
-                    let clock_sync_expired =
-                        crate::tmc_control::containment::lease_expired(read_tim5());
-                    let (shutdown, queue_flush, emergency_disable, fault_active) =
-                        commission_wait_containment_snapshot!();
-                    // Cancel fast-path stays off: a genuine fault must still win the
-                    // channel-1 critical-STATUS poll below, so this is `false` until
-                    // that priority is revisited.
-                    let precheck = crate::tmc_control::effects::classify_commission_wait_precheck(
-                        shutdown,
-                        queue_flush,
-                        emergency_disable,
-                        fault_active,
-                        clock_sync_expired,
-                        false,
-                    );
-                    if let crate::tmc_control::effects::CommissionWaitPrecheck::Exit(exit) =
-                        precheck
-                    {
-                        if !matches!(
-                            exit,
-                            crate::tmc_control::effects::CommissionWaitExit::Cancelled
-                        ) {
-                            for runtime in runtimes.iter_mut() {
-                                runtime.request_restore_cancel();
-                            }
-                        }
-                        if matches!(
-                            exit,
-                            crate::tmc_control::effects::CommissionWaitExit::EmergencyDisable
-                        ) {
-                            lower_all_enable_pins(enable_pins);
-                            TMC_DISABLE_SIGNAL.signal(());
-                        }
-                        continue 'control_loop;
-                    }
-
-                    let critical_status = poll_channel1_critical_status!();
-                    let (shutdown, queue_flush, emergency_disable, fault_active) =
-                        commission_wait_containment_snapshot!();
-                    let exit = crate::tmc_control::effects::classify_commission_wait_exit(
-                        shutdown,
-                        queue_flush,
-                        emergency_disable,
-                        critical_status || fault_active,
-                        clock_sync_expired,
-                        tmc_state($channel)
-                            .cancel_requested
-                            .load(core::sync::atomic::Ordering::Relaxed),
-                    );
-                    if let Some(exit) = exit {
-                        if !matches!(
-                            exit,
-                            crate::tmc_control::effects::CommissionWaitExit::Cancelled
-                        ) {
-                            for runtime in runtimes.iter_mut() {
-                                runtime.request_restore_cancel();
-                            }
-                        }
-                        if matches!(
-                            exit,
-                            crate::tmc_control::effects::CommissionWaitExit::EmergencyDisable
-                        ) {
-                            lower_all_enable_pins(enable_pins);
-                            TMC_DISABLE_SIGNAL.signal(());
-                        }
-                        continue 'control_loop;
-                    }
-                }};
-            }
-
-            handle_tmc_disable_signal!();
-
-            // On shutdown, perform one-shot motor safe-state then idle until
-            // shutdown clears. This catches USB disconnect / host crash where
-            // no further commands arrive but the TMC4671 remains energized.
-            if SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed) {
-                commission_measurement_active.fill(false);
+            if SHUTDOWN_ACTIVE.load(Relaxed) {
                 if !shutdown_handled {
-                    quiesce_all_channels(&mut runtimes, enable_pins);
                     #[cfg(feature = "trace")]
-                    commission_trace_phase.fill(None);
-                    let mut all_shutdown_safe_state_complete = true;
-                    for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                        let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                            continue;
-                        };
-                        let mut tmc = tmc_driver(device);
-                        let runtime = &mut runtimes[channel as usize];
-                        let mut backend =
-                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        all_shutdown_safe_state_complete &=
-                            foci_firmware::tmc_control::lifecycle::apply_shutdown_safe_state(
-                                runtime,
-                                &mut backend,
-                                tmc_state(channel),
-                                stepper_state(channel),
-                            )
-                            .await;
-                        tmc_state(channel)
-                            .commission_in_flight
-                            .store(false, core::sync::atomic::Ordering::Relaxed);
+                    for d in drivers.iter_mut() {
+                        d.commission_trace_phase = None;
                     }
-                    shutdown_handled = all_shutdown_safe_state_complete;
+                    let mut complete = true;
+                    per_channel!(|ch, idx| {
+                        match device_or_invalid(mux, ch) {
+                            ChannelDevice::Device(device) => {
+                                let mut tmc = tmc_driver(device);
+                                let mut backend =
+                                    ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                                complete &= foci_firmware::tmc_control::lifecycle::apply_shutdown_safe_state(
+                                    &mut drivers[idx].runtime,
+                                    &mut backend,
+                                    tmc_state(ch),
+                                    stepper_state(ch),
+                                )
+                                .await;
+                                tmc_state(ch).commission_in_flight.store(false, Relaxed);
+                            }
+                            ChannelDevice::Invalid => complete = false,
+                        }
+                    });
+                    quiesce_all_channels(drivers, enable_pins);
+                    shutdown_handled = complete;
                     integral_candidate.observe_fault();
                 }
                 Mono::delay(1.millis()).await;
@@ -1037,931 +562,568 @@ mod app {
             }
             shutdown_handled = false;
 
-            // classify_lease_check(shutdown_active, ...) always returns
-            // Proceed while shutdown is already active -- see its doc
-            // comment for why.
             match crate::tmc_control::containment::classify_lease_check(
-                SHUTDOWN_ACTIVE.load(core::sync::atomic::Ordering::Relaxed),
+                SHUTDOWN_ACTIVE.load(Relaxed),
                 crate::tmc_control::containment::lease_expired(read_tim5()),
             ) {
                 crate::tmc_control::containment::LeaseCheckDisposition::EnterClockSyncShutdown => {
-                    ctx.shared.app_state.lock(|state| {
-                        if crate::firmware_ctx::enter_shutdown(state) {
-                            foci_firmware::dispatch_shutdown!(
-                                foci_firmware::shutdown::ShutdownReason::HostClockSyncExpired,
-                                read_tim5(),
-                                &mut crate::_ankyra_config::Sender
-                            );
-                        }
-                    });
+                    shutdown_reason!(foci_firmware::shutdown::ShutdownReason::HostClockSyncExpired);
                     continue;
                 }
                 crate::tmc_control::containment::LeaseCheckDisposition::Proceed => {}
             }
 
-            // Drain stale requests after config_reset
-            if TMC_QUEUE_FLUSH.swap(false, core::sync::atomic::Ordering::Relaxed) {
-                commission_measurement_active.fill(false);
+            if TMC_QUEUE_FLUSH.swap(false, Relaxed) {
                 integral_candidate.observe_fault();
                 while rx.try_recv().is_ok() {}
-                let mut needs_disarm = [false; crate::board_config::TMC_CHANNEL_COUNT as usize];
-                for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                    needs_disarm[channel as usize] =
-                        channel_needs_safe_state(channel, &runtimes[channel as usize]);
-                }
-                // Stop steppers, clear local armed/enabled state, and lower both
-                // enable pins before any SPI awaits in the restore-safe-state pass.
-                quiesce_all_channels(&mut runtimes, enable_pins);
+                let needs_disarm = [
+                    channel_needs_safe_state(0, &drivers[0]),
+                    channel_needs_safe_state(1, &drivers[1]),
+                ];
+                quiesce_all_channels(drivers, enable_pins);
                 #[cfg(feature = "trace")]
-                commission_trace_phase.fill(None);
-
-                for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                    if needs_disarm[channel as usize] {
-                        let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
-                                }
-                            });
-                            continue;
-                        };
-                        let mut tmc = tmc_driver(device);
-                        let mut backend =
-                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        let runtime = &mut runtimes[channel as usize];
-                        let mut state =
-                            runtime.dispatch_state(tmc_state(channel), stepper_state(channel));
-                        foci_firmware::tmc_control::lifecycle::disarm_motor(
-                            &mut backend,
-                            &mut state,
-                        )
-                        .await;
-                    }
-                    runtimes[channel as usize].reset_runtime_state();
-                    foci_firmware::tmc_control::TmcControlRuntime::reset_channel_state(
-                        tmc_state(channel),
-                        stepper_state(channel),
-                    );
-                    tmc_state(channel)
-                        .commission_in_flight
-                        .store(false, core::sync::atomic::Ordering::Relaxed);
+                for d in drivers.iter_mut() {
+                    d.commission_trace_phase = None;
                 }
-                FAULT_ACTIVE.store(false, core::sync::atomic::Ordering::Relaxed);
-                status_poll_counters.fill(0);
+                per_channel!(|ch, idx| {
+                    if needs_disarm[idx] {
+                        match device_or_invalid(mux, ch) {
+                            ChannelDevice::Device(device) => {
+                                let mut tmc = tmc_driver(device);
+                                let mut backend =
+                                    ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                                let mut state = drivers[idx]
+                                    .runtime
+                                    .dispatch_state(tmc_state(ch), stepper_state(ch));
+                                foci_firmware::tmc_control::lifecycle::disarm_motor(
+                                    &mut backend,
+                                    &mut state,
+                                )
+                                .await;
+                            }
+                            ChannelDevice::Invalid => {
+                                shutdown!("Invalid TMC channel");
+                            }
+                        }
+                    }
+                    drivers[idx].runtime.reset_runtime_state();
+                    foci_firmware::tmc_control::TmcControlRuntime::reset_channel_state(
+                        tmc_state(ch),
+                        stepper_state(ch),
+                    );
+                    tmc_state(ch).commission_in_flight.store(false, Relaxed);
+                });
                 defmt::info!("TMC request queue flushed after config_reset");
             }
 
-            // Tick an active commissioning engine through the shared absolute scheduler.
-            'commission_channel: for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                let channel_idx = channel as usize;
-                if !runtimes[channel_idx].is_commission_active() {
-                    commission_measurement_active[channel_idx] = false;
+            if TMC_DISABLE_SIGNAL.try_take().is_some()
+                || FAULT_ACTIVE.load(Relaxed)
+                || levels[0]
+                || levels[1]
+            {
+                let deadline_channel =
+                    STEPPER_DEADLINE_MISS_CHANNEL.swap(NO_STEPPER_CHANNEL, Relaxed);
+                quiesce_all_channels(drivers, enable_pins);
+                #[cfg(feature = "trace")]
+                for d in drivers.iter_mut() {
+                    d.commission_trace_phase = None;
+                }
+                let mut flags = [0u32; 2];
+                per_channel!(|ch, idx| {
+                    if let ChannelDevice::Device(device) = device_or_invalid(mux, ch) {
+                        let mut tmc = tmc_driver(device);
+                        flags[idx] = tmc
+                            .read_register(foci_tmc4671::registers::STATUS_FLAGS)
+                            .await
+                            .unwrap_or(0);
+                    }
+                    record_stepper_event(
+                        StepperEventReason::TmcDisableSignal,
+                        ch,
+                        read_tim5(),
+                        UNKNOWN_QUEUE_LEN,
+                        flags[idx],
+                        0,
+                    );
+                    defmt::error!(
+                        "TMC4671 channel {} emergency disable: STATUS={:#010x}",
+                        ch,
+                        flags[idx]
+                    );
+                });
+
+                // No await between this re-poll and the store below: a fault
+                // signalled since entry must still be visible here, with
+                // FAULT_ACTIVE itself as the latch being cleared.
+                let levels = status_levels(status_pin0);
+                tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
+                tmc_state(1).status_pin_asserted.store(levels[1], Relaxed);
+                let fault_still_reported = levels[0] || levels[1] || TMC_DISABLE_SIGNAL.signaled();
+                if fault_still_reported {
+                    defmt::error!("TMC4671 fault still reported after containment; latch kept");
+                } else {
+                    FAULT_ACTIVE.store(false, Relaxed);
+                }
+
+                if deadline_channel != NO_STEPPER_CHANNEL {
+                    shutdown_reason!(foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast);
+                } else if (flags[0] | flags[1]) & STATUS_CRITICAL_MASK != 0 {
+                    shutdown!("TMC4671: ADC current clipped (overcurrent)");
+                } else {
+                    shutdown!("TMC4671 fault");
+                }
+                continue;
+            }
+
+            per_channel!(|ch, idx| {
+                if matches!(
+                    drivers[idx].mode(),
+                    ChannelMode::Commissioning | ChannelMode::Restore
+                ) {
+                    let exit = crate::tmc_control::containment::classify_commission_wait_exit(
+                        SHUTDOWN_ACTIVE.load(Relaxed),
+                        TMC_QUEUE_FLUSH.load(Relaxed),
+                        TMC_DISABLE_SIGNAL.signaled(),
+                        FAULT_ACTIVE.load(Relaxed),
+                        crate::tmc_control::containment::lease_expired(read_tim5()),
+                        tmc_state(ch).cancel_requested.load(Relaxed),
+                    );
+                    if let Some(exit) = exit {
+                        if !matches!(
+                            exit,
+                            crate::tmc_control::containment::CommissionWaitExit::Cancelled
+                        ) {
+                            drivers[idx].runtime.request_restore_cancel(); // wait-exit site (expands twice)
+                        }
+                        if matches!(
+                            exit,
+                            crate::tmc_control::containment::CommissionWaitExit::EmergencyDisable
+                        ) {
+                            lower_all_enable_pins(enable_pins);
+                        }
+                        continue 'control_loop;
+                    }
+                }
+            });
+
+            scheduler.set_mode(0, drivers[0].mode(), now_us());
+            scheduler.set_mode(1, drivers[1].mode(), now_us());
+
+            let control_sleep = Mono::delay_until(fugit::Instant::<u64, 1, 1_000_000>::from_ticks(
+                scheduler
+                    .earliest_due_us()
+                    .unwrap_or_else(|| now_us() + 1_000),
+            ));
+            let selected = select(rx.recv(), control_sleep).await;
+
+            if let Either::First(Ok(req)) = selected {
+                if req.channel >= crate::board_config::TMC_CHANNEL_COUNT {
+                    emit_invalid_channel_diagnostic(req.channel);
+                    shutdown!("Invalid TMC channel");
                     continue;
                 }
-                if !commission_measurement_active[channel_idx] {
-                    commission_poll_drivers[channel_idx] =
-                        foci_firmware::tmc_control::CommissionPollDriver::new();
-                    commission_tick_max_cycles[channel_idx] = 0;
-                    commission_measurement_active[channel_idx] = true;
-                }
-
-                'commission_poll: loop {
-                    handle_commission_wait_exit!(channel);
-
-                    // A terminal restore owns this channel until it reports its
-                    // terminal: advance it one backend operation per pass
-                    // instead of stepping the engine again.
-                    if runtimes[channel_idx].is_restore_pending() {
-                        let action = {
-                            let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                                ctx.shared.app_state.lock(|state| {
-                                    if crate::firmware_ctx::enter_shutdown(state) {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "Invalid TMC channel",
-                                            read_tim5(),
-                                        );
-                                    }
-                                });
-                                runtimes[channel_idx].request_restore_cancel();
-                                continue 'commission_channel;
-                            };
-                            let mut tmc = tmc_driver(device);
-                            let mut backend = ouroboros_backend(
-                                channel,
-                                &mut tmc,
-                                enable_pin(enable_pins, channel),
-                            );
-                            let mut retention =
-                                foci_firmware::commission_dispatch::CommissionRetention::new(
-                                    &mut *integral_candidate,
+                let channel = req.channel;
+                let idx = channel as usize;
+                let commissioning = matches!(
+                    drivers[idx].mode(),
+                    ChannelMode::Commissioning | ChannelMode::Restore
+                );
+                let disposition = if commissioning {
+                    crate::tmc_control::effects::commission_wait_request_disposition(&req)
+                } else {
+                    CommissionWaitRequestDisposition::Cancel
+                };
+                match disposition {
+                    CommissionWaitRequestDisposition::Cancel => {
+                        if commissioning {
+                            let route =
+                                crate::tmc_control::effects::classify_commission_wait_cancel(
+                                    channel,
+                                    req.channel,
+                                    crate::board_config::TMC_CHANNEL_COUNT,
                                 );
-                            runtimes[channel_idx]
-                                .poll_commissioning_terminal(
-                                    &mut backend,
-                                    &mut retention,
-                                    tmc_state(channel),
-                                    stepper_state(channel),
+                            if matches!(
+                                route,
+                                crate::tmc_control::effects::CommissionWaitCancelRoute::Invalid
+                            ) {
+                                emit_invalid_channel_diagnostic(req.channel);
+                                shutdown!("Invalid TMC channel");
+                                drivers[idx].runtime.request_restore_cancel(); // invalid-route site
+                                continue 'control_loop;
+                            }
+                            enable_pin(enable_pins, channel).set_low();
+                            tmc_state(channel)
+                                .commission_in_flight
+                                .store(false, Relaxed);
+                        }
+                        let commissioning_blocked = match &req.kind {
+                            TmcRequestKind::SetEnable(true) => {
+                                !drivers[idx].runtime.is_calibrated()
+                                    && commissioning_request_blocked(drivers, channel)
+                            }
+                            TmcRequestKind::Calibrate { .. }
+                            | TmcRequestKind::Commission { .. }
+                            | TmcRequestKind::Tune { .. }
+                            | TmcRequestKind::SelfTest { .. } => {
+                                commissioning_request_blocked(drivers, channel)
+                            }
+                            _ => false,
+                        };
+                        let outcome = match device_or_invalid(mux, channel) {
+                            ChannelDevice::Device(device) => {
+                                let mut tmc = tmc_driver(device);
+                                crate::tmc_control::request::handle_tmc_control_request(
+                                    req,
+                                    TmcPreRequestDisposition::ContinueRequest,
+                                    crate::tmc_control::request::TmcControlRequestContext {
+                                        channel,
+                                        commissioning_blocked,
+                                        drivers: &mut *drivers,
+                                        tmc: &mut tmc,
+                                        enable_pins,
+                                        integral_candidate: &mut *integral_candidate,
+                                    },
                                 )
                                 .await
+                            }
+                            ChannelDevice::Invalid => {
+                                shutdown!("Invalid TMC channel");
+                                continue;
+                            }
                         };
-                        match action {
-                            None => continue 'commission_poll,
-                            Some(
-                                foci_firmware::tmc_control::ScheduledCommissionTickAction::Terminal {
-                                    reply,
-                                    actions,
-                                },
-                            ) => {
-                                #[cfg(feature = "trace")]
-                                {
-                                    commission_trace_phase[channel_idx] = None;
-                                }
-                                {
-                                    let runtime = &mut runtimes[channel_idx];
-                                    let mut state = runtime.dispatch_state(
-                                        tmc_state(channel),
-                                        stepper_state(channel),
-                                    );
-                                    apply_stepper_post_action(actions.stepper, &mut state, channel);
-                                }
-                                emit_terminal_reply(reply);
-                                defmt::info!(
-                                    "commissioning channel {} terminal max tick cycles: {}",
-                                    channel,
-                                    commission_tick_max_cycles[channel_idx],
-                                );
-                                commission_measurement_active[channel_idx] = false;
-                                break 'commission_poll;
-                            }
-                            Some(_) => {
-                                unreachable!("terminal restore produced a nonterminal action")
-                            }
-                        }
-                    }
-
-                    #[cfg(feature = "trace")]
-                    let engine_tick_deadline =
-                        Mono::now() + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
-                    let engine_kind = runtimes[channel_idx]
-                        .pending_commission_kind()
-                        .expect("active commissioning engine has a kind");
-                    let tick_start = cortex_m::peripheral::DWT::cycle_count();
-
-                    let mut poll = {
-                        let Some(device) = ctx.local.tmc_mux.device(channel) else {
+                        if let Some(reason) = outcome.shutdown {
                             ctx.shared.app_state.lock(|state| {
                                 if crate::firmware_ctx::enter_shutdown(state) {
-                                    ::ankyra::klipper_shutdown_from!(
-                                        &mut crate::_ankyra_config::Sender,
-                                        "Invalid TMC channel",
-                                        read_tim5(),
-                                    );
+                                    crate::tmc_control::effects::emit_shutdown(reason);
                                 }
                             });
-                            runtimes[channel_idx].request_restore_cancel();
-                            continue 'commission_channel;
-                        };
-                        let mut tmc = tmc_driver(device);
-                        let runtime = &mut runtimes[channel_idx];
-                        let mut backend =
-                            ouroboros_backend(channel, &mut tmc, enable_pin(enable_pins, channel));
-                        runtime
-                            .step_commissioning_scheduled(&mut backend)
-                            .await
-                            .expect("active commissioning engine produces a poll")
-                    };
-                    let now_us = Mono::now().duration_since_epoch().to_micros();
-                    let driver_action = match commission_poll_drivers[channel_idx]
-                        .classify(&poll, now_us)
-                    {
-                        Ok(action) => action,
-                        Err(error) => {
-                            poll =
-                                foci_firmware::commissioning::schedule::CommissionPoll::Terminal {
-                                    result: if matches!(
-                                        engine_kind,
-                                        foci_firmware::commissioning::types::EngineKind::OuterTune
-                                    ) {
-                                        foci_firmware::commissioning::schedule::CommissionTerminal::OuterFailed(
-                                    error,
-                                )
-                                    } else {
-                                        foci_firmware::commissioning::schedule::CommissionTerminal::InnerFailed(
-                                    error,
-                                )
-                                    },
-                                };
-                            foci_firmware::tmc_control::PollDriverAction::Terminal
                         }
-                    };
-                    if matches!(
-                        driver_action,
-                        foci_firmware::tmc_control::PollDriverAction::YieldNow
-                    ) {
-                        Mono::delay(foci_firmware::tmc_control::FORCED_READY_YIELD_US.micros())
-                            .await;
-                        handle_commission_wait_exit!(channel);
-                    }
-
-                    let action = {
-                        let mut retention =
-                            foci_firmware::commission_dispatch::CommissionRetention::new(
-                                &mut *integral_candidate,
-                            );
-                        runtimes[channel_idx].begin_commissioning_poll_with_stages(
-                            poll,
-                            &mut retention,
-                            &tmc_control_config,
-                        )
-                    };
-                    let Some(action) = action else {
-                        // A terminal poll starts the restore machine instead of
-                        // producing an action; the drain block above advances it.
-                        assert!(
-                            runtimes[channel_idx].is_restore_pending(),
-                            "active commissioning poll produces an action"
-                        );
-                        continue 'commission_poll;
-                    };
-                    let tick_cycles =
-                        cortex_m::peripheral::DWT::cycle_count().wrapping_sub(tick_start);
-                    commission_tick_max_cycles[channel_idx] =
-                        commission_tick_max_cycles[channel_idx].max(tick_cycles);
-                    handle_commission_wait_exit!(channel);
-
-                    use foci_firmware::tmc_control::ScheduledCommissionTickAction;
-                    match action {
-                        ScheduledCommissionTickAction::ReadyNow { event }
-                        | ScheduledCommissionTickAction::At { event, .. } => {
-                            let phase_changed = matches!(
-                                &event,
-                                Some(
-                                    foci_firmware::commissioning::schedule::CommissionEvent::PhaseChanged {
-                                        ..
-                                    }
-                                )
-                            );
-                            if let Some(event) = event {
-                                match event {
-                                    foci_firmware::commissioning::schedule::CommissionEvent::PhaseChanged {
-                                        oid,
-                                        phase_id,
-                                        engine_kind,
-                                    } => {
-                                        #[cfg(not(feature = "trace"))]
-                                        let _ = engine_kind;
-                                        #[cfg(feature = "trace")]
-                                        {
-                                            commission_trace_phase[channel_idx] =
-                                                Some((engine_kind, phase_id));
-                                        }
-                                        emit_phase_reply(oid, phase_id);
-                                    }
-                                    foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegral {
-                                        oid,
-                                        event,
-                                    } => {
-                                        crate::ankyra::replies::emit_velocity_integral_event(
-                                            oid, event,
-                                        );
-                                    }
-                                    foci_firmware::commissioning::schedule::CommissionEvent::BreakawayCampaign {
-                                        oid,
-                                        event,
-                                    } => {
-                                        crate::ankyra::replies::emit_breakaway_campaign_event(
-                                            oid, event,
-                                        );
-                                    }
-                                    foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegralPlan {
-                                        oid,
-                                        run_sequence,
-                                        plan,
-                                    } => {
-                                        crate::ankyra::replies::emit_velocity_integral_plan(
-                                            oid, run_sequence, plan,
-                                        );
-                                    }
-                                }
-                            }
-                            #[cfg(feature = "trace")]
-                        if let Some((engine_kind, phase_id)) =
-                            commission_trace_phase[channel_idx]
-                            && foci_firmware::trace::commissioning::commission_trace_phase_samples_closed_loop_activation(
-                                engine_kind,
-                                phase_id,
-                            ) {
-                            let trace_tick = runtimes[channel_idx].advance_trace_sample_tick();
-                            let refs =
-                                TmcControlStateRefs::new(tmc_state(channel), stepper_state(channel));
-                            let motor_enabled = runtimes[channel_idx].is_motor_enabled();
-                            let step_timing = crate::usb_trace::take_step_timing_snapshot();
-                            let step_timing = if crate::usb_trace::is_configured() {
-                                Some(step_timing)
-                            } else {
-                                None
-                            };
-                            let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                                ctx.shared.app_state.lock(|state| {
-                                    if crate::firmware_ctx::enter_shutdown(state) {
-                                        ::ankyra::klipper_shutdown_from!(
-                                            &mut crate::_ankyra_config::Sender,
-                                            "Invalid TMC channel",
-                                            read_tim5(),
-                                        );
-                                    }
-                                });
-                                runtimes[channel_idx].request_restore_cancel();
-                                continue 'control_loop;
-                            };
-                            let mut tmc = tmc_driver(device);
-                            crate::usb_trace::sample_commission_closed_loop_activation(
-                                &mut tmc,
-                                crate::usb_trace::TraceSampleContext {
-                                    channel,
-                                    refs,
-                                    motor_enabled,
-                                    step_timing,
-                                },
-                                trace_tick,
-                                || {
-                                    engine_tick_deadline
-                                        .checked_duration_since(Mono::now())
-                                        .map(|d| d.to_micros())
-                                        .unwrap_or(0)
-                                },
-                                || Mono::now() > engine_tick_deadline,
-                            )
-                            .await;
+                        if outcome.should_refresh_velocity_scale {
+                            refresh_velocity_scale(channel, &mut drivers[idx].runtime);
                         }
-
-                            match foci_firmware::tmc_control::nonterminal_continuation(
-                                driver_action,
-                                phase_changed,
-                            ) {
-                                foci_firmware::tmc_control::PollDriverAction::PollNow
-                                | foci_firmware::tmc_control::PollDriverAction::YieldNow => {
-                                    runtimes[channel_idx].request_restore_cancel();
-                                    continue 'control_loop;
-                                }
-                                foci_firmware::tmc_control::PollDriverAction::WaitUntil(
-                                    deadline_us,
-                                ) => {
-                                    loop {
-                                        handle_commission_wait_exit!(channel);
-
-                                        if let Ok(req) = rx.try_recv() {
-                                            use foci_firmware::tmc_control::CommissionWaitRequestDisposition;
-                                            match crate::tmc_control::effects::commission_wait_request_disposition(&req) {
-                                            CommissionWaitRequestDisposition::Cancel => {
-                                                let request_channel = req.channel;
-                                                let cancel_route = crate::tmc_control::effects::classify_commission_wait_cancel(
-                                                    channel,
-                                                    request_channel,
-                                                    crate::board_config::TMC_CHANNEL_COUNT,
-                                                );
-                                                if matches!(
-                                                    cancel_route,
-                                                    crate::tmc_control::effects::CommissionWaitCancelRoute::Invalid
-                                                ) {
-                                                    emit_invalid_channel_diagnostic(request_channel);
-                                                    ctx.shared.app_state.lock(|state| {
-                                                        if crate::firmware_ctx::enter_shutdown(state) {
-                                                            ::ankyra::klipper_shutdown_from!(
-                                                                &mut crate::_ankyra_config::Sender,
-                                                                "Invalid TMC channel",
-                                                                read_tim5(),
-                                                            );
-                                                        }
-                                                    });
-                                                    runtimes[channel_idx].request_restore_cancel();
-                                                    continue 'control_loop;
-                                                }
-
-                                                let request_idx = request_channel as usize;
-                                                enable_pin(enable_pins, request_channel).set_low();
-                                                tmc_state(request_channel).commission_in_flight.store(
-                                                    false,
-                                                    core::sync::atomic::Ordering::Relaxed,
-                                                );
-                                                commission_poll_drivers[request_idx] =
-                                                    foci_firmware::tmc_control::CommissionPollDriver::new();
-                                                commission_tick_max_cycles[request_idx] = 0;
-                                                commission_measurement_active[request_idx] = false;
-                                                #[cfg(feature = "trace")]
-                                                {
-                                                    commission_trace_phase[request_idx] = None;
-                                                }
-                                                let Some(device) = ctx.local.tmc_mux.device(request_channel) else {
-                                                    ctx.shared.app_state.lock(|state| {
-                                                        if crate::firmware_ctx::enter_shutdown(state) {
-                                                            ::ankyra::klipper_shutdown_from!(
-                                                                &mut crate::_ankyra_config::Sender,
-                                                                "Invalid TMC channel",
-                                                                read_tim5(),
-                                                            );
-                                                        }
-                                                    });
-                                                    runtimes[channel_idx].request_restore_cancel();
-                                                    continue 'control_loop;
-                                                };
-                                                let mut request_tmc = tmc_driver(device);
-                                                let outcome = crate::tmc_control::request::handle_tmc_control_request(
-                                                    req,
-                                                    TmcPreRequestDisposition::ContinueRequest,
-                                                    crate::tmc_control::request::TmcControlRequestContext {
-                                                        channel: request_channel,
-                                                        commissioning_blocked: false,
-                                                        runtimes: &mut runtimes,
-                                                        tmc: &mut request_tmc,
-                                                        enable_pins,
-                                                        commission_trace_engine_seq: &mut commission_trace_engine_seq,
-                                                        integral_candidate: &mut *integral_candidate,
-                                                    },
-                                                )
-                                                .await;
-                                                if let Some(reason) = outcome.shutdown {
-                                                    ctx.shared.app_state.lock(|state| {
-                                                        if crate::firmware_ctx::enter_shutdown(state) {
-                                                            crate::tmc_control::effects::emit_shutdown(reason);
-                                                        }
-                                                    });
-                                                }
-                                                if outcome.should_refresh_velocity_scale {
-                                                    refresh_velocity_scale(
-                                                        request_channel,
-                                                        &mut runtimes[request_idx],
-                                                    );
-                                                }
-                                                if matches!(
-                                                    cancel_route,
-                                                    crate::tmc_control::effects::CommissionWaitCancelRoute::Current
-                                                ) {
-                                                    runtimes[channel_idx].request_restore_cancel();
-                                                    continue 'control_loop;
-                                                }
-                                            }
-                                            CommissionWaitRequestDisposition::RejectBusy => {
-                                                let outcome = crate::tmc_control::effects::handle_commission_wait_reject(req);
-                                                if let Some(reason) = outcome.shutdown {
-                                                    ctx.shared.app_state.lock(|state| {
-                                                        if crate::firmware_ctx::enter_shutdown(state) {
-                                                            crate::tmc_control::effects::emit_shutdown(reason);
-                                                        }
-                                                    });
-                                                }
-                                            }
-                                            CommissionWaitRequestDisposition::DropBusy => {}
-                                        }
-                                        }
-
-                                        handle_commission_wait_exit!(channel);
-                                        let now_us = Mono::now().duration_since_epoch().to_micros();
-                                        match foci_firmware::tmc_control::classify_absolute_wait(
-                                            now_us,
-                                            deadline_us,
-                                        ) {
-                                            Ok(
-                                                foci_firmware::tmc_control::AbsoluteWaitAction::PollNow,
-                                            ) => break,
-                                            Ok(
-                                                foci_firmware::tmc_control::AbsoluteWaitAction::SleepUntil(
-                                                    wake_us,
-                                                ),
-                                            ) => {
-                                                let wake = fugit::Instant::<u64, 1, 1_000_000>::from_ticks(
-                                                    wake_us,
-                                                );
-                                                Mono::delay_until(wake).await;
-                                            }
-                                            Err(_) => {
-                                                lower_all_enable_pins(enable_pins);
-                                                TMC_DISABLE_SIGNAL.signal(());
-                                                runtimes[channel_idx].request_restore_cancel();
-                                                continue 'control_loop;
-                                            }
-                                        }
-                                    }
-                                    continue 'commission_poll;
-                                }
-                                foci_firmware::tmc_control::PollDriverAction::Terminal => {
-                                    unreachable!("nonterminal poll classified as terminal")
-                                }
-                            }
+                        if !commissioning
+                            && matches!(drivers[idx].mode(), ChannelMode::Commissioning)
+                        {
+                            scheduler.set_commission_due(channel, Some(now_us()));
                         }
-                        ScheduledCommissionTickAction::WorkflowContinuation => {
-                            continue 'commission_poll;
+                        if commissioning {
+                            drivers[idx].runtime.request_restore_cancel(); // in-commissioning cancel site
+                            continue 'control_loop;
                         }
-                        ScheduledCommissionTickAction::Terminal { reply, actions } => {
-                            #[cfg(feature = "trace")]
-                            {
-                                commission_trace_phase[channel_idx] = None;
-                            }
-                            {
-                                let runtime = &mut runtimes[channel_idx];
-                                let mut state = runtime
-                                    .dispatch_state(tmc_state(channel), stepper_state(channel));
-                                apply_stepper_post_action(actions.stepper, &mut state, channel);
-                            }
-                            emit_terminal_reply(reply);
-                            defmt::info!(
-                                "commissioning channel {} terminal max tick cycles: {}",
-                                channel,
-                                commission_tick_max_cycles[channel_idx],
-                            );
-                            commission_measurement_active[channel_idx] = false;
-                            break 'commission_poll;
-                        }
-                    }
-                }
-                // Terminal cases fall through to normal channel-receive processing.
-                break;
-            }
-
-            let control_refs = [
-                TmcControlStateRefs::new(tmc_state(0), stepper_state(0)),
-                TmcControlStateRefs::new(tmc_state(1), stepper_state(1)),
-            ];
-            let control_period_us =
-                TmcControlRuntime::minimum_control_period_us(&runtimes, &control_refs);
-
-            match select(
-                rx.recv(),
-                Mono::delay(u64::from(control_period_us).micros()),
-            )
-            .await
-            {
-                // Channel message received
-                Either::First(Ok(req)) => {
-                    if req.channel >= crate::board_config::TMC_CHANNEL_COUNT {
-                        emit_invalid_channel_diagnostic(req.channel);
-                        ctx.shared.app_state.lock(|state| {
-                            if crate::firmware_ctx::enter_shutdown(state) {
-                                ::ankyra::klipper_shutdown_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    "Invalid TMC channel",
-                                    read_tim5(),
-                                );
-                            }
-                        });
-                        continue;
-                    }
-                    let channel = req.channel;
-                    let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                        ctx.shared.app_state.lock(|state| {
-                            if crate::firmware_ctx::enter_shutdown(state) {
-                                ::ankyra::klipper_shutdown_from!(
-                                    &mut crate::_ankyra_config::Sender,
-                                    "Invalid TMC channel",
-                                    read_tim5(),
-                                );
-                            }
-                        });
-                        continue;
-                    };
-                    let mut tmc = tmc_driver(device);
-
-                    let commissioning_blocked = match &req.kind {
-                        TmcRequestKind::SetEnable(true) => {
-                            !runtimes[channel as usize].is_calibrated()
-                                && commissioning_request_blocked(&runtimes, channel)
-                        }
-                        TmcRequestKind::Calibrate { .. }
-                        | TmcRequestKind::Commission { .. }
-                        | TmcRequestKind::Tune { .. }
-                        | TmcRequestKind::SelfTest { .. } => {
-                            commissioning_request_blocked(&runtimes, channel)
-                        }
-                        _ => false,
-                    };
-                    let outcome = crate::tmc_control::request::handle_tmc_control_request(
-                        req,
-                        TmcPreRequestDisposition::ContinueRequest,
-                        crate::tmc_control::request::TmcControlRequestContext {
-                            channel,
-                            commissioning_blocked,
-                            runtimes: &mut runtimes,
-                            tmc: &mut tmc,
-                            enable_pins,
-                            commission_trace_engine_seq: &mut commission_trace_engine_seq,
-                            integral_candidate: &mut *integral_candidate,
-                        },
-                    )
-                    .await;
-
-                    if let Some(reason) = outcome.shutdown {
-                        ctx.shared.app_state.lock(|state| {
-                            if crate::firmware_ctx::enter_shutdown(state) {
-                                crate::tmc_control::effects::emit_shutdown(reason);
-                            }
-                        });
-                    }
-
-                    if outcome.should_refresh_velocity_scale {
-                        refresh_velocity_scale(channel, &mut runtimes[channel as usize]);
-                    }
-
-                    match outcome.tail {
-                        foci_firmware::tmc_control::TmcControlRequestTail::FallThrough => {}
-                        foci_firmware::tmc_control::TmcControlRequestTail::SkipTickTail => {
+                        if matches!(outcome.tail, TmcControlRequestTail::SkipTickTail) {
                             continue 'control_loop;
                         }
                     }
-                }
-                Either::First(Err(_)) => {}
-                // 1ms timeout — write position target via SPI, and push any
-                // configuration recorded by config-time setters. Those setters
-                // record state instead of enqueueing, so a connect-time burst
-                // cannot overflow the bounded TMC request channel.
-                Either::Second(()) => {
-                    for pending_channel in 0..foci_firmware::state::tmc::MAX_TMC_CHANNELS as u8 {
-                        let Some(device) = ctx.local.tmc_mux.device(pending_channel) else {
-                            continue;
-                        };
-                        let mut pending_tmc = tmc_driver(device);
-                        if foci_firmware::tmc_control::filters::apply_pending_config(
-                            &mut pending_tmc,
-                            tmc_state(pending_channel),
-                            TMC_CONFIG.pwm_maxcnt,
-                        )
-                        .await
-                        .is_err()
-                        {
-                            defmt::error!(
-                                "pending TMC config apply failed: channel {}",
-                                pending_channel
-                            );
+                    CommissionWaitRequestDisposition::RejectBusy => {
+                        let outcome =
+                            crate::tmc_control::effects::handle_commission_wait_reject(req);
+                        if let Some(reason) = outcome.shutdown {
+                            ctx.shared.app_state.lock(|state| {
+                                if crate::firmware_ctx::enter_shutdown(state) {
+                                    crate::tmc_control::effects::emit_shutdown(reason);
+                                }
+                            });
                         }
                     }
+                    CommissionWaitRequestDisposition::DropBusy => {}
                 }
+                scheduler.set_mode(0, drivers[0].mode(), now_us());
+                scheduler.set_mode(1, drivers[1].mode(), now_us());
             }
 
-            // Check emergency disable (non-blocking). Triggered by EXTI
-            // STATUS interrupt or enter_shutdown. Disables motor and reports
-            // the fault to Klipper so the host knows the MCU is down.
-            handle_tmc_disable_signal!();
-
-            // Poll STATUS_FLAGS every ~1 second on the shared slow-control
-            // cadence. Channel 1 still gets a per-control-tick critical poll
-            // while it may be energized because PA2 cannot share EXTI2 with PE2.
-            let slow_control_tick = TmcControlRuntime::update_slow_control_accumulator(
-                &mut slow_control_accum_us,
-                control_period_us,
-            );
-
-            let homing = HOMING_STATE.load(core::sync::atomic::Ordering::Relaxed);
-            let mut all_channels_ready_for_homing_advance = true;
+            let now = now_us();
+            let homing_state = HOMING_STATE.load(Relaxed);
+            let Some(unit) = scheduler.pick(now, homing_state) else {
+                continue;
+            };
+            let snapshot = scheduler
+                .maintenance_group()
+                .map_or(homing_state, |g| g.homing_snapshot());
             #[cfg(feature = "trace")]
-            let mut trace_metadata_due = false;
-            #[cfg(feature = "trace")]
-            let step_timing = if slow_control_tick {
-                let snapshot = crate::usb_trace::take_step_timing_snapshot();
-                if crate::usb_trace::is_configured() {
-                    Some(snapshot)
-                } else {
-                    None
-                }
-            } else {
+            let engine_tick_deadline =
+                Mono::now() + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
+            let ch = unit.channel;
+            let idx = ch as usize;
+            let unit_start = cortex_m::peripheral::DWT::cycle_count();
+            let outcome = if unit.class == UnitClass::MaintenanceFinalize {
+                foci_firmware::tmc_control::TmcControlRuntime::advance_homing_state_after_channels(
+                    foci_firmware::tmc_control::TmcControlHomingRefs::new(
+                        &HOMING_STATE,
+                        &HOMING_TRIGGERED,
+                    ),
+                    snapshot,
+                    group_all_ready,
+                );
+                group_all_ready = true;
                 None
+            } else {
+                match device_or_invalid(mux, ch) {
+                    ChannelDevice::Device(device) => {
+                        let mut tmc = tmc_driver(device);
+                        let mut backend =
+                            ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                        let ctx_unit = drive_ctx(
+                            now,
+                            snapshot,
+                            levels[idx],
+                            &tmc_control_config,
+                            &mut *integral_candidate,
+                        );
+                        Some(drivers[idx].drive(unit, &mut backend, ctx_unit).await)
+                    }
+                    ChannelDevice::Invalid => {
+                        shutdown!("Invalid TMC channel");
+                        None
+                    }
+                }
+            };
+            let unit_cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(unit_start);
+            scheduler.record(now_us(), unit_cycles);
+            let Some(outcome) = outcome else {
+                continue;
             };
 
-            #[cfg(feature = "trace")]
-            let mut trace_spi_cycles: u32 = 0;
-
-            for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
-                let Some(device) = ctx.local.tmc_mux.device(channel) else {
-                    ctx.shared.app_state.lock(|state| {
-                        if crate::firmware_ctx::enter_shutdown(state) {
-                            ::ankyra::klipper_shutdown_from!(
-                                &mut crate::_ankyra_config::Sender,
-                                "Invalid TMC channel",
-                                read_tim5(),
-                            );
+            match outcome {
+                UnitOutcome::Idle => {}
+                UnitOutcome::Reschedule { fast_period_us } => {
+                    scheduler.set_fast_period(ch, fast_period_us, now_us());
+                }
+                UnitOutcome::Ready => {
+                    if ch == 0 {
+                        enable_status_exti_ch0();
+                    } else {
+                        enable_status_capture_ch1();
+                    }
+                    scheduler.set_mode(ch, ChannelMode::Ready, now_us());
+                }
+                UnitOutcome::Parked(reason) => {
+                    scheduler.set_mode(ch, ChannelMode::Parked, now_us());
+                    match park_shutdown(ch, reason) {
+                        crate::tmc_control::board::ParkShutdown::SpiFailedAtBoot => {
+                            shutdown!("TMC4671 SPI failed at boot");
                         }
-                    });
-                    continue;
-                };
-                let mut tmc = tmc_driver(device);
-                let poll_channel1_critical = channel == CHANNEL1_STATUS_FALLBACK
-                    && channel_may_be_energized(channel, &runtimes[channel as usize]);
-                if poll_channel1_critical {
-                    match tmc
-                        .read_register(foci_tmc4671::registers::STATUS_FLAGS)
-                        .await
-                    {
-                        Ok(flags) if flags & STATUS_CRITICAL_FAULT_MASK != 0 => {
-                            defmt::error!(
-                                "TMC4671 channel {} critical STATUS fault: {:#010x}",
-                                channel,
-                                flags
-                            );
-                            latch_tmc_fault();
-                            let _ = tmc;
-                            quiesce_and_report_tmc_fault!();
-                            continue 'control_loop;
+                        crate::tmc_control::board::ParkShutdown::ChipIdMismatch => {
+                            shutdown!("TMC4671 chip ID mismatch");
                         }
-                        Ok(_) => {}
-                        Err(_) => {
-                            defmt::error!(
-                                "TMC4671 channel {} critical STATUS fallback read failed",
-                                channel
-                            );
-                            latch_tmc_fault();
-                            let _ = tmc;
-                            quiesce_and_report_tmc_fault!();
-                            continue 'control_loop;
+                        crate::tmc_control::board::ParkShutdown::PiRepresentationFailedAtBoot => {
+                            shutdown!("TMC4671 PI representation failed at boot");
+                        }
+                        crate::tmc_control::board::ParkShutdown::Reason(reason) => {
+                            shutdown_reason!(reason);
                         }
                     }
                 }
-                let runtime = &mut runtimes[channel as usize];
-
-                let refs = TmcControlStateRefs::new(tmc_state(channel), stepper_state(channel));
-                let homing_active = homing != 0;
-                let reset = refs
-                    .tmc
-                    .feedforward_reset
-                    .swap(false, core::sync::atomic::Ordering::Relaxed);
-                let command_velocity_reference =
-                    runtime.command_velocity_reference(refs, homing_active, reset);
-
-                if runtime
-                    .apply_feedforward_tick(
-                        &mut tmc,
-                        refs,
-                        &tmc_control_config,
-                        homing_active,
-                        reset,
-                        slow_control_tick,
-                    )
-                    .await
-                    .is_err()
-                {
-                    defmt::warn!("TMC feedforward tick failed");
-                }
-
-                if !slow_control_tick {
-                    if homing != 0 && runtime.is_motor_enabled() {
-                        all_channels_ready_for_homing_advance = false;
-                    }
-                    continue;
-                }
-
-                runtime
-                    .apply_phase_and_position_tick(
-                        &mut tmc,
-                        refs,
-                        command_velocity_reference,
-                        homing_active,
-                        reset,
-                    )
-                    .await;
-
-                #[cfg(feature = "trace")]
-                {
-                    let trace_tick = runtime.advance_trace_tick();
-                    let inputs =
-                        foci_firmware::trace::sampling::TraceSampleInputs::from_runtime_trace(
-                            runtime.trace_state(),
-                            trace_tick,
-                        );
-                    trace_spi_cycles = trace_spi_cycles.saturating_add(
-                        crate::usb_trace::sample_tick(
-                            &mut tmc,
-                            crate::usb_trace::TraceSampleContext {
-                                channel,
-                                refs,
-                                motor_enabled: runtime.is_motor_enabled(),
-                                step_timing,
-                            },
-                            inputs,
-                        )
-                        .await,
-                    );
-                    if trace_tick.phase_advance_due {
-                        crate::usb_trace::emit_phase_advance(
-                            channel,
-                            trace_tick.phase_advance_counts,
-                            trace_tick.phase_advance_flags,
-                            refs.tmc
-                                .phase_advance_gain_ppm
-                                .load(core::sync::atomic::Ordering::Relaxed),
-                            refs.tmc
-                                .phase_advance_max_counts
-                                .load(core::sync::atomic::Ordering::Relaxed),
-                            refs.tmc
-                                .phase_advance_deadband
-                                .load(core::sync::atomic::Ordering::Relaxed),
-                        );
-                    }
-                    crate::usb_trace::emit_status_frames(
-                        channel,
-                        &mut tmc,
-                        trace_tick.control_tick,
-                        trace_tick.status_detail_due,
-                    )
-                    .await;
-                    if channel == 0 {
-                        trace_metadata_due = trace_tick.metadata_due;
-                    }
-                }
-
-                let homing_result = runtime
-                    .apply_slow_channel_maintenance_tick(
-                        &mut tmc,
-                        refs,
-                        &tmc_control_config,
+                UnitOutcome::Maintenance { homing } => {
+                    group_all_ready &= matches!(
                         homing,
-                    )
-                    .await;
-                match homing_result {
-                    HomingMaintenanceResult::ReadyToAdvance => {}
-                    HomingMaintenanceResult::RetryCurrentState => {
-                        all_channels_ready_for_homing_advance = false;
-                        continue;
-                    }
-                    HomingMaintenanceResult::FailClosed => {
-                        defmt::error!(
-                            "TMC4671 channel {} homing failed closed, disabling motors",
-                            channel
-                        );
-                        refs.tmc
-                            .homing_clamp_active
-                            .store(false, core::sync::atomic::Ordering::Relaxed);
-                        latch_tmc_fault();
-                        let _ = tmc;
-                        quiesce_and_report_tmc_fault!();
-                        continue 'control_loop;
-                    }
-                }
-
-                // TrSync and endstop polling have been replaced by the TIM5 CC2
-                // trigger scheduler. See step_timer_irq CC2 dispatch above.
-
-                let status_idx = channel as usize;
-                status_poll_counters[status_idx] =
-                    status_poll_counters[status_idx].saturating_add(1);
-                let poll_status = if status_poll_counters[status_idx] >= 1000 {
-                    status_poll_counters[status_idx] = 0;
-                    true
-                } else {
-                    false
-                };
-
-                if poll_status
-                    && let Ok(flags) = tmc
-                        .read_register(foci_tmc4671::registers::STATUS_FLAGS)
-                        .await
-                {
-                    // Warning flags: PID output limits (position, velocity, current)
-                    const PID_LIMIT_MASK: u32 = 0x0000_FFFF; // bits 0-15
-                    const PWM_LIMIT_MASK: u32 = (1 << 24) | (1 << 25); // pwm_min, pwm_max
-                    const FAULT_MASK: u32 = STATUS_ADC_I_CLIPPED;
-
-                    if flags & FAULT_MASK != 0 {
-                        defmt::error!("TMC4671 channel {} STATUS fault: {:#010x}", channel, flags);
-                        latch_tmc_fault();
-                        let _ = tmc;
-                        quiesce_and_report_tmc_fault!();
-                        continue 'control_loop;
-                    } else if runtime.is_motor_enabled()
-                        && flags & (PID_LIMIT_MASK | PWM_LIMIT_MASK) != 0
+                        foci_firmware::tmc_control::HomingMaintenanceResult::ReadyToAdvance
+                    );
+                    #[cfg(feature = "trace")]
                     {
-                        defmt::warn!("TMC4671 channel {} STATUS: {:#010x}", channel, flags);
+                        let refs = foci_firmware::tmc_control::TmcControlStateRefs::new(
+                            tmc_state(ch),
+                            stepper_state(ch),
+                        );
+                        let trace_tick = drivers[idx].runtime.advance_trace_tick();
+                        let inputs =
+                            foci_firmware::trace::sampling::TraceSampleInputs::from_runtime_trace(
+                                drivers[idx].runtime.trace_state(),
+                                trace_tick,
+                            );
+                        let step_timing = if ch == 0 {
+                            let snapshot = crate::usb_trace::take_step_timing_snapshot();
+                            if crate::usb_trace::is_configured() {
+                                Some(snapshot)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        if let ChannelDevice::Device(device) = device_or_invalid(mux, ch) {
+                            let mut tmc = tmc_driver(device);
+                            crate::usb_trace::record_spi_sample_cycles(
+                                crate::usb_trace::sample_tick(
+                                    &mut tmc,
+                                    crate::usb_trace::TraceSampleContext {
+                                        channel: ch,
+                                        refs,
+                                        motor_enabled: drivers[idx].runtime.is_motor_enabled(),
+                                        step_timing,
+                                    },
+                                    inputs,
+                                )
+                                .await,
+                            );
+                            if trace_tick.phase_advance_due {
+                                crate::usb_trace::emit_phase_advance(
+                                    ch,
+                                    trace_tick.phase_advance_counts,
+                                    trace_tick.phase_advance_flags,
+                                    refs.tmc.phase_advance_gain_ppm.load(Relaxed),
+                                    refs.tmc.phase_advance_max_counts.load(Relaxed),
+                                    refs.tmc.phase_advance_deadband.load(Relaxed),
+                                );
+                            }
+                            crate::usb_trace::emit_status_frames(
+                                ch,
+                                &mut tmc,
+                                trace_tick.control_tick,
+                                trace_tick.status_detail_due,
+                            )
+                            .await;
+                            crate::usb_trace::request_spi_duration_event_if_ready();
+                            if trace_tick.metadata_due {
+                                crate::usb_trace::emit_metadata();
+                            }
+                        }
                     }
                 }
-            }
-
-            #[cfg(feature = "trace")]
-            if trace_spi_cycles != 0 {
-                crate::usb_trace::record_spi_sample_cycles(trace_spi_cycles);
-            }
-
-            #[cfg(feature = "trace")]
-            if slow_control_tick {
-                crate::usb_trace::request_spi_duration_event_if_ready();
-                if trace_metadata_due {
-                    crate::usb_trace::emit_metadata();
+                UnitOutcome::Audit(result) => {
+                    match result {
+                        AuditResult::Clean | AuditResult::Warning { .. } => {}
+                        AuditResult::Critical { .. }
+                        | AuditResult::PinMismatch { .. }
+                        | AuditResult::ReadFailed => {
+                            FAULT_ACTIVE.store(true, Relaxed);
+                            TMC_DISABLE_SIGNAL.signal(());
+                        }
+                    }
+                    if ch == 0 {
+                        let f0 = scheduler.fast_stats(0);
+                        let f1 = scheduler.fast_stats(1);
+                        let c0 = scheduler.commission_stats(0);
+                        let c1 = scheduler.commission_stats(1);
+                        let m = scheduler.maintenance_stats();
+                        let a = scheduler.audit_stats();
+                        defmt::info!(
+                            "sched fast0 req={} svc={} miss={} late={}us cyc={} | fast1 req={} svc={} miss={} late={}us cyc={} | comm0 svc={} late={}us | comm1 svc={} late={}us | maint svc={} miss={} late={}us | audit svc={} miss={}",
+                            f0.requested,
+                            f0.serviced,
+                            f0.missed,
+                            f0.max_lateness_us,
+                            f0.max_unit_cycles,
+                            f1.requested,
+                            f1.serviced,
+                            f1.missed,
+                            f1.max_lateness_us,
+                            f1.max_unit_cycles,
+                            c0.serviced,
+                            c0.max_lateness_us,
+                            c1.serviced,
+                            c1.max_lateness_us,
+                            m.serviced,
+                            m.missed,
+                            m.max_lateness_us,
+                            a.serviced,
+                            a.missed,
+                        );
+                    }
+                }
+                UnitOutcome::Commission { event, next } => {
+                    if let Some(event) = event {
+                        match event {
+                            foci_firmware::commissioning::schedule::CommissionEvent::PhaseChanged {
+                                oid,
+                                phase_id,
+                                ..
+                            } => emit_phase_reply(oid, phase_id),
+                            foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegral {
+                                oid,
+                                event,
+                            } => crate::ankyra::replies::emit_velocity_integral_event(oid, event),
+                            foci_firmware::commissioning::schedule::CommissionEvent::BreakawayCampaign {
+                                oid,
+                                event,
+                            } => crate::ankyra::replies::emit_breakaway_campaign_event(oid, event),
+                            foci_firmware::commissioning::schedule::CommissionEvent::VelocityIntegralPlan {
+                                oid,
+                                run_sequence,
+                                plan,
+                            } => crate::ankyra::replies::emit_velocity_integral_plan(
+                                oid,
+                                run_sequence,
+                                plan,
+                            ),
+                        }
+                    }
+                    #[cfg(feature = "trace")]
+                    if let Some((engine_kind, phase_id)) = drivers[idx].commission_trace_phase
+                        && foci_firmware::trace::commissioning::commission_trace_phase_samples_closed_loop_activation(
+                            engine_kind,
+                            phase_id,
+                        )
+                    {
+                        let trace_tick = drivers[idx].runtime.advance_trace_sample_tick();
+                        let refs = foci_firmware::tmc_control::TmcControlStateRefs::new(tmc_state(ch), stepper_state(ch));
+                        let motor_enabled = drivers[idx].runtime.is_motor_enabled();
+                        let step_timing = crate::usb_trace::take_step_timing_snapshot();
+                        let step_timing = if crate::usb_trace::is_configured() {
+                            Some(step_timing)
+                        } else {
+                            None
+                        };
+                        match device_or_invalid(mux, ch) {
+                            ChannelDevice::Device(device) => {
+                                let mut tmc = tmc_driver(device);
+                                crate::usb_trace::sample_commission_closed_loop_activation(
+                                    &mut tmc,
+                                    crate::usb_trace::TraceSampleContext {
+                                        channel: ch,
+                                        refs,
+                                        motor_enabled,
+                                        step_timing,
+                                    },
+                                    trace_tick,
+                                    || {
+                                        engine_tick_deadline
+                                            .checked_duration_since(Mono::now())
+                                            .map(|d| d.to_micros())
+                                            .unwrap_or(0)
+                                    },
+                                    || Mono::now() > engine_tick_deadline,
+                                )
+                                .await;
+                            }
+                            ChannelDevice::Invalid => {
+                                shutdown!("Invalid TMC channel");
+                                continue 'control_loop;
+                            }
+                        }
+                    }
+                    match next {
+                        CommissionNext::PollNow => scheduler.set_commission_due(ch, Some(now_us())),
+                        CommissionNext::WaitUntil(deadline_us) => {
+                            scheduler.set_commission_due(ch, Some(deadline_us))
+                        }
+                        CommissionNext::Yield => {
+                            scheduler.note_commission_yield(ch);
+                            scheduler.set_commission_due(ch, Some(now_us()));
+                        }
+                    }
+                    scheduler.set_mode(ch, drivers[idx].mode(), now_us());
+                }
+                UnitOutcome::CommissionTerminal { reply, actions } => {
+                    {
+                        let mut state = drivers[idx]
+                            .runtime
+                            .dispatch_state(tmc_state(ch), stepper_state(ch));
+                        apply_stepper_post_action(actions.stepper, &mut state, ch);
+                    }
+                    foci_firmware::diagnostic::mark_p1_reply_construction_start();
+                    emit_terminal_reply(reply);
+                    foci_firmware::diagnostic::mark_p1_reply_construction_end();
+                    defmt::info!(
+                        "channel {} commissioning terminal max tick cycles: {}",
+                        ch,
+                        scheduler.commission_stats(ch).max_unit_cycles
+                    );
+                    scheduler.set_commission_due(ch, None);
+                    scheduler.set_mode(ch, drivers[idx].mode(), now_us());
                 }
             }
-
-            // Suppressing: advance to RestorePending once a trigger has fired
-            // via the HOMING_TRIGGERED sentinel (set by TriggerDomain on first
-            // trigger, 0xFF = no trigger pending). P1 never enters
-            // TriggerDomain per spec. If host's trsync_trigger runs before P1
-            // polls, trsync_trigger advances HOMING_STATE 2->3 directly.
-            TmcControlRuntime::advance_homing_state_after_channels(
-                TmcControlHomingRefs::new(&HOMING_STATE, &HOMING_TRIGGERED),
-                homing,
-                all_channels_ready_for_homing_advance,
-            );
         }
     }
-
     #[inline]
     fn step_clock_is_due(clock: u32, now: u32) -> bool {
         (clock as i32).wrapping_sub(now as i32) <= 0

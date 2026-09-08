@@ -71,6 +71,13 @@ pub(crate) enum CommissionWaitExit {
 }
 
 /// Decision made before the optional channel-1 critical-STATUS fallback.
+///
+/// The fallback this precheck used to gate was removed when the control
+/// loop moved to the shared `ChannelScheduler`/`ChannelDriver` shape, which
+/// polls both STATUS levels unconditionally at the top of every iteration
+/// instead. Kept for the containment classification it still documents and
+/// tests exercise.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommissionWaitPrecheck {
     /// Return to the outer containment path without performing fallback SPI.
@@ -107,6 +114,7 @@ pub(crate) const fn classify_commission_wait_exit(
 /// A clock-sync expiry is decided here too, before any SPI -- same
 /// motivation as the existing fault/shutdown/queue-flush prechecks: skip
 /// the channel-1 poll when a cheap flag already says to exit.
+#[allow(dead_code)]
 pub(crate) const fn classify_commission_wait_precheck(
     shutdown: bool,
     queue_flush: bool,

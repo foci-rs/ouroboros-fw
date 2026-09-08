@@ -55,6 +55,8 @@ mod commissioning_board_contract_tests {
     const SHARED_FOCI_HANDLERS: &str =
         include_str!("../../../../shared/foci-firmware/src/ankyra/handlers/foci.rs");
     const USB_TRACE: &str = include_str!("../../src/usb_trace.rs");
+    const DRIVER: &str = include_str!("../../../../shared/foci-firmware/src/tmc_control/driver.rs");
+    const BOARD: &str = include_str!("../../src/tmc_control/board.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -134,21 +136,26 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn startup_establishes_pi_representation_per_channel_before_adc_vm_capture() {
-        let chip_identity = MAIN
+        let chip_identity = DRIVER
             .find("CHIPINFO_SI_TYPE")
             .expect("startup must verify each TMC4671 identity");
-        let representation = MAIN
+        let representation = DRIVER
             .find("bootstrap_pi_representation")
             .expect("startup must establish the fixed PI representation");
-        let adc_vm = MAIN
+        let adc_vm = DRIVER
             .find("capture_adc_vm_offset")
             .expect("startup must retain per-channel ADC-VM capture");
 
         assert!(chip_identity < representation);
         assert!(representation < adc_vm);
-        assert_eq!(MAIN.matches("bootstrap_pi_representation").count(), 1);
+        assert_eq!(DRIVER.matches("bootstrap_pi_representation").count(), 1);
         assert!(MAIN.contains("TMC4671 PI representation failed at boot"));
-        assert!(!MAIN.contains("0x15"));
+        assert!(!DRIVER.contains("0x15"));
+        assert!(!MAIN.contains("bootstrap_pi_representation"));
+        assert!(
+            !MAIN.contains("for channel in 0..crate::board_config::TMC_CHANNEL_COUNT"),
+            "no channel loops in the task"
+        );
     }
 
     #[test]
@@ -179,7 +186,7 @@ mod commissioning_board_contract_tests {
             MAIN.matches("integral_candidate.observe_fault()").count(),
             2
         );
-        assert!(MAIN.contains("CommissionRetention::new"));
+        assert!(BOARD.contains("CommissionRetention::new"));
         assert!(REQUEST.contains("handle_tmc_control_request_with_stages"));
         assert!(REQUEST.contains("integral_candidate"));
         assert!(!MAIN.contains("[IntegralRetentionSlot"));
@@ -195,16 +202,16 @@ mod commissioning_board_contract_tests {
             !MAIN.contains("drive_commissioning_poll_with_stages"),
             "the board must not await the whole terminal chain in one future"
         );
-        assert!(MAIN.contains("begin_commissioning_poll_with_stages"));
-        assert!(MAIN.contains("poll_commissioning_terminal"));
-        assert!(MAIN.contains("is_restore_pending"));
+        assert!(DRIVER.contains(".classify_commission_poll(poll)"));
+        assert!(DRIVER.contains("poll_commissioning_terminal"));
+        assert!(DRIVER.contains("is_restore_pending"));
         assert!(
             MAIN.contains("restore_cancel_pending") && MAIN.contains("drive_restore_cancel"),
             "the loop must drain a latched restore cancel"
         );
         assert_eq!(
             MAIN.matches("request_restore_cancel").count(),
-            10,
+            3,
             "every commissioning-loop exit must latch a restore cancel"
         );
     }
@@ -557,7 +564,7 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn sampler_budget_is_recorded_once_per_control_iteration() {
+    fn sampler_budget_is_recorded_once_per_channel_maintenance_unit() {
         let body = USB_TRACE
             .split("pub(crate) async fn sample_tick")
             .nth(1)
@@ -573,26 +580,82 @@ mod commissioning_board_contract_tests {
             USB_TRACE.contains("record_spi_sample_cycles(sample_tick(tmc, context, inputs).await)")
         );
 
-        // Exactly one recording site in the control loop, placed after the
-        // channel loop that accumulates both channels' cycles.
+        // Exactly one recording site: the driven unit's own Maintenance
+        // outcome, one channel at a time -- no channel loop accumulates
+        // cycles across both channels any more.
         assert_eq!(MAIN.matches("record_spi_sample_cycles(").count(), 1);
-        let add = MAIN
-            .find("trace_spi_cycles.saturating_add(")
-            .expect("accumulation present");
-        let loop_start = MAIN[..add]
-            .rfind("for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {")
-            .expect("accumulation sits inside the channel loop");
-        let loop_end =
-            find_matching_close_brace(MAIN, MAIN[loop_start..].find('{').unwrap() + loop_start);
-        let record = MAIN
-            .find("record_spi_sample_cycles(trace_spi_cycles)")
-            .expect("recording present");
+        assert!(!MAIN.contains("trace_spi_cycles.saturating_add("));
+        assert!(!MAIN.contains("for channel in 0..crate::board_config::TMC_CHANNEL_COUNT"));
+    }
+
+    #[test]
+    fn control_loop_drives_one_unit_per_iteration_and_never_loops_over_channels() {
+        let task_start = MAIN
+            .find("async fn tmc_control(")
+            .expect("tmc_control task");
+        let task_end = MAIN[task_start..]
+            .find("#[task(")
+            .map_or(MAIN.len(), |o| task_start + o);
+        let body = &MAIN[task_start..task_end];
         assert!(
-            loop_start < add && add < loop_end,
-            "accumulation must be inside the channel loop"
+            !body.contains("for channel in"),
+            "no channel loops inside the future"
         );
-        assert!(record > loop_end, "recording must follow the channel loop");
-        assert!(MAIN[loop_end..record].matches("for channel in").count() == 0);
+        assert!(
+            !body.contains("'commission_poll"),
+            "the commission poll loop is gone"
+        );
+        assert_eq!(
+            body.matches(".drive(").count(),
+            1,
+            "exactly one drive await site"
+        );
+        assert_eq!(body.matches("scheduler.pick(").count(), 1);
+        assert_eq!(
+            body.matches("scheduler.record(").count(),
+            1,
+            "finalize and drive share one record site"
+        );
+        assert!(body.contains("select(rx.recv(), control_sleep)"));
+        assert!(body.contains("status_pin_asserted"));
+        assert!(!body.contains("CHANNEL1_STATUS_FALLBACK"));
+        assert!(!body.contains("poll_channel1_critical_status"));
+    }
+
+    #[test]
+    fn fault_active_is_cleared_only_after_the_interlock_recheck() {
+        let task_start = MAIN
+            .find("async fn tmc_control(")
+            .expect("tmc_control task");
+        let body = &MAIN[task_start..];
+        assert_eq!(
+            body.matches("FAULT_ACTIVE.store(false").count(),
+            1,
+            "one emergency-disable clear shared by the fault and deadline-miss paths"
+        );
+        let clear = body
+            .find("FAULT_ACTIVE.store(false")
+            .expect("the emergency-disable clear");
+        // Wide enough to span the whole containment block from lowering
+        // every enable pin down to the clear, with margin.
+        let window = &body[clear.saturating_sub(2_200)..clear];
+        assert!(
+            window.contains("status_levels("),
+            "the clear follows a fresh pin poll"
+        );
+        assert!(
+            window.contains("TMC_DISABLE_SIGNAL.signaled()"),
+            "the clear follows a pending-signal check"
+        );
+        assert!(
+            window.contains("lower_all_enable_pins(") || window.contains("quiesce_all_channels("),
+            "the clear follows lowering every enable pin"
+        );
+        assert!(
+            window.contains("record_stepper_event("),
+            "the clear follows the STATUS diagnostic"
+        );
+        assert!(!MAIN.contains("status_poll_counters"));
     }
 
     #[test]

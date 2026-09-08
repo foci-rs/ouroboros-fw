@@ -11,10 +11,8 @@ use foci_firmware::tmc_control::{
 
 use crate::helpers::lifecycle::read_tim5;
 use crate::helpers::stepper::stepper_stop_from_p1;
-pub(crate) use crate::tmc_control::containment::{
-    CommissionWaitExit, CommissionWaitPrecheck, classify_commission_wait_exit,
-    classify_commission_wait_precheck,
-};
+#[cfg(test)]
+use crate::tmc_control::containment::{CommissionWaitExit, classify_commission_wait_exit};
 
 /// Ownership route for a disable request received during a commissioning wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

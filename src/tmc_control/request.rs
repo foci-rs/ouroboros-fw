@@ -13,7 +13,7 @@ use foci_firmware::tmc_control::request::{
     MotionScaleMapperInstallError, TmcPreRequestDisposition, TmcRequestBoard,
 };
 use foci_firmware::tmc_control::{
-    BoardActions, TmcControlRequestOutcome, TmcControlRequestTail, TmcControlRuntime,
+    BoardActions, ChannelDriver, TmcControlRequestOutcome, TmcControlRequestTail, TmcControlRuntime,
 };
 use foci_tmc4671::spi::Tmc4671Spi;
 
@@ -27,8 +27,7 @@ use crate::state::stepper::{
     reset_mapper_observables,
 };
 use crate::tmc_control::board::{
-    TmcEnablePins, TmcRuntimes, enable_pin, next_commission_trace_seq, ouroboros_backend,
-    stepper_state, tmc_state,
+    TmcEnablePins, enable_pin, ouroboros_backend, stepper_state, tmc_state,
 };
 use crate::tmc_dispatch::handle_tmc_request;
 use crate::trigger_domain::with_trigger_domain;
@@ -37,7 +36,7 @@ struct OuroborosRequestBoard<'a> {
     channel: u8,
     commissioning_blocked: bool,
     enable_pins: &'a mut TmcEnablePins,
-    commission_trace_engine_seq: &'a mut [u32; TMC_CHANNEL_COUNT as usize],
+    commission_trace_engine_seq: &'a mut u32,
 }
 
 impl<'a> OuroborosRequestBoard<'a> {
@@ -45,7 +44,7 @@ impl<'a> OuroborosRequestBoard<'a> {
         channel: u8,
         commissioning_blocked: bool,
         enable_pins: &'a mut TmcEnablePins,
-        commission_trace_engine_seq: &'a mut [u32; TMC_CHANNEL_COUNT as usize],
+        commission_trace_engine_seq: &'a mut u32,
     ) -> Self {
         Self {
             channel,
@@ -74,7 +73,9 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
     }
 
     fn next_commission_trace_seq(&mut self) -> u32 {
-        next_commission_trace_seq(self.commission_trace_engine_seq, self.channel)
+        let seq = *self.commission_trace_engine_seq;
+        *self.commission_trace_engine_seq = seq.wrapping_add(1);
+        seq
     }
 
     fn normal_tail(&self) -> TmcControlRequestTail {
@@ -229,10 +230,9 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
 pub(crate) struct TmcControlRequestContext<'a, 'spi> {
     pub(crate) channel: u8,
     pub(crate) commissioning_blocked: bool,
-    pub(crate) runtimes: &'a mut TmcRuntimes,
+    pub(crate) drivers: &'a mut [ChannelDriver; TMC_CHANNEL_COUNT as usize],
     pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     pub(crate) enable_pins: &'a mut TmcEnablePins,
-    pub(crate) commission_trace_engine_seq: &'a mut [u32; TMC_CHANNEL_COUNT as usize],
     pub(crate) integral_candidate: &'a mut foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot,
 }
 
@@ -244,24 +244,23 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
     let TmcControlRequestContext {
         channel,
         commissioning_blocked,
-        runtimes,
+        drivers,
         tmc,
         enable_pins,
-        commission_trace_engine_seq,
         integral_candidate,
     } = context;
-    let runtime = &mut runtimes[channel as usize];
+    let driver = &mut drivers[channel as usize];
 
     let mut board = OuroborosRequestBoard::new(
         channel,
         commissioning_blocked,
         enable_pins,
-        commission_trace_engine_seq,
+        &mut driver.commission_trace_engine_seq,
     );
     handle_tmc_control_request_with_stages(
         req,
         disposition,
-        runtime,
+        &mut driver.runtime,
         integral_candidate,
         tmc,
         &mut board,
