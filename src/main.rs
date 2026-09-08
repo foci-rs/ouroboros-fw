@@ -651,6 +651,14 @@ mod app {
                         status_flags.unwrap_or(0),
                         0,
                     );
+                    #[cfg(feature = "trace")]
+                    crate::usb_trace::request_event(
+                        foci_firmware::trace::events::EVENT_LEVEL_ERROR,
+                        foci_firmware::trace::events::SUBSYSTEM_SAFETY_SHUTDOWN,
+                        crate::usb_trace::EVENT_STATUS_INTERRUPT,
+                        [i32::from(ch), status_flags.unwrap_or(0) as i32, 0, 0],
+                        2,
+                    );
                     match status_flags {
                         Ok(flags) => defmt::error!(
                             "TMC4671 channel {} emergency disable: STATUS={:#010x}",

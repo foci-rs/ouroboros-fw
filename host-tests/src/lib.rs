@@ -285,6 +285,24 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_emits_the_shared_lifecycle_event_stream() {
+        for declaration in [
+            "pub(crate) const EVENT_FIRMWARE_BOOT: u16 = 1;",
+            "pub(crate) const EVENT_USB_CONFIGURED: u16 = 2;",
+            "pub(crate) const EVENT_MOTOR_ARM: u16 = 3;",
+            "pub(crate) const EVENT_MOTOR_DISARM: u16 = 4;",
+            "pub(crate) const EVENT_STATUS_INTERRUPT: u16 = 9;",
+        ] {
+            assert!(USB_TRACE.contains(declaration), "missing {declaration}");
+        }
+        assert!(USB_TRACE.contains("EVENT_FIRMWARE_BOOT"));
+        assert!(USB_TRACE.contains("EVENT_USB_CONFIGURED"));
+        assert!(REQUEST.contains("usb_trace::EVENT_MOTOR_ARM"));
+        assert!(REQUEST.contains("usb_trace::EVENT_MOTOR_DISARM"));
+        assert!(MAIN.contains("crate::usb_trace::EVENT_STATUS_INTERRUPT"));
+    }
+
+    #[test]
     fn board_wires_the_velocity_limit_latch_test_command_behind_its_feature() {
         assert!(
             PROVIDER.contains(r#"#[cfg(feature = "trace-velocity-limit-latch-test")]"#),
@@ -654,7 +672,7 @@ mod commissioning_board_contract_tests {
             .expect("the emergency-disable clear");
         // Wide enough to span the whole containment block from lowering
         // every enable pin down to the clear, with margin.
-        let window = &body[clear.saturating_sub(2_800)..clear];
+        let window = &body[clear.saturating_sub(3_200)..clear];
         assert!(
             window.contains("status_levels("),
             "the clear follows a fresh pin poll"

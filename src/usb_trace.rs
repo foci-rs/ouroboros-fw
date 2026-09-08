@@ -25,6 +25,14 @@ static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
 /// Enable the lower-rate raw current-path diagnostic frame.
 const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path");
 
+pub(crate) const EVENT_FIRMWARE_BOOT: u16 = 1;
+pub(crate) const EVENT_USB_CONFIGURED: u16 = 2;
+pub(crate) const EVENT_MOTOR_ARM: u16 = 3;
+pub(crate) const EVENT_MOTOR_DISARM: u16 = 4;
+pub(crate) const EVENT_STATUS_INTERRUPT: u16 = 9;
+#[allow(dead_code)]
+pub(crate) const EVENT_SHUTDOWN: u16 = 10;
+
 // OpenFFBoard uses 120_000 cycles at 168 MHz, about 714 us. Scale that
 // wall-time budget to the 520 MHz H723 DWT clock: 120_000 * 520 / 168 =
 // 371_429, rounded up. Do not derive this from CLOCK_FREQ; CLOCK_FREQ is TIM5.
@@ -245,6 +253,20 @@ pub(crate) fn is_configured() -> bool {
 pub(crate) fn note_usb_configured() {
     TRACE_COUNTERS.configured.store(true, Ordering::Relaxed);
     emit_metadata();
+    request_event(
+        foci_firmware::trace::events::EVENT_LEVEL_INFO,
+        foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,
+        EVENT_FIRMWARE_BOOT,
+        [0; 4],
+        0,
+    );
+    request_event(
+        foci_firmware::trace::events::EVENT_LEVEL_INFO,
+        foci_firmware::trace::events::SUBSYSTEM_USB_TRACE,
+        EVENT_USB_CONFIGURED,
+        [0; 4],
+        0,
+    );
 }
 
 fn header_at_timestamp(

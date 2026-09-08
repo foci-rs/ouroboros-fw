@@ -167,6 +167,14 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         foci_firmware::tmc_control::lifecycle::arm_motor_electrical(&mut backend, &mut state)
             .await?;
         apply_stepper_post_action(post_action, &mut state, self.channel);
+        #[cfg(feature = "trace")]
+        crate::usb_trace::request_event(
+            foci_firmware::trace::events::EVENT_LEVEL_INFO,
+            foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,
+            crate::usb_trace::EVENT_MOTOR_ARM,
+            [i32::from(self.channel), 0, 0, 0],
+            1,
+        );
         Ok(())
     }
 
@@ -183,6 +191,14 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         let mut state =
             runtime.dispatch_state(tmc_state(self.channel), stepper_state(self.channel));
         foci_firmware::tmc_control::lifecycle::disarm_motor(&mut backend, &mut state).await;
+        #[cfg(feature = "trace")]
+        crate::usb_trace::request_event(
+            foci_firmware::trace::events::EVENT_LEVEL_INFO,
+            foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,
+            crate::usb_trace::EVENT_MOTOR_DISARM,
+            [i32::from(self.channel), 0, 0, 0],
+            1,
+        );
     }
 
     async fn dispatch_register_request(
