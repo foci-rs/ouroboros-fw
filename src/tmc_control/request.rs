@@ -183,9 +183,6 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         let mut state =
             runtime.dispatch_state(tmc_state(self.channel), stepper_state(self.channel));
         foci_firmware::tmc_control::lifecycle::disarm_motor(&mut backend, &mut state).await;
-        stepper_state(self.channel)
-            .position
-            .store(0, core::sync::atomic::Ordering::Relaxed);
     }
 
     async fn dispatch_register_request(
