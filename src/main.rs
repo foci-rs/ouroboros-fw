@@ -366,8 +366,8 @@ mod app {
     )]
     async fn tmc_control(mut ctx: tmc_control::Context) {
         use crate::tmc_control::board::{
-            ChannelDevice, STATUS_CRITICAL_MASK, device_or_invalid, drive_ctx,
-            enable_status_capture_ch1, enable_status_exti_ch0, park_shutdown, status_levels,
+            ChannelDevice, device_or_invalid, drive_ctx, enable_status_capture_ch1,
+            enable_status_exti_ch0, park_shutdown, status_levels,
         };
         use core::sync::atomic::Ordering::Relaxed;
         use embassy_futures::select::{Either, select};
@@ -628,28 +628,40 @@ mod app {
                 for d in drivers.iter_mut() {
                     d.commission_trace_phase = None;
                 }
-                let mut flags = [0u32; 2];
-                per_channel!(|ch, idx| {
-                    if let ChannelDevice::Device(device) = device_or_invalid(mux, ch) {
-                        let mut tmc = tmc_driver(device);
-                        flags[idx] = tmc
-                            .read_register(foci_tmc4671::registers::STATUS_FLAGS)
-                            .await
-                            .unwrap_or(0);
-                    }
+                let mut fault = foci_firmware::tmc_control::EmergencyDisableFault::Generic;
+                per_channel!(|ch, _idx| {
+                    let status_flags = match device_or_invalid(mux, ch) {
+                        ChannelDevice::Device(device) => {
+                            let mut tmc = tmc_driver(device);
+                            tmc.read_register_retried(foci_tmc4671::registers::STATUS_FLAGS)
+                                .await
+                                .map_err(|_| ())
+                        }
+                        ChannelDevice::Invalid => Err(()),
+                    };
+                    fault = foci_firmware::tmc_control::combine_emergency_disable_fault(
+                        fault,
+                        foci_firmware::tmc_control::classify_emergency_disable_fault(status_flags),
+                    );
                     record_stepper_event(
                         StepperEventReason::TmcDisableSignal,
                         ch,
                         read_tim5(),
                         UNKNOWN_QUEUE_LEN,
-                        flags[idx],
+                        status_flags.unwrap_or(0),
                         0,
                     );
-                    defmt::error!(
-                        "TMC4671 channel {} emergency disable: STATUS={:#010x}",
-                        ch,
-                        flags[idx]
-                    );
+                    match status_flags {
+                        Ok(flags) => defmt::error!(
+                            "TMC4671 channel {} emergency disable: STATUS={:#010x}",
+                            ch,
+                            flags
+                        ),
+                        Err(_) => defmt::error!(
+                            "TMC4671 channel {} emergency disable: STATUS read failed",
+                            ch
+                        ),
+                    }
                 });
 
                 // No await between this re-poll and the store below: a fault
@@ -667,10 +679,18 @@ mod app {
 
                 if deadline_channel != NO_STEPPER_CHANNEL {
                     shutdown_reason!(foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast);
-                } else if (flags[0] | flags[1]) & STATUS_CRITICAL_MASK != 0 {
-                    shutdown!("TMC4671: ADC current clipped (overcurrent)");
                 } else {
-                    shutdown!("TMC4671 fault");
+                    match fault {
+                        foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped => {
+                            shutdown!("TMC4671: ADC current clipped (overcurrent)");
+                        }
+                        foci_firmware::tmc_control::EmergencyDisableFault::StatusReadFailed => {
+                            shutdown!("TMC4671: STATUS_FLAGS read failed");
+                        }
+                        foci_firmware::tmc_control::EmergencyDisableFault::Generic => {
+                            shutdown!("TMC4671 fault");
+                        }
+                    }
                 }
                 continue;
             }

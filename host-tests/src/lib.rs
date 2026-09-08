@@ -638,7 +638,7 @@ mod commissioning_board_contract_tests {
             .expect("the emergency-disable clear");
         // Wide enough to span the whole containment block from lowering
         // every enable pin down to the clear, with margin.
-        let window = &body[clear.saturating_sub(2_200)..clear];
+        let window = &body[clear.saturating_sub(2_800)..clear];
         assert!(
             window.contains("status_levels("),
             "the clear follows a fresh pin poll"
