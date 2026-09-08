@@ -13,6 +13,50 @@
 //!   `RESERVE_PINS_*` family describing which physical pins are
 //!   unavailable to printer.cfg.
 
+#[cfg(feature = "trace-velocity-limit-latch-test")]
+ankyra::ankyra_provider! {
+    name: BOARD_PROVIDER,
+    commands: [
+        crate::ankyra::handlers::foci::foci_stepper_exec_stats,
+        crate::ankyra::handlers::foci::foci_stepper_perf_stats,
+        crate::ankyra::handlers::foci::foci_stepper_stats,
+        crate::ankyra::handlers::foci::foci_stepper_stop_stats,
+        crate::ankyra::handlers::foci::foci_stepper_timing_stats,
+        crate::ankyra::handlers::foci::foci_tune,
+        crate::ankyra::handlers::foci::tmc_velocity_limit_latch_test,
+    ],
+    replies: [],
+    outputs: [],
+    enumerations: [
+        crate::ankyra::enumerations::Pins,
+    ],
+    constants: [
+        crate::ankyra::constants::CLOCK_FREQ,
+        crate::ankyra::constants::ENVELOPE_ABSOLUTE_MARGIN_MREV_S,
+        crate::ankyra::constants::ENVELOPE_PROPORTIONAL_DEN,
+        crate::ankyra::constants::ENVELOPE_PROPORTIONAL_NUM,
+        crate::ankyra::constants::FOCI_VM_ADC_CENTER_COUNTS,
+        crate::ankyra::constants::FOCI_VM_ADC_REFERENCE_MILLIVOLTS,
+        crate::ankyra::constants::FOCI_VM_DIVIDER_HIGH_OHMS,
+        crate::ankyra::constants::FOCI_VM_DIVIDER_LOW_OHMS,
+        crate::ankyra::constants::MCU,
+        crate::ankyra::constants::RESERVE_PINS_DRV,
+        crate::ankyra::constants::RESERVE_PINS_LED,
+        crate::ankyra::constants::RESERVE_PINS_SPI,
+        crate::ankyra::constants::RESERVE_PINS_STEP,
+        crate::ankyra::constants::RESERVE_PINS_SWD,
+        crate::ankyra::constants::RESERVE_PINS_TMC,
+        crate::ankyra::constants::RESERVE_PINS_USB,
+        crate::ankyra::constants::PROPORTIONAL_EVIDENCE_SCHEMA_REVISION,
+        crate::ankyra::constants::INTEGRAL_EVIDENCE_SCHEMA_REVISION,
+        crate::ankyra::constants::INTEGRAL_MAX_POSITIVE_RUNGS,
+        crate::ankyra::constants::INTEGRAL_OBSERVATIONS_PER_DIRECTION,
+        crate::ankyra::constants::INTEGRAL_OBSERVATIONS_PER_RUNG,
+        crate::ankyra::constants::VELOCITY_LIMIT_EVIDENCE_CAPABILITY,
+    ],
+}
+
+#[cfg(not(feature = "trace-velocity-limit-latch-test"))]
 ankyra::ankyra_provider! {
     name: BOARD_PROVIDER,
     commands: [

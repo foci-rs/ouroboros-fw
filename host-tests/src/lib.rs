@@ -285,6 +285,22 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_wires_the_velocity_limit_latch_test_command_behind_its_feature() {
+        assert!(
+            PROVIDER.contains(r#"#[cfg(feature = "trace-velocity-limit-latch-test")]"#),
+            "provider has no trace-velocity-limit-latch-test-gated block"
+        );
+        assert!(
+            PROVIDER.contains(r#"#[cfg(not(feature = "trace-velocity-limit-latch-test"))]"#),
+            "provider has no fallback block for when the feature is disabled"
+        );
+        assert!(
+            PROVIDER.contains("crate::ankyra::handlers::foci::tmc_velocity_limit_latch_test"),
+            "provider never lists the tmc_velocity_limit_latch_test command"
+        );
+    }
+
+    #[test]
     fn board_publishes_the_integral_schema_and_geometry_constants() {
         for declaration in [
             "pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;",

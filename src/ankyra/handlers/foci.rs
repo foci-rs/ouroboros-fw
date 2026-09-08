@@ -18,6 +18,8 @@ pub use foci_firmware::ankyra::handlers::foci::*;
 use core::sync::atomic::Ordering::Relaxed;
 
 use ankyra::prelude::klipper_command;
+#[cfg(feature = "trace-velocity-limit-latch-test")]
+use foci_firmware::context::TmcHost;
 use foci_firmware::context::{ClockSource, ShutdownRecovery, StateAccess};
 use foci_firmware::diagnostic::{MotionScaleDiagnosticSnapshot, StepperExecutionSnapshot};
 use foci_firmware::shutdown::ShutdownReason;
@@ -85,6 +87,36 @@ pub fn foci_tune(
         positive_position_headroom_mrev,
         max_duration_ms,
     });
+}
+
+/// Run the trace-only focused velocity-output-limit persistence diagnostic.
+#[cfg(feature = "trace-velocity-limit-latch-test")]
+#[klipper_command]
+pub fn tmc_velocity_limit_latch_test(ctx: &mut FirmwareCtx<'_>, oid: u8, channel: u8) {
+    let Some(configured_channel) = ctx.state().stepper_channel(oid) else {
+        if ctx.enter_shutdown() {
+            let clock = ctx.now();
+            ctx.send_shutdown(ShutdownReason::InvalidTmcChannel, clock);
+        }
+        return;
+    };
+    if configured_channel != channel {
+        if ctx.enter_shutdown() {
+            let clock = ctx.now();
+            ctx.send_shutdown(ShutdownReason::TmcRequestValidationFailed, clock);
+        }
+        return;
+    }
+    if ctx
+        .enqueue_request(foci_firmware::tmc::tmc_velocity_limit_latch_test(
+            channel, oid,
+        ))
+        .is_err()
+        && ctx.enter_shutdown()
+    {
+        let clock = ctx.now();
+        ctx.send_shutdown(ShutdownReason::TmcDiagnosticLostQueueFull, clock);
+    }
 }
 
 fn stepper_execution_snapshot(

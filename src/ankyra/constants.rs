@@ -54,6 +54,9 @@ const _: () = assert!(
             as u32
 );
 
+/// BEST_EFFORT until `tmc_velocity_limit_latch_test` confirms the latch
+/// survives this board's SPI-mux/dual-channel signal path; promote to
+/// OpenFFBoard's LATCHED value only after that confirmation.
 #[klipper_constant]
 pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 0;
 const _: () = assert!(
