@@ -61,6 +61,31 @@ mod commissioning_board_contract_tests {
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
 
+    fn extract_fn<'a>(text: &'a str, name: &str) -> &'a str {
+        let marker = std::format!("fn {name}");
+        let start = text
+            .find(&marker)
+            .unwrap_or_else(|| panic!("missing fn {name}"));
+        let brace_start = text[start..]
+            .find('{')
+            .map(|offset| start + offset)
+            .expect("unterminated function signature");
+        let mut depth = 0usize;
+        for (offset, ch) in text[brace_start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &text[start..brace_start + offset + 1];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unterminated fn {name}");
+    }
+
     fn assert_reply_contract(method: &str, reply: &str, fields: &[&str]) {
         let start = REPLIES
             .find(method)
@@ -295,10 +320,15 @@ mod commissioning_board_contract_tests {
         ] {
             assert!(USB_TRACE.contains(declaration), "missing {declaration}");
         }
-        assert!(USB_TRACE.contains("EVENT_FIRMWARE_BOOT"));
-        assert!(USB_TRACE.contains("EVENT_USB_CONFIGURED"));
-        assert!(REQUEST.contains("usb_trace::EVENT_MOTOR_ARM"));
-        assert!(REQUEST.contains("usb_trace::EVENT_MOTOR_DISARM"));
+        let note_usb_configured = extract_fn(USB_TRACE, "note_usb_configured");
+        assert!(note_usb_configured.contains("EVENT_FIRMWARE_BOOT"));
+        assert!(note_usb_configured.contains("EVENT_USB_CONFIGURED"));
+
+        let arm_motor = extract_fn(REQUEST, "arm_motor");
+        assert!(arm_motor.contains("usb_trace::EVENT_MOTOR_ARM"));
+        let disarm_motor = extract_fn(REQUEST, "disarm_motor");
+        assert!(disarm_motor.contains("usb_trace::EVENT_MOTOR_DISARM"));
+
         assert!(MAIN.contains("crate::usb_trace::EVENT_STATUS_INTERRUPT"));
     }
 
