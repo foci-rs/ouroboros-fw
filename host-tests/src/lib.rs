@@ -331,15 +331,37 @@ mod commissioning_board_contract_tests {
             USB_TRACE.contains("fn set_trace_serial"),
             "missing set_trace_serial"
         );
-        assert!(USB_TRACE.contains("fn trace_serial"), "missing trace_serial");
+        assert!(
+            USB_TRACE.contains("fn trace_serial"),
+            "missing trace_serial"
+        );
         assert!(MAIN.contains("usb_trace::set_trace_serial("));
 
+        for declaration in [
+            "const CRITICAL_HZ: u32 = 1000;",
+            "const CONTROL_DETAIL_HZ: u32 = 500;",
+            "const STATUS_HZ: u32 = 10;",
+        ] {
+            assert!(USB_TRACE.contains(declaration), "missing {declaration}");
+        }
+
         let emit_metadata = extract_fn(USB_TRACE, "emit_metadata");
-        assert!(!emit_metadata.contains("skipped_sample_counter_count: 0"));
-        assert!(!emit_metadata.contains("critical_hz: 0"));
-        assert!(!emit_metadata.contains("control_detail_hz: 0"));
-        assert!(!emit_metadata.contains("status_hz: 0"));
-        assert!(!emit_metadata.contains("pre_configuration_elapsed_ms: 0"));
+        assert!(emit_metadata.contains("skipped_sample_counter_count: 3"));
+        assert!(emit_metadata.contains("critical_hz: CRITICAL_HZ"));
+        assert!(emit_metadata.contains("control_detail_hz: CONTROL_DETAIL_HZ"));
+        assert!(emit_metadata.contains("status_hz: STATUS_HZ"));
+        for field in [
+            "pre_config_elapsed_ms",
+            "pre_config_skipped_critical",
+            "pre_config_skipped_control_detail",
+            "pre_config_skipped_status",
+        ] {
+            assert!(
+                emit_metadata.contains(&std::format!("TRACE_COUNTERS\n            .{field}"))
+                    || emit_metadata.contains(&std::format!("TRACE_COUNTERS.{field}")),
+                "emit_metadata does not read TRACE_COUNTERS.{field}"
+            );
+        }
         assert!(!emit_metadata.contains(r#"serial: "","#));
         assert!(emit_metadata.contains("serial: trace_serial()"));
     }
