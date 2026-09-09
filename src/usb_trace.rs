@@ -158,9 +158,16 @@ pub(crate) struct StepTimingSnapshot {
 pub(crate) static TRACE_TIMING: TraceTiming = TraceTiming::new();
 
 fn compute_boot_id() -> u32 {
+    const UID_BASE: *const u32 = 0x1FF1_E800 as *const u32;
+    // SAFETY: UID registers are always readable at this address on STM32H7.
+    let uid0 = unsafe { core::ptr::read_volatile(UID_BASE) };
+    // SAFETY: UID registers are always readable at this address on STM32H7.
+    let uid1 = unsafe { core::ptr::read_volatile(UID_BASE.add(1)) };
+    // SAFETY: UID registers are always readable at this address on STM32H7.
+    let uid2 = unsafe { core::ptr::read_volatile(UID_BASE.add(2)) };
     let tim5 = crate::helpers::lifecycle::read_tim5();
     let dwt = cortex_m::peripheral::DWT::cycle_count();
-    tim5 ^ dwt
+    uid0 ^ uid1 ^ uid2 ^ tim5 ^ dwt
 }
 
 /// Extend the 32-bit TIM5 Klipper clock into the u64 trace timestamp domain.

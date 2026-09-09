@@ -311,6 +311,18 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_mixes_the_stm32_uid_into_the_trace_boot_id() {
+        let compute_boot_id = extract_fn(USB_TRACE, "compute_boot_id");
+        assert!(
+            compute_boot_id.contains("0x1FF1_E800"),
+            "must read the STM32H7 UID base address"
+        );
+        assert!(compute_boot_id.contains("read_volatile"));
+        assert!(compute_boot_id.contains("tim5"));
+        assert!(compute_boot_id.contains("dwt"));
+    }
+
+    #[test]
     fn board_reports_real_trace_metadata_instead_of_placeholders() {
         for field in [
             "boot_tick_low",
