@@ -239,6 +239,10 @@ pub fn enable_usb_clock() {
     embassy_stm32::pac::RCC
         .ahb1enr()
         .modify(|w| w.set_usb_otg_hsen(true));
+    // The internal FS PHY requires the external ULPI clock disabled during CSleep.
+    embassy_stm32::pac::RCC
+        .ahb1lpenr()
+        .modify(|w| w.set_usb_otg_hs_ulpilpen(false));
     cortex_m::asm::delay(100);
 }
 

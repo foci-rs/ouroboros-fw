@@ -147,6 +147,18 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn internal_usb_phy_remains_usable_during_cpu_sleep() {
+        let usb_clock = extract_fn(BOARD_INIT, "enable_usb_clock");
+        assert!(
+            usb_clock.contains(".ahb1lpenr()")
+                && usb_clock.contains("set_usb_otg_hs_ulpilpen(false)"),
+            "the internal USB PHY requires the external ULPI clock disabled during CPU sleep"
+        );
+        assert!(usb_clock.contains("set_usb_otg_hsen(true)"));
+        assert!(extract_fn(MAIN, "init").contains("board_init::enable_usb_clock();"));
+    }
+
+    #[test]
     fn spi_dma_interrupt_priority_is_explicit_and_below_hard_real_time() {
         assert!(
             BOARD_INIT.contains(
