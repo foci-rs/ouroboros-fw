@@ -109,15 +109,7 @@ pub const RESERVE_PINS_TMC: &str = "PD0,PD1,PD2,PD6,PE2,PA2";
 
 #[allow(dead_code)]
 #[klipper_constant]
-pub const RESERVE_PINS_LED: &str = "";
-
-#[allow(dead_code)]
-#[klipper_constant]
 pub const RESERVE_PINS_SWD: &str = "PA13,PA14";
-
-#[allow(dead_code)]
-#[klipper_constant]
-pub const RESERVE_PINS_DRV: &str = "";
 
 /// STEP/DIR GPIO pins for the two TMC4671 hardware step/dir channels.
 #[allow(dead_code)]

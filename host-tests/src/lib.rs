@@ -430,6 +430,24 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_never_declares_an_empty_reserve_pins_category() {
+        for empty_const in ["RESERVE_PINS_LED", "RESERVE_PINS_DRV"] {
+            assert!(
+                !CONSTANTS.contains(&std::format!("pub const {empty_const}: &str = \"\";")),
+                "{empty_const} is declared with an empty pin list; Klipper's \
+                 mcu_identify reserves the empty string as a real pin, so a \
+                 second empty category collides with the first. Real Klipper \
+                 firmware omits a RESERVE_PINS_* category entirely instead of \
+                 sending an empty one; do the same, or drop the constant."
+            );
+            assert!(
+                !PROVIDER.contains(&std::format!("crate::ankyra::constants::{empty_const},")),
+                "provider still wires {empty_const} into the wire constants list"
+            );
+        }
+    }
+
+    #[test]
     fn board_publishes_the_integral_schema_and_geometry_constants() {
         for declaration in [
             "pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;",
