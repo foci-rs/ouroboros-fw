@@ -286,7 +286,7 @@ mod app {
                 base_addr: 0x4004_0000,
                 irq_num: 77,
                 trdt: 6,
-                vbus_detection: false,
+                vbus_detection: true,
                 double_buffer_tx: true,
                 vid: 0x1D50,
                 pid: 0x614E,
