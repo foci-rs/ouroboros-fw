@@ -448,6 +448,43 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_never_lists_the_same_pin_under_two_reserve_pins_categories() {
+        use std::vec::Vec;
+        let mut categories: Vec<(&str, Vec<&str>)> = Vec::new();
+        for line in CONSTANTS.lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("pub const RESERVE_PINS_") else {
+                continue;
+            };
+            let (name, rest) = rest
+                .split_once(':')
+                .expect("malformed RESERVE_PINS_ declaration");
+            let value = rest
+                .trim()
+                .strip_prefix("&str = \"")
+                .and_then(|s| s.strip_suffix("\";"))
+                .expect("malformed RESERVE_PINS_ declaration");
+            let pins: Vec<&str> = value.split(',').filter(|p| !p.is_empty()).collect();
+            categories.push((name, pins));
+        }
+        assert!(!categories.is_empty(), "no RESERVE_PINS_ constants found");
+        for i in 0..categories.len() {
+            for j in (i + 1)..categories.len() {
+                for pin in &categories[i].1 {
+                    assert!(
+                        !categories[j].1.contains(pin),
+                        "pin {pin} is listed under both RESERVE_PINS_{} and \
+                         RESERVE_PINS_{}; Klipper's mcu_identify rejects reserving \
+                         the same pin under two different owners",
+                        categories[i].0,
+                        categories[j].0
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn board_publishes_the_integral_schema_and_geometry_constants() {
         for declaration in [
             "pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;",
