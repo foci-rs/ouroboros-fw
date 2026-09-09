@@ -2,7 +2,7 @@
 
 #![cfg(feature = "trace")]
 
-use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicU8, AtomicU32, Ordering};
 
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
@@ -32,6 +32,80 @@ pub(crate) const EVENT_MOTOR_DISARM: u16 = 4;
 pub(crate) const EVENT_STATUS_INTERRUPT: u16 = 9;
 #[allow(dead_code)]
 pub(crate) const EVENT_SHUTDOWN: u16 = 10;
+
+const CRITICAL_HZ: u32 = 1000;
+const CONTROL_DETAIL_HZ: u32 = 500;
+const STATUS_HZ: u32 = 10;
+
+static TRACE_SERIAL_LEN: AtomicU8 = AtomicU8::new(0);
+static mut TRACE_SERIAL: [u8; 31] = [0; 31];
+
+/// Cache the USB serial string for metadata frames.
+///
+/// Call once during init before trace producers run. The metadata path reads
+/// the cached bytes without an ownership handoff.
+pub(crate) fn set_trace_serial(serial: &str) {
+    let bytes = serial.as_bytes();
+    let len = bytes.len().min(31);
+    cortex_m::interrupt::free(|_| unsafe {
+        let dst = core::ptr::addr_of_mut!(TRACE_SERIAL).cast::<u8>();
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
+        TRACE_SERIAL_LEN.store(len as u8, Ordering::Relaxed);
+    });
+}
+
+fn trace_serial() -> &'static str {
+    let len = TRACE_SERIAL_LEN.load(Ordering::Relaxed) as usize;
+    cortex_m::interrupt::free(|_| unsafe {
+        let src = core::ptr::addr_of!(TRACE_SERIAL).cast::<u8>();
+        let bytes = core::slice::from_raw_parts(src, len);
+        core::str::from_utf8_unchecked(bytes)
+    })
+}
+
+fn store_split_u64(low: &AtomicU32, high: &AtomicU32, value: u64) {
+    cortex_m::interrupt::free(|_| {
+        low.store(value as u32, Ordering::Relaxed);
+        high.store((value >> 32) as u32, Ordering::Relaxed);
+    });
+}
+
+fn load_split_u64(low: &AtomicU32, high: &AtomicU32) -> u64 {
+    cortex_m::interrupt::free(|_| {
+        u64::from(low.load(Ordering::Relaxed)) | (u64::from(high.load(Ordering::Relaxed)) << 32)
+    })
+}
+
+fn note_trace_usb_configured_time() {
+    let configured = trace_now_ticks();
+    let boot = load_split_u64(
+        &TRACE_COUNTERS.boot_tick_low,
+        &TRACE_COUNTERS.boot_tick_high,
+    );
+    let ticks_per_millisecond = u64::from(crate::ankyra::constants::CLOCK_FREQ / 1000);
+    let elapsed_ticks = configured.saturating_sub(boot);
+    let elapsed_ms = (elapsed_ticks / ticks_per_millisecond).min(u64::from(u32::MAX));
+    store_split_u64(
+        &TRACE_COUNTERS.configured_tick_low,
+        &TRACE_COUNTERS.configured_tick_high,
+        configured,
+    );
+    TRACE_COUNTERS
+        .pre_config_elapsed_ms
+        .store(elapsed_ms as u32, Ordering::Relaxed);
+    TRACE_COUNTERS.pre_config_skipped_critical.store(
+        ((elapsed_ms * u64::from(CRITICAL_HZ)) / 1000).min(u64::from(u32::MAX)) as u32,
+        Ordering::Relaxed,
+    );
+    TRACE_COUNTERS.pre_config_skipped_control_detail.store(
+        ((elapsed_ms * u64::from(CONTROL_DETAIL_HZ)) / 1000).min(u64::from(u32::MAX)) as u32,
+        Ordering::Relaxed,
+    );
+    TRACE_COUNTERS.pre_config_skipped_status.store(
+        ((elapsed_ms * u64::from(STATUS_HZ)) / 1000).min(u64::from(u32::MAX)) as u32,
+        Ordering::Relaxed,
+    );
+}
 
 // OpenFFBoard uses 120_000 cycles at 168 MHz, about 714 us. Scale that
 // wall-time budget to the 520 MHz H723 DWT clock: 120_000 * 520 / 168 =
@@ -238,10 +312,15 @@ pub(crate) fn record_spi_sample_cycles(cycles: u32) {
 
 /// Record the trace boot timestamp after TIM5 starts.
 pub(crate) fn note_trace_boot() {
-    let _ = trace_now_ticks();
+    let boot = trace_now_ticks();
     TRACE_COUNTERS
         .boot_id
         .store(compute_boot_id(), Ordering::Relaxed);
+    store_split_u64(
+        &TRACE_COUNTERS.boot_tick_low,
+        &TRACE_COUNTERS.boot_tick_high,
+        boot,
+    );
 }
 
 /// Return true when trace producers should emit frames.
@@ -251,6 +330,7 @@ pub(crate) fn is_configured() -> bool {
 
 /// Mark the trace stream configured after USB configuration.
 pub(crate) fn note_usb_configured() {
+    note_trace_usb_configured_time();
     TRACE_COUNTERS.configured.store(true, Ordering::Relaxed);
     emit_metadata();
     request_event(
@@ -486,18 +566,24 @@ pub(crate) fn emit_metadata() {
         return;
     };
     let Ok(payload) = transport::build_metadata_payload(transport::TraceMetadataInputs {
-        skipped_sample_counter_count: 0,
+        skipped_sample_counter_count: 3,
         clock_freq: crate::ankyra::constants::CLOCK_FREQ,
-        critical_hz: 0,
-        control_detail_hz: 0,
-        status_hz: 0,
-        pre_configuration_elapsed_ms: 0,
-        pre_configuration_skipped_critical: 0,
-        pre_configuration_skipped_control_detail: 0,
-        pre_configuration_skipped_status: 0,
+        critical_hz: CRITICAL_HZ,
+        control_detail_hz: CONTROL_DETAIL_HZ,
+        status_hz: STATUS_HZ,
+        pre_configuration_elapsed_ms: TRACE_COUNTERS.pre_config_elapsed_ms.load(Ordering::Relaxed),
+        pre_configuration_skipped_critical: TRACE_COUNTERS
+            .pre_config_skipped_critical
+            .load(Ordering::Relaxed),
+        pre_configuration_skipped_control_detail: TRACE_COUNTERS
+            .pre_config_skipped_control_detail
+            .load(Ordering::Relaxed),
+        pre_configuration_skipped_status: TRACE_COUNTERS
+            .pre_config_skipped_status
+            .load(Ordering::Relaxed),
         firmware_id: "ouroboros-fw",
         product: TRACE_PRODUCT,
-        serial: "",
+        serial: trace_serial(),
         sources: sources.as_slice(),
     }) else {
         return;

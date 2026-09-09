@@ -276,6 +276,8 @@ mod app {
         crate::board_init::enable_usb_clock();
 
         let uid = crate::board_init::read_stm32_uid(ctx.local.uid_str);
+        #[cfg(feature = "trace")]
+        crate::usb_trace::set_trace_serial(uid);
 
         // SAFETY: Called exactly once, before any other klipper-usb function.
         // base_addr is the USB_OTG_HS peripheral base on STM32H723.

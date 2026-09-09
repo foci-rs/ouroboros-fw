@@ -57,6 +57,7 @@ mod commissioning_board_contract_tests {
     const USB_TRACE: &str = include_str!("../../src/usb_trace.rs");
     const DRIVER: &str = include_str!("../../../../shared/foci-firmware/src/tmc_control/driver.rs");
     const BOARD: &str = include_str!("../../src/tmc_control/board.rs");
+    const STATE_USB_TRACE: &str = include_str!("../../src/state/usb_trace.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -307,6 +308,40 @@ mod commissioning_board_contract_tests {
             "FociVelocityIntegralTerminal",
             &["oid: u8", "payload: &[u8]"],
         );
+    }
+
+    #[test]
+    fn board_reports_real_trace_metadata_instead_of_placeholders() {
+        for field in [
+            "boot_tick_low",
+            "boot_tick_high",
+            "configured_tick_low",
+            "configured_tick_high",
+            "pre_config_elapsed_ms",
+            "pre_config_skipped_critical",
+            "pre_config_skipped_control_detail",
+            "pre_config_skipped_status",
+        ] {
+            assert!(
+                STATE_USB_TRACE.contains(field),
+                "TraceCounters is missing {field}"
+            );
+        }
+        assert!(
+            USB_TRACE.contains("fn set_trace_serial"),
+            "missing set_trace_serial"
+        );
+        assert!(USB_TRACE.contains("fn trace_serial"), "missing trace_serial");
+        assert!(MAIN.contains("usb_trace::set_trace_serial("));
+
+        let emit_metadata = extract_fn(USB_TRACE, "emit_metadata");
+        assert!(!emit_metadata.contains("skipped_sample_counter_count: 0"));
+        assert!(!emit_metadata.contains("critical_hz: 0"));
+        assert!(!emit_metadata.contains("control_detail_hz: 0"));
+        assert!(!emit_metadata.contains("status_hz: 0"));
+        assert!(!emit_metadata.contains("pre_configuration_elapsed_ms: 0"));
+        assert!(!emit_metadata.contains(r#"serial: "","#));
+        assert!(emit_metadata.contains("serial: trace_serial()"));
     }
 
     #[test]
