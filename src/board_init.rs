@@ -29,18 +29,35 @@ pub fn read_stm32_uid(buf: &mut [u8; 24]) -> &str {
     unsafe { core::str::from_utf8_unchecked(buf) }
 }
 
-/// Build the embassy-stm32 clock configuration for 520 MHz SYSCLK from HSI64.
+/// Build the embassy-stm32 clock configuration for 520 MHz SYSCLK from the
+/// 25 MHz HSE crystal.
 pub fn rcc_config() -> embassy_stm32::Config {
     use embassy_stm32::rcc::*;
 
     let mut config = embassy_stm32::Config::default();
     config.rcc.hsi = Some(HSIPrescaler::DIV1);
-    config.rcc.hse = None;
+    config.rcc.hse = Some(Hse {
+        freq: embassy_stm32::time::Hertz(25_000_000),
+        mode: HseMode::Oscillator,
+    });
     config.rcc.pll1 = Some(Pll {
-        source: PllSource::HSI,
-        prediv: PllPreDiv::DIV16,
-        mul: PllMul::MUL130,
+        source: PllSource::HSE,
+        prediv: PllPreDiv::DIV5,
+        mul: PllMul::MUL104,
         divp: Some(PllDiv::DIV1),
+        divq: None,
+        divr: None,
+    });
+    // SPI123 and the ADC have no usable kernel clock from PLL1: sysclk 520 MHz
+    // pins PLL1's VCO to 520 (DIVP must be 1, since DIVP=2 needs a 1040 MHz
+    // VCO, above the 836 MHz ceiling), and 520 = 8 * 65 with 65 odd, so no
+    // DIVQ yields a multiple-of-8 MHz kernel. PLL2 at 32 MHz divides to
+    // exactly 8 MHz for the TMC4671 link.
+    config.rcc.pll2 = Some(Pll {
+        source: PllSource::HSE,
+        prediv: PllPreDiv::DIV5,
+        mul: PllMul::MUL96,
+        divp: Some(PllDiv::DIV15),
         divq: None,
         divr: None,
     });
@@ -51,6 +68,7 @@ pub fn rcc_config() -> embassy_stm32::Config {
     config.rcc.apb3_pre = APBPrescaler::DIV2;
     config.rcc.apb4_pre = APBPrescaler::DIV2;
     config.rcc.sys = Sysclk::PLL1_P;
+    config.rcc.mux.spi123sel = mux::Saisel::PLL2_P;
 
     // SPI2 RX/TX DMA completion (DMA1_STREAM0/DMA1_STREAM1) defaults to
     // Embassy's Priority::P0, the highest hardware priority on this part --
