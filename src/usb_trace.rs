@@ -47,6 +47,9 @@ static mut TRACE_SERIAL: [u8; 31] = [0; 31];
 pub(crate) fn set_trace_serial(serial: &str) {
     let bytes = serial.as_bytes();
     let len = bytes.len().min(31);
+    // SAFETY: the critical section excludes trace_serial's concurrent read;
+    // len is capped to TRACE_SERIAL's 31-byte size, so the copy stays in
+    // bounds.
     cortex_m::interrupt::free(|_| unsafe {
         let dst = core::ptr::addr_of_mut!(TRACE_SERIAL).cast::<u8>();
         core::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
@@ -56,6 +59,9 @@ pub(crate) fn set_trace_serial(serial: &str) {
 
 fn trace_serial() -> &'static str {
     let len = TRACE_SERIAL_LEN.load(Ordering::Relaxed) as usize;
+    // SAFETY: the critical section excludes set_trace_serial's concurrent
+    // write; len never exceeds what set_trace_serial wrote, and that write
+    // is always valid UTF-8 (the source is a &str).
     cortex_m::interrupt::free(|_| unsafe {
         let src = core::ptr::addr_of!(TRACE_SERIAL).cast::<u8>();
         let bytes = core::slice::from_raw_parts(src, len);
