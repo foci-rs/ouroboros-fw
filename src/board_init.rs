@@ -40,6 +40,11 @@ pub fn rcc_config() -> embassy_stm32::Config {
         freq: embassy_stm32::time::Hertz(25_000_000),
         mode: HseMode::Oscillator,
     });
+    // CRS trims HSI48 against host SOF timing; USB full-speed's tolerance is
+    // tighter than HSI48's factory trim alone.
+    config.rcc.hsi48 = Some(Hsi48Config {
+        sync_from_usb: true,
+    });
     config.rcc.pll1 = Some(Pll {
         source: PllSource::HSE,
         prediv: PllPreDiv::DIV5,
@@ -69,6 +74,7 @@ pub fn rcc_config() -> embassy_stm32::Config {
     config.rcc.apb4_pre = APBPrescaler::DIV2;
     config.rcc.sys = Sysclk::PLL1_P;
     config.rcc.mux.spi123sel = mux::Saisel::PLL2_P;
+    config.rcc.mux.usbsel = mux::Usbsel::HSI48;
 
     // SPI2 RX/TX DMA completion (DMA1_STREAM0/DMA1_STREAM1) defaults to
     // Embassy's Priority::P0, the highest hardware priority on this part --
