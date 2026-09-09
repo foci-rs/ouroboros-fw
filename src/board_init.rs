@@ -227,6 +227,15 @@ pub fn init_usb_pins(
 /// Enable the USB OTG HS peripheral clock and briefly delay so the
 /// clock can stabilize before further register accesses.
 pub fn enable_usb_clock() {
+    // The H7 USB transceiver sits in its own 3.3 V supply domain. Without
+    // USB33DEN the PHY signals well enough to be seen on the bus but stalls
+    // during descriptor reads. Klipper's OTG init enables it the same way; the
+    // F407 has no equivalent bit, which is why the shared USB crate does not.
+    let pwr = embassy_stm32::pac::PWR;
+    if !pwr.cr3().read().usb33rdy() {
+        pwr.cr3().modify(|w| w.set_usb33den(true));
+        while !pwr.cr3().read().usb33rdy() {}
+    }
     embassy_stm32::pac::RCC
         .ahb1enr()
         .modify(|w| w.set_usb_otg_hsen(true));
