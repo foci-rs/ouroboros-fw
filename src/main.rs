@@ -106,7 +106,7 @@ mod app {
     use foci_firmware::diagnostic::StepperEventReason;
     use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
 
-    use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
+    use crate::board_config::TMC_CONFIG;
     use crate::helpers::stepper_diag::{UNKNOWN_QUEUE_LEN, record_stepper_event};
 
     fn lower_all_enable_pins(enable_pins: &mut TmcEnablePins) {
@@ -428,7 +428,7 @@ mod app {
         let tmc_control_config = foci_firmware::tmc_control::TmcControlConfig::new(
             CLOCK_FREQ,
             TMC_CONFIG.pwm_freq_hz(),
-            CURRENT_SCALE_MA_PER_LSB,
+            TMC_CONFIG.current_scale_ma_per_lsb,
             TMC_CONFIG,
         );
         let now_us = || Mono::now().duration_since_epoch().to_micros();

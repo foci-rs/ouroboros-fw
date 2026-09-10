@@ -5,11 +5,6 @@ use crate::ankyra::enumerations::Pins;
 /// Number of board-local TMC4671 motor channels.
 pub(crate) const TMC_CHANNEL_COUNT: u8 = 2;
 
-/// Current scaling for Ouroboros: milliamps per ADC least significant bit.
-///
-/// Maker-confirmed production-v1 current scale.
-pub(crate) const CURRENT_SCALE_MA_PER_LSB: f32 = 1.272;
-
 /// Ouroboros production-v1 VM sense divider high-side resistor.
 ///
 /// Cached schematic excerpt `docs/datasheets/Ouroboros-schematic-2025-01-26.pdf`
@@ -84,6 +79,9 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     current_validation_torque_max_encoder_delta_counts: 16,
     resistance_max_expected_current_count: 1600,
     resistance_scale_metadata_validated: false,
+    // Milliamps per ADC least significant bit; maker-confirmed
+    // production-v1 current scale.
+    current_scale_ma_per_lsb: 1.272,
 };
 
 /// Per-channel feedback wiring. Every board channel is ABN-only today; see

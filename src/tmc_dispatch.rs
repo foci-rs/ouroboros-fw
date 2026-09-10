@@ -18,7 +18,7 @@ use rtic_monotonics::fugit::ExtU64;
 
 use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
-use crate::board_config::{CURRENT_SCALE_MA_PER_LSB, TMC_CONFIG};
+use crate::board_config::TMC_CONFIG;
 
 fn report_invalid_channel(channel: u8) {
     ::ankyra::klipper_reply_from!(
@@ -53,7 +53,7 @@ pub(crate) async fn handle_tmc_request(
         &kind,
         tmc,
         tmc_state,
-        CURRENT_SCALE_MA_PER_LSB,
+        TMC_CONFIG.current_scale_ma_per_lsb,
         TMC_CONFIG.pwm_maxcnt,
     )
     .await?
