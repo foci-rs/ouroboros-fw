@@ -473,6 +473,18 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn board_reserves_the_layer2_brake_gpio() {
+        // PE14 (BRK3) drives the STM32-controlled Layer 2 brake circuit,
+        // independent of the TMC4671's own autonomous ADC_VM_LIMITS brake
+        // path. Not yet driven by firmware, but it must still be reserved
+        // so Klipper's pin allocator cannot hand it to user config.
+        assert!(
+            CONSTANTS.contains(r#"pub const RESERVE_PINS_TMC: &str = "PD1,PD6,PE2,PA2,PE14";"#),
+            "RESERVE_PINS_TMC must include the Layer 2 brake GPIO (PE14)"
+        );
+    }
+
+    #[test]
     fn board_never_lists_the_same_pin_under_two_reserve_pins_categories() {
         use std::vec::Vec;
         let mut categories: Vec<(&str, Vec<&str>)> = Vec::new();

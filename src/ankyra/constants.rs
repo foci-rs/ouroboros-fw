@@ -105,7 +105,7 @@ pub const RESERVE_PINS_SPI: &str = "PB13,PB14,PB15,PD0,PD2";
 
 #[allow(dead_code)]
 #[klipper_constant]
-pub const RESERVE_PINS_TMC: &str = "PD1,PD6,PE2,PA2";
+pub const RESERVE_PINS_TMC: &str = "PD1,PD6,PE2,PA2,PE14";
 
 #[allow(dead_code)]
 #[klipper_constant]
