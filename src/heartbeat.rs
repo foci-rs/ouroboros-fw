@@ -29,9 +29,8 @@ pub fn watchdog_tick(wdg: &mut IndependentWatchdog<'static, peripherals::IWDG1>)
     wdg.pet();
 }
 
-/// Perform a single stats-tick cycle: compute elapsed ticks, update
-/// the stats accumulator, advance the 32-bit CYCCNT wrap counter, and emit
-/// the Klipper `stats` message.
+/// Track 32-bit TIM5-clock wraps for `get_uptime`'s high word and report the
+/// CPU load sample via a Klipper `stats` message.
 ///
 /// `stats_send_time` and `stats_send_time_high` are the atomics shared
 /// with `get_uptime`. Write-order matters: the `swap` on
