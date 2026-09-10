@@ -2,13 +2,59 @@
 //!
 //! These functions perform the hardware-specific pieces of the RTIC
 //! `init` task: clock tree configuration, timer bring-up, GPIO setup,
-//! USB peripheral preparation, and DWT instrumentation. Each helper is a
+//! USB peripheral preparation, DWT instrumentation, and stack painting.
+//! Each helper is a
 //! pure step in the init sequence; the RTIC `init` task orchestrates the
 //! ordering and ownership of peripherals.
 
 use embassy_stm32::Peri;
 use embassy_stm32::gpio::{AfType, Flex, Input, Pull};
 use embassy_stm32::peripherals;
+
+/// Bytes left unpainted below the live stack pointer so the paint cannot reach
+/// the running frame or an exception frame stacked on top of it.
+const STACK_PAINT_GUARD_BYTES: usize = 256;
+
+/// Paint the unused span of the MSP stack and register it for later readout.
+///
+/// Must run before the init task builds any deeper frame: the span a later
+/// frame occupies would otherwise never be painted, and the readout would
+/// report that frame's depth as untouched headroom.
+///
+/// `_stack_end` is cortex-m-rt's top-of-statics address (`link.x` defines it as
+/// `__euninit`, the end of `.uninit`, and asserts both its 4-byte alignment and
+/// `_stack_start >= _stack_end`). The MSP grows down from `_stack_start` at the
+/// end of RAM, so everything between the two is stack.
+pub fn paint_stack() {
+    unsafe extern "C" {
+        static _stack_end: u32;
+    }
+
+    // SAFETY: `_stack_end` is the linker's end-of-statics address and the live
+    // MSP grows down toward it, so every byte in `[_stack_end, sp)` is stack --
+    // `.bss` and `.uninit` end at `_stack_end` and no output section is placed
+    // above it. Dropping `STACK_PAINT_GUARD_BYTES` off the top excludes the
+    // running frame, and RTIC runs `init` with interrupts masked, so nothing
+    // else can be using the span while it is written. The bounds handed to
+    // `register_painted_region` are exactly the span painted here, and the
+    // stack stays readable for the life of the program.
+    unsafe {
+        let bottom = (&raw const _stack_end) as usize;
+        let top = (cortex_m::register::msp::read() as usize)
+            .saturating_sub(STACK_PAINT_GUARD_BYTES)
+            & !0b11;
+        if top <= bottom {
+            return;
+        }
+        let len_words = (top - bottom) / size_of::<u32>();
+        for index in 0..len_words {
+            (bottom as *mut u32)
+                .add(index)
+                .write_volatile(foci_firmware::stack_watermark::STACK_PAINT_SENTINEL);
+        }
+        foci_firmware::stack_watermark::register_painted_region(bottom, len_words);
+    }
+}
 
 /// Read the STM32 96-bit unique device ID and format as a hex string.
 ///
