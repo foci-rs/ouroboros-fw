@@ -983,6 +983,13 @@ mod app {
                         }
                     }
                 }
+                UnitOutcome::Shutdown(reason) => {
+                    ctx.shared.app_state.lock(|state| {
+                        if crate::firmware_ctx::enter_shutdown(state) {
+                            crate::tmc_control::effects::emit_shutdown(reason);
+                        }
+                    });
+                }
                 UnitOutcome::Maintenance { homing } => {
                     group_all_ready &= matches!(
                         homing,

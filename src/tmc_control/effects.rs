@@ -165,6 +165,11 @@ pub(crate) fn emit_shutdown(reason: ShutdownReason) {
             "Live gain application failed",
             clock,
         ),
+        ShutdownReason::PendingConfigApplyFailed => ::ankyra::klipper_shutdown_from!(
+            &mut crate::_ankyra_config::Sender,
+            "TMC pending config apply failed",
+            clock,
+        ),
         ShutdownReason::AdcCurrentClipped => ::ankyra::klipper_shutdown_from!(
             &mut crate::_ankyra_config::Sender,
             "TMC4671: ADC current clipped (overcurrent)",
