@@ -359,6 +359,8 @@ pub(crate) async fn run_diagnostic_request<'spi>(
         channel,
         enable_pin,
     };
+    let mut host_liveness_expired =
+        || crate::tmc_control::containment::lease_expired(crate::helpers::lifecycle::read_tim5());
 
     let outcome = foci_firmware::tmc_diagnostics::handle_diagnostic_request(
         diagnostic_req,
@@ -374,6 +376,7 @@ pub(crate) async fn run_diagnostic_request<'spi>(
             },
             tmc_config: &crate::board_config::TMC_CONFIG,
             feedback_config: crate::board_config::FEEDBACK_CONFIGS[channel as usize],
+            host_liveness_expired: Some(&mut host_liveness_expired),
         },
     )
     .await;

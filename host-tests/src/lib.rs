@@ -58,6 +58,7 @@ mod commissioning_board_contract_tests {
     const DRIVER: &str = include_str!("../../../../shared/foci-firmware/src/tmc_control/driver.rs");
     const BOARD: &str = include_str!("../../src/tmc_control/board.rs");
     const STATE_USB_TRACE: &str = include_str!("../../src/state/usb_trace.rs");
+    const TMC_DIAGNOSTICS: &str = include_str!("../../src/tmc_diagnostics.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -876,6 +877,22 @@ mod commissioning_board_contract_tests {
         assert!(INTERRUPTS.contains("pub fn tmc_status_irq_body("));
         assert!(!INTERRUPTS.contains("defmt::"), "ISR bodies never log");
         assert!(MAIN.contains("tmc_status0: Input<'static>"));
+    }
+
+    #[test]
+    fn diagnostic_dispatch_uses_raw_lease_expired_not_the_classifier() {
+        assert!(
+            TMC_DIAGNOSTICS.contains("tmc_control::containment::lease_expired("),
+            "diagnostic dispatch must wire the host-liveness check to the raw \
+             lease_expired function"
+        );
+        assert!(
+            !TMC_DIAGNOSTICS.contains("classify_lease_check")
+                && !TMC_DIAGNOSTICS.contains("LeaseCheckDisposition"),
+            "diagnostic dispatch must not use classify_lease_check -- its \
+             shutdown-active suppression does not apply to a diagnostic \
+             runner's one-shot poll"
+        );
     }
 }
 
