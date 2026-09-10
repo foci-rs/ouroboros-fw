@@ -14,20 +14,21 @@ fn main() {
     };
     fs::copy(memory_x, out_dir.join("memory.x")).unwrap();
 
-    // The allowlist admits only the one named no-init diagnostic record
-    // (Ouroboros has no panic-capture record); any other `.ccmram*` input
-    // section becomes an orphan and is rejected by --orphan-handling=error
-    // below rather than silently absorbed into this section.
+    // The allowlist admits only the two named no-init diagnostic records; any
+    // other `.ccmram*` input section becomes an orphan and is rejected by
+    // --orphan-handling=error below rather than silently absorbed into this
+    // section.
     let ccmram_x = out_dir.join("ccmram.x");
     fs::write(
         &ccmram_x,
         "SECTIONS {\n\
          \x20 .ccmram (NOLOAD) : ALIGN(4) {\n\
+         \x20   *(.ccmram.diag.panic)\n\
          \x20   *(.ccmram.diag.breakaway)\n\
          \x20 } > CCMRAM\n\
          }\n\
-         /* The breakaway breadcrumb's AtomicU32. */\n\
-         ASSERT(SIZEOF(.ccmram) == 4, \"unexpected CCMRAM contents\");\n\
+         /* PanicPersist (5 x u32) + the breakaway AtomicU32 breadcrumb. */\n\
+         ASSERT(SIZEOF(.ccmram) == 24, \"unexpected CCMRAM contents\");\n\
          \n\
          /* --orphan-handling=error hard-errors on any input section the script\n\
           * does not place explicitly, including debug/symbol metadata GNU ld\n\

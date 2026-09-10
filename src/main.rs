@@ -2,7 +2,10 @@
 #![no_main]
 
 use defmt_rtt as _;
-use panic_probe as _;
+
+// Probe-free panic/HardFault capture replaces panic-probe: it persists the
+// fault into no-init CCMRAM and reports it to the host on the next connect.
+mod panic_capture;
 
 // PAC shim for RTIC + embassy-stm32
 pub mod pac {
@@ -206,6 +209,19 @@ mod app {
         crate::board_init::paint_stack();
         foci_firmware::diagnostic::recover_last_boot_breakaway_breadcrumb();
         defmt::info!("FOCI Ouroboros starting");
+
+        // Recover any panic/HardFault the previous boot persisted to no-init
+        // CCMRAM, before anything else can overwrite it, and hand it to the
+        // diagnostic layer so the connect-time dump reports it to the host.
+        if let Some(record) = crate::panic_capture::recover() {
+            defmt::error!(
+                "recovered last-boot fault: kind={} line={} pc={:#010x}",
+                record.kind,
+                record.line,
+                record.pc
+            );
+            foci_firmware::diagnostic::set_last_panic(record);
+        }
 
         // SAFETY: init runs exactly once, before any other task starts.
         unsafe {
