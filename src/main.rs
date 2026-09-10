@@ -374,7 +374,20 @@ mod app {
     #[idle]
     fn idle(_: idle::Context) -> ! {
         loop {
-            rtic::export::wfi();
+            // Mask interrupts so wfi wakes on a pending IRQ but defers the
+            // handler until we re-enable: the bracketed interval is pure sleep,
+            // not sleep plus the work burst that runs before idle (the
+            // lowest-priority context) can resume. Recording the lap inside the
+            // masked region keeps measure-and-record atomic against the P1
+            // stats reader, so each stats window accounts its own sleep even
+            // when a single sleep spans most of the window. Mirrors Klipper
+            // sched.c's irq_disable / irq_wait / irq_enable around its sleep.
+            cortex_m::interrupt::free(|_| {
+                let sleep_start = read_tim5();
+                rtic::export::wfi();
+                let slept = read_tim5().wrapping_sub(sleep_start);
+                foci_firmware::cpu_load::record_idle_lap(slept);
+            });
         }
     }
 

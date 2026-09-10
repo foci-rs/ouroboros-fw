@@ -8,27 +8,17 @@ use embassy_stm32::peripherals;
 use embassy_stm32::wdg::IndependentWatchdog;
 use foci_firmware::ankyra::replies::{FociStepperEvent, FociStepperPerfEvent, Stats, TrsyncState};
 
-/// SumSq base used by `stats`. Must match `STATS_SUMSQ_BASE` advertised
-/// to Klipper via `klipper_constant`.
-const STATS_SUMSQ_BASE: u32 = 256;
-
 /// Period between independent-watchdog service ticks.
 pub const WATCHDOG_INTERVAL_MS: u64 = 5_000;
 
-/// Accumulator state for the stats task between ticks.
+/// Carries the last stats-send clock between ticks.
 pub struct StatsAccumulator {
-    count: u32,
-    sum: u32,
-    sumsq: u32,
     last_clock: u32,
 }
 
 impl StatsAccumulator {
     pub fn new(initial_clock: u32) -> Self {
         Self {
-            count: 0,
-            sum: 0,
-            sumsq: 0,
             last_clock: initial_clock,
         }
     }
@@ -54,16 +44,10 @@ pub fn stats_tick(
     stats_send_time: &AtomicU32,
     stats_send_time_high: &AtomicU32,
 ) {
-    let elapsed = now.wrapping_sub(accumulator.last_clock);
+    let wall = now.wrapping_sub(accumulator.last_clock);
     accumulator.last_clock = now;
 
-    // One "iteration" per stats period with elapsed ticks.
-    accumulator.count += 1;
-    accumulator.sum += elapsed;
-    let diff_scaled = elapsed / STATS_SUMSQ_BASE;
-    accumulator.sumsq = accumulator
-        .sumsq
-        .saturating_add(diff_scaled.saturating_mul(elapsed));
+    let sample = foci_firmware::cpu_load::take(wall);
 
     // Track 32-bit clock wraps for `get_uptime`'s high word.
     let prev = stats_send_time.swap(now, Relaxed);
@@ -75,13 +59,10 @@ pub fn stats_tick(
     ::ankyra::klipper_reply_from!(
         &mut crate::_ankyra_config::Sender,
         Stats,
-        count: u32 = accumulator.count,
-        sum: u32 = accumulator.sum,
-        sumsq: u32 = accumulator.sumsq,
+        count: u32 = sample.count,
+        sum: u32 = sample.sum,
+        sumsq: u32 = sample.sumsq,
     );
-    accumulator.count = 0;
-    accumulator.sum = 0;
-    accumulator.sumsq = 0;
 }
 
 /// Drain pending trsync reports and emit `trsync_state` replies.
