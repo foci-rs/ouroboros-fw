@@ -116,6 +116,12 @@ pub const RESERVE_PINS_SWD: &str = "PA13,PA14";
 #[klipper_constant]
 pub const RESERVE_PINS_STEP: &str = "PD4,PD3,PC12,PC11";
 
+/// Board status LED, driven directly by the MCU (distinct from the PE2/PA2
+/// pins repurposed as TMC4671 STATUS inputs on production v1.0 hardware).
+#[allow(dead_code)]
+#[klipper_constant]
+pub const RESERVE_PINS_LED: &str = "PA15";
+
 #[klipper_constant]
 pub const FOCI_VM_DIVIDER_HIGH_OHMS: u32 = 71_500;
 const _: () = assert!(FOCI_VM_DIVIDER_HIGH_OHMS == board_config::VM_DIVIDER_HIGH_OHMS);

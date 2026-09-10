@@ -432,7 +432,12 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn board_never_declares_an_empty_reserve_pins_category() {
-        for empty_const in ["RESERVE_PINS_LED", "RESERVE_PINS_DRV"] {
+        // RESERVE_PINS_DRV has no genuine pin to reserve: the gate drivers
+        // are driven entirely by TMC4671 PWM outputs, with no discrete
+        // STM32 GPIO enable line (confirmed against the schematic). Unlike
+        // RESERVE_PINS_LED (see board_declares_the_status_led_reserve_pin
+        // below), there is nothing to declare here.
+        for empty_const in ["RESERVE_PINS_DRV"] {
             assert!(
                 !CONSTANTS.contains(&std::format!("pub const {empty_const}: &str = \"\";")),
                 "{empty_const} is declared with an empty pin list; Klipper's \
@@ -446,6 +451,25 @@ mod commissioning_board_contract_tests {
                 "provider still wires {empty_const} into the wire constants list"
             );
         }
+    }
+
+    #[test]
+    fn board_declares_the_status_led_reserve_pin() {
+        // Unlike RESERVE_PINS_DRV, Ouroboros has a genuine MCU-driven status
+        // LED on PA15 (confirmed against the schematic's MCU and LEDs
+        // blocks, distinct from the PE2/PA2 pins repurposed as TMC4671
+        // STATUS inputs on production v1.0). It must be reserved so
+        // Klipper's pin allocator cannot hand PA15 to user config.
+        assert!(
+            CONSTANTS.contains(r#"pub const RESERVE_PINS_LED: &str = "PA15";"#),
+            "RESERVE_PINS_LED must declare the board status LED pin (PA15)"
+        );
+        assert_eq!(
+            PROVIDER.matches("crate::ankyra::constants::RESERVE_PINS_LED,").count(),
+            2,
+            "provider must wire RESERVE_PINS_LED into both the default and \
+             trace-velocity-limit-latch-test constant lists"
+        );
     }
 
     #[test]
