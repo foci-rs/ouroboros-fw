@@ -217,6 +217,29 @@ mod app {
         crate::board_init::verify_dma_interrupt_priority();
         crate::board_init::enable_debug_clock_during_sleep();
 
+        // One-time reset-cause diagnostic. RCC_RSR latches why the MCU last
+        // reset and holds the flags until RMVF clears them. Log the cause by
+        // name, then clear so the next reset's cause is unambiguous. A brown-out
+        // (BORRSTF) or power-on (PORRSTF) flag after a silent communication loss
+        // is the decisive undervoltage evidence; IWDG1RSTF, SFTRSTF, and PINRSTF
+        // distinguish the watchdog, a software reset, and the reset pin. The H7
+        // metapac names the independent-watchdog flag `iwdg1rstf` and the pin
+        // flag `pinrstf` (vs. F4's `wdgrstf`/`padrstf`).
+        {
+            let rsr = embassy_stm32::pac::RCC.rsr().read();
+            defmt::info!(
+                "reset cause: LPWRRSTF={} WWDG1RSTF={} IWDG1RSTF={} SFTRSTF={} PORRSTF={} PINRSTF={} BORRSTF={}",
+                rsr.lpwrrstf(),
+                rsr.wwdg1rstf(),
+                rsr.iwdg1rstf(),
+                rsr.sftrstf(),
+                rsr.porrstf(),
+                rsr.pinrstf(),
+                rsr.borrstf(),
+            );
+            embassy_stm32::pac::RCC.rsr().modify(|w| w.set_rmvf(true));
+        }
+
         crate::board_init::init_tim5_clock();
         #[cfg(feature = "trace")]
         crate::usb_trace::note_trace_boot();
