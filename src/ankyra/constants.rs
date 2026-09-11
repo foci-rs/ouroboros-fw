@@ -54,10 +54,9 @@ const _: () = assert!(
             as u32
 );
 
-/// Promoted to OpenFFBoard's LATCHED value: `tmc_velocity_limit_latch_test`
-/// confirmed on hardware that `PID_V_OUTPUT_LIMIT_STATUS` persists across a
-/// delay and clears only on explicit clear via this board's SPI-mux/
-/// dual-channel signal path, matching the chip-level latch guarantee.
+/// LATCHED: `PID_V_OUTPUT_LIMIT_STATUS` persists across a delay and clears
+/// only on explicit clear via this board's SPI-mux/dual-channel signal
+/// path.
 #[klipper_constant]
 pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 1;
 const _: () = assert!(
