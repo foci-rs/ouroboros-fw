@@ -54,14 +54,15 @@ const _: () = assert!(
             as u32
 );
 
-/// BEST_EFFORT until `tmc_velocity_limit_latch_test` confirms the latch
-/// survives this board's SPI-mux/dual-channel signal path; promote to
-/// OpenFFBoard's LATCHED value only after that confirmation.
+/// Promoted to OpenFFBoard's LATCHED value: `tmc_velocity_limit_latch_test`
+/// confirmed on hardware that `PID_V_OUTPUT_LIMIT_STATUS` persists across a
+/// delay and clears only on explicit clear via this board's SPI-mux/
+/// dual-channel signal path, matching the chip-level latch guarantee.
 #[klipper_constant]
-pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 0;
+pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 1;
 const _: () = assert!(
     VELOCITY_LIMIT_EVIDENCE_CAPABILITY
-        == foci_firmware::commissioning::outer::velocity::VELOCITY_LIMIT_EVIDENCE_CAPABILITY_BEST_EFFORT
+        == foci_firmware::commissioning::outer::velocity::VELOCITY_LIMIT_EVIDENCE_CAPABILITY_LATCHED_FLAG
 );
 
 #[klipper_constant]
