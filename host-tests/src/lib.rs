@@ -465,7 +465,9 @@ mod commissioning_board_contract_tests {
             "RESERVE_PINS_LED must declare the board status LED pin (PA15)"
         );
         assert_eq!(
-            PROVIDER.matches("crate::ankyra::constants::RESERVE_PINS_LED,").count(),
+            PROVIDER
+                .matches("crate::ankyra::constants::RESERVE_PINS_LED,")
+                .count(),
             2,
             "provider must wire RESERVE_PINS_LED into both the default and \
              trace-velocity-limit-latch-test constant lists"
