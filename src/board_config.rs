@@ -91,3 +91,37 @@ pub(crate) const FEEDBACK_CONFIGS: [foci_firmware::config::FeedbackConfig;
     phi_e_source: foci_firmware::config::FeedbackSource::Abn,
     position_source: foci_firmware::config::FeedbackSource::Abn,
 }; TMC_CHANNEL_COUNT as usize];
+
+/// Return the `shared/foci-firmware` `ANALOG_CHANNELS` slot index for a
+/// virtual analog-in pin. `TH0` (index 0) is the schematic's `TH1` net
+/// (TMC1 MOSFET thermistor, physical pin PC4); `TH1` (index 1) is the
+/// schematic's `TH2` net (TMC2, PC5); `MCU_TEMP` is index 2. The 0-index
+/// wire names intentionally follow this project's `STEP0`/`DIR0`
+/// convention, not the schematic's 1-indexed net labels -- do not "fix"
+/// this offset.
+pub(crate) fn analog_pin_channel(pin: u8) -> Option<u8> {
+    match Pins::try_from(pin) {
+        Ok(Pins::TH0) => Some(0),
+        Ok(Pins::TH1) => Some(1),
+        Ok(Pins::MCU_TEMP) => Some(2),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analog_pin_channel_resolves_th0_th1_and_mcu_temp() {
+        assert_eq!(analog_pin_channel(Pins::TH0 as u8), Some(0));
+        assert_eq!(analog_pin_channel(Pins::TH1 as u8), Some(1));
+        assert_eq!(analog_pin_channel(Pins::MCU_TEMP as u8), Some(2));
+    }
+
+    #[test]
+    fn analog_pin_channel_rejects_unrelated_pins() {
+        assert_eq!(analog_pin_channel(Pins::STEP0 as u8), None);
+        assert_eq!(analog_pin_channel(Pins::PC0 as u8), None);
+    }
+}
