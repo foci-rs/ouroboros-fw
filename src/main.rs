@@ -1424,6 +1424,7 @@ mod app {
         let next_move =
             unsafe { crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].isr_dequeue() };
         let Some(move_) = next_move else {
+            stepper.mark_idle();
             crate::state::stepper_diag::record_queue_empty(channel);
             if HOMING_STATE.load(Relaxed) != 0 {
                 record_stepper_event(

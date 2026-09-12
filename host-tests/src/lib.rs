@@ -176,6 +176,24 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn queue_empty_marks_stepper_idle_before_disarming_channel() {
+        let load_next = extract_fn(MAIN, "load_next_step_move");
+        let mark_idle = load_next
+            .find("stepper.mark_idle();")
+            .expect("queue-empty path must mark the stepper idle");
+        let record_empty = load_next
+            .find("record_queue_empty(channel);")
+            .expect("queue-empty path must record the transition");
+        let clear_channel = load_next[record_empty..]
+            .find("clear_step_channel(channel, next_event_clocks);")
+            .map(|offset| record_empty + offset)
+            .expect("queue-empty path must disarm the channel");
+
+        assert!(mark_idle < record_empty);
+        assert!(record_empty < clear_channel);
+    }
+
+    #[test]
     fn spi_dma_interrupt_priority_is_explicit_and_below_hard_real_time() {
         assert!(
             BOARD_INIT.contains(
