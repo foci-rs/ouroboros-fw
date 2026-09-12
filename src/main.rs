@@ -50,6 +50,7 @@ mod app {
     use rtic_monotonics::stm32::prelude::*;
     use rtic_sync::channel::Receiver;
 
+    use crate::board_config::TMC_CHANNEL_COUNT;
     use crate::helpers::lifecycle::*;
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
@@ -62,6 +63,7 @@ mod app {
     use crate::trigger_domain::{
         TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain, with_trigger_domain_site,
     };
+    use foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlots;
     use foci_firmware::context::stepper::{
         StepperArmCheckBoard, StepperStopCheckBoard, StepperTimerStateBoard,
     };
@@ -182,13 +184,12 @@ mod app {
         app_state: State,
     }
 
-    /// Persistent Stage-C candidate slot carried across `tmc_control` task calls.
+    /// Persistent Stage-C candidate slots carried across `tmc_control` task calls.
     ///
     /// Retains the Stage-C authority a `breakaway_seeded` campaign hands off to
     /// `integral_resume`, so the production build runs the full autotune
     /// hand-off exactly as the trace build does.
-    type IntegralCandidateTaskLocal =
-        foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot;
+    type IntegralCandidatesTaskLocal = IntegralRetentionSlots<{ TMC_CHANNEL_COUNT as usize }>;
 
     #[local]
     struct Local {
@@ -197,7 +198,7 @@ mod app {
         tmc_rx: Receiver<'static, TmcRequest, TMC_CHANNEL_SIZE>,
         tmc_status0: Input<'static>,
         wdg: IndependentWatchdog<'static, peripherals::IWDG1>,
-        integral_candidate: IntegralCandidateTaskLocal,
+        integral_candidates: IntegralCandidatesTaskLocal,
     }
 
     #[init(local = [
@@ -374,8 +375,7 @@ mod app {
                 tmc_rx,
                 tmc_status0,
                 wdg,
-                integral_candidate:
-                    foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot::new(),
+                integral_candidates: IntegralCandidatesTaskLocal::new(),
             },
         )
     }
@@ -421,7 +421,7 @@ mod app {
             tmc_enable,
             tmc_status0,
             tmc_rx,
-            integral_candidate,
+            integral_candidates,
             drivers: [foci_firmware::tmc_control::ChannelDriver; 2] = [
                 foci_firmware::tmc_control::ChannelDriver::new(0),
                 foci_firmware::tmc_control::ChannelDriver::new(1),
@@ -444,7 +444,7 @@ mod app {
         let enable_pins = ctx.local.tmc_enable;
         let status_pin0 = ctx.local.tmc_status0;
         let rx = ctx.local.tmc_rx;
-        let integral_candidate = ctx.local.integral_candidate;
+        let integral_candidates = ctx.local.integral_candidates;
         let drivers = ctx.local.drivers;
 
         let tmc_control_config = foci_firmware::tmc_control::TmcControlConfig::new(
@@ -619,7 +619,7 @@ mod app {
                     });
                     quiesce_all_channels(drivers, enable_pins);
                     shutdown_handled = complete;
-                    integral_candidate.observe_fault();
+                    integral_candidates.invalidate_all();
                 }
                 Mono::delay(1.millis()).await;
                 continue;
@@ -638,7 +638,7 @@ mod app {
             }
 
             if TMC_QUEUE_FLUSH.swap(false, Relaxed) {
-                integral_candidate.observe_fault();
+                integral_candidates.invalidate_all();
                 while rx.try_recv().is_ok() {}
                 let needs_disarm = [
                     channel_needs_safe_state(0, &drivers[0]),
@@ -873,7 +873,7 @@ mod app {
                                         drivers: &mut *drivers,
                                         tmc: &mut tmc,
                                         enable_pins,
-                                        integral_candidate: &mut *integral_candidate,
+                                        integral_candidates: &mut *integral_candidates,
                                     },
                                 )
                                 .await
@@ -954,12 +954,15 @@ mod app {
                         let mut tmc = tmc_driver(device);
                         let mut backend =
                             ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                        let integral_candidate = integral_candidates
+                            .slot_mut(ch)
+                            .expect("scheduled TMC channel");
                         let ctx_unit = drive_ctx(
                             now,
                             snapshot,
                             levels[idx],
                             &tmc_control_config,
-                            &mut *integral_candidate,
+                            integral_candidate,
                         );
                         Some(drivers[idx].drive(unit, &mut backend, ctx_unit).await)
                     }

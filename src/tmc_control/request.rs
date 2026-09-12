@@ -4,6 +4,7 @@ use core::sync::atomic::Ordering;
 
 use foci_firmware::autotune::CommissionError;
 use foci_firmware::commission_dispatch::{ReplyPayload, StepperPostAction};
+use foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlots;
 use foci_firmware::state::stepper::StepperChannelState;
 use foci_firmware::state::tmc::TmcChannelState;
 use foci_firmware::tmc::TmcRequest;
@@ -246,7 +247,7 @@ pub(crate) struct TmcControlRequestContext<'a, 'spi> {
     pub(crate) drivers: &'a mut [ChannelDriver; TMC_CHANNEL_COUNT as usize],
     pub(crate) tmc: &'a mut Tmc4671Spi<TmcSpiDevice<'spi>>,
     pub(crate) enable_pins: &'a mut TmcEnablePins,
-    pub(crate) integral_candidate: &'a mut foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot,
+    pub(crate) integral_candidates: &'a mut IntegralRetentionSlots<{ TMC_CHANNEL_COUNT as usize }>,
 }
 
 pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
@@ -260,9 +261,12 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         drivers,
         tmc,
         enable_pins,
-        integral_candidate,
+        integral_candidates,
     } = context;
     let driver = &mut drivers[channel as usize];
+    let integral_candidate = integral_candidates
+        .slot_mut(channel)
+        .expect("validated TMC channel");
 
     let mut board = OuroborosRequestBoard::new(
         channel,
