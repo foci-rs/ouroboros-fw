@@ -154,13 +154,6 @@ pub(crate) fn commissioning_request_blocked(
     false
 }
 
-#[allow(dead_code)]
-pub(crate) fn channel_may_be_energized(channel: u8, driver: &ChannelDriver) -> bool {
-    driver.runtime.is_motor_enabled()
-        || driver.runtime.is_commission_active()
-        || tmc_state(channel).motor_armed.load(Relaxed)
-}
-
 pub(crate) fn refresh_velocity_scale(channel: u8, runtime: &mut TmcControlRuntime) {
     refresh_velocity_scale_from_state(
         runtime,

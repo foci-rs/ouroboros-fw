@@ -14,10 +14,6 @@ pub(crate) const KATAPULT_BOOT_ADDRESS: u32 = 0x0800_0000;
 /// Signature at `bl_vectors[reset_handler - 9]` when a Katapult
 /// bootloader is resident.
 pub(crate) const KATAPULT_SIGNATURE: u64 = 0x2174_6f6f_426e_6143; // "CanBoot!"
-/// Request signature that keeps the MCU in the bootloader after reset
-/// (used by klipper-usb's 1200-baud DTR reflash path).
-#[allow(dead_code)]
-pub(crate) const KATAPULT_REQUEST: u64 = 0x5984_E3FA_6CA1_589B;
 /// Request signature that skips the bootloader on next boot
 /// (used for `FIRMWARE_RESTART`).
 pub(crate) const KATAPULT_BYPASS: u64 = 0x7b06_ec45_a9a8_243d;

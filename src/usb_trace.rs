@@ -30,8 +30,6 @@ pub(crate) const EVENT_USB_CONFIGURED: u16 = 2;
 pub(crate) const EVENT_MOTOR_ARM: u16 = 3;
 pub(crate) const EVENT_MOTOR_DISARM: u16 = 4;
 pub(crate) const EVENT_STATUS_INTERRUPT: u16 = 9;
-#[allow(dead_code)]
-pub(crate) const EVENT_SHUTDOWN: u16 = 10;
 
 const CRITICAL_HZ: u32 = 1000;
 const CONTROL_DETAIL_HZ: u32 = 500;
