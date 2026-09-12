@@ -70,22 +70,6 @@ pub(crate) enum CommissionWaitExit {
     Cancelled,
 }
 
-/// Decision made before the optional channel-1 critical-STATUS fallback.
-///
-/// The fallback this precheck used to gate was removed when the control
-/// loop moved to the shared `ChannelScheduler`/`ChannelDriver` shape, which
-/// polls both STATUS levels unconditionally at the top of every iteration
-/// instead. Kept for the containment classification it still documents and
-/// tests exercise.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CommissionWaitPrecheck {
-    /// Return to the outer containment path without performing fallback SPI.
-    Exit(CommissionWaitExit),
-    /// No containment state is observable, so fallback SPI is permitted.
-    PollCriticalStatus,
-}
-
 /// Classify board-owned signals checked between commissioning wait slices.
 pub(crate) const fn classify_commission_wait_exit(
     shutdown: bool,
@@ -107,32 +91,6 @@ pub(crate) const fn classify_commission_wait_exit(
         Some(CommissionWaitExit::ClockSyncExpired)
     } else {
         None
-    }
-}
-
-/// Decide whether a containment snapshot permits the fallback STATUS read.
-/// A clock-sync expiry is decided here too, before any SPI -- same
-/// motivation as the existing fault/shutdown/queue-flush prechecks: skip
-/// the channel-1 poll when a cheap flag already says to exit.
-#[allow(dead_code)]
-pub(crate) const fn classify_commission_wait_precheck(
-    shutdown: bool,
-    queue_flush: bool,
-    emergency_disable: bool,
-    fault_active: bool,
-    clock_sync_expired: bool,
-    cancel_requested: bool,
-) -> CommissionWaitPrecheck {
-    match classify_commission_wait_exit(
-        shutdown,
-        queue_flush,
-        emergency_disable,
-        fault_active,
-        clock_sync_expired,
-        cancel_requested,
-    ) {
-        Some(exit) => CommissionWaitPrecheck::Exit(exit),
-        None => CommissionWaitPrecheck::PollCriticalStatus,
     }
 }
 
@@ -368,30 +326,6 @@ mod tests {
         assert_eq!(
             classify_commission_wait_exit(false, false, false, false, true, true),
             Some(CommissionWaitExit::Cancelled)
-        );
-    }
-
-    #[test]
-    fn classify_commission_wait_precheck_exits_on_clock_sync_without_polling() {
-        assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, true, false),
-            CommissionWaitPrecheck::Exit(CommissionWaitExit::ClockSyncExpired)
-        );
-    }
-
-    #[test]
-    fn classify_commission_wait_precheck_polls_when_clock_sync_not_expired() {
-        assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, false, false),
-            CommissionWaitPrecheck::PollCriticalStatus
-        );
-    }
-
-    #[test]
-    fn classify_commission_wait_precheck_exits_on_cancel_requested_without_polling() {
-        assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, false, true),
-            CommissionWaitPrecheck::Exit(CommissionWaitExit::Cancelled)
         );
     }
 }

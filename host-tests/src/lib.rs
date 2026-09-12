@@ -982,50 +982,6 @@ mod step_dispatch;
 mod containment;
 
 #[cfg(test)]
-mod containment_tests {
-    use crate::containment::{
-        CommissionWaitExit, CommissionWaitPrecheck, classify_commission_wait_precheck,
-    };
-
-    #[test]
-    fn observable_containment_prevents_status_fallback() {
-        let cases = [
-            (true, false, false, false, CommissionWaitExit::Shutdown),
-            (false, true, false, false, CommissionWaitExit::QueueFlush),
-            (
-                false,
-                false,
-                true,
-                false,
-                CommissionWaitExit::EmergencyDisable,
-            ),
-            (
-                false,
-                false,
-                false,
-                true,
-                CommissionWaitExit::EmergencyDisable,
-            ),
-        ];
-
-        for (shutdown, flush, disable, fault, expected) in cases {
-            assert_eq!(
-                classify_commission_wait_precheck(shutdown, flush, disable, fault, false, false),
-                CommissionWaitPrecheck::Exit(expected),
-            );
-        }
-    }
-
-    #[test]
-    fn clear_containment_snapshot_permits_status_fallback() {
-        assert_eq!(
-            classify_commission_wait_precheck(false, false, false, false, false, false),
-            CommissionWaitPrecheck::PollCriticalStatus,
-        );
-    }
-}
-
-#[cfg(test)]
 mod pulse_train_tests {
     use foci_klipper::stepper::LogicalStepEvent;
     use std::vec::Vec;
