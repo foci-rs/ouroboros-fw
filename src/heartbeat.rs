@@ -48,13 +48,27 @@ pub fn stats_tick(
 
     let sample = foci_firmware::cpu_load::take(wall);
 
+    // Throwaway attribution: revert with the rest of this
+    // instrumentation once the residual investigation note is written.
+    let attribution = foci_firmware::idle_attribution::take(sample.sum, 0);
+
     // Track 32-bit clock wraps for `get_uptime`'s high word.
     let prev = stats_send_time.swap(now, Relaxed);
     if now < prev {
         stats_send_time_high.fetch_add(1, Relaxed);
     }
 
-    defmt::info!("stats tick");
+    defmt::info!(
+        "stats tick busy={} fast={} maintenance={} watchdog={} stats={} report={} stepper_diag={} residual={}",
+        sample.sum,
+        attribution.fast,
+        attribution.maintenance,
+        attribution.watchdog,
+        attribution.stats,
+        attribution.report,
+        attribution.stepper_diag,
+        attribution.residual,
+    );
     ::ankyra::klipper_reply_from!(
         &mut crate::_ankyra_config::Sender,
         Stats,
