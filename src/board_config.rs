@@ -92,6 +92,32 @@ pub(crate) const FEEDBACK_CONFIGS: [foci_firmware::config::FeedbackConfig;
     position_source: foci_firmware::config::FeedbackSource::Abn,
 }; TMC_CHANNEL_COUNT as usize];
 
+/// STM32H723 ADC instance owning PC4 (TH0) and PC5 (TH1).
+///
+/// Verified against the STM32H723xE/G datasheet (DS13313 Rev 5, cached at
+/// `docs/datasheets/STM32H723xx_datasheet.pdf`), Table 7 "STM32H723 pin and
+/// ball descriptions" (p. 60): the PC4 row lists additional functions
+/// `ADC12_INP4` / `OPAMP1_VOUT` / `COMP1_INM`, and the PC5 row lists
+/// `ADC12_INN4` / `ADC12_INP8` / `OPAMP1_VINM`. The `ADC12` prefix means
+/// these channels are wired to the shared ADC1/ADC2 analog input bank, not
+/// ADC3.
+/// ADC1 and ADC2 see identical external inputs on this family, so either
+/// works; ADC1 is picked here for no reason other than being first.
+#[allow(dead_code)] // consumed by Task 8's ADC peripheral construction
+pub(crate) type ExternalAdcInstance = embassy_stm32::peripherals::ADC1;
+
+/// STM32H723 ADC instance carrying the internal temperature sensor channel.
+///
+/// Verified against RM0468 (STM32H723 reference manual, Rev 3) Section
+/// 29.4.3 "ADC internal channels", Table 242 "ADC interconnection": `VSENSE`
+/// (internal temperature sensor), `VREFINT`, and `VBAT/4` are wired only to
+/// `ADC3 VINP[17]`, `VINP[18]`, and `VINP[16]` respectively -- these internal
+/// channels are not present on ADC1/ADC2 at all. This differs from
+/// `ExternalAdcInstance` above, so Task 8 must construct and hold both ADC1
+/// and ADC3 peripheral instances rather than sharing one.
+#[allow(dead_code)] // consumed by Task 8's ADC peripheral construction
+pub(crate) type InternalTempAdcInstance = embassy_stm32::peripherals::ADC3;
+
 /// Return the `shared/foci-firmware` `ANALOG_CHANNELS` slot index for a
 /// virtual analog-in pin. `TH0` (index 0) is the schematic's `TH1` net
 /// (TMC1 MOSFET thermistor, physical pin PC4); `TH1` (index 1) is the
