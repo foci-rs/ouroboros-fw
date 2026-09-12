@@ -1773,7 +1773,7 @@ mod app {
 
         // --- CC2: trigger scheduler (process before CC1) ---
         if cc2_pending {
-            tim5.sr().modify(|w| w.set_ccif(1, false));
+            clear_tim5_compare_flag(1);
             let mut need_report = false;
             with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_TIM5, |td| {
                 use foci_klipper::scheduler::SchedulerEventKind;
@@ -1967,7 +1967,7 @@ mod app {
             perf_sample.finish_dispatch();
             return;
         }
-        tim5.sr().modify(|w| w.set_ccif(0, false));
+        clear_tim5_compare_flag(0);
 
         let next_event_clocks = ctx.local.next_event_clocks;
         if FAULT_ACTIVE.load(Relaxed) {

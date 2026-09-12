@@ -46,6 +46,25 @@ pub(crate) fn request_arm_reconciliation(channel: u8) {
 /// (~16 s later).
 pub(crate) const STEP_TIMER_ARM_MIN_LEAD_TICKS: u32 = 128;
 
+/// Clear one TIM5 capture/compare flag without losing another flag that
+/// becomes pending concurrently.
+///
+/// TIM5 status flags are cleared by writing zero. A read-modify-write can
+/// therefore erase a different flag that changes from zero to one between
+/// the read and write. Writing ones to every other defined flag preserves
+/// them regardless of their sampled state.
+pub(crate) fn clear_tim5_compare_flag(compare_index: usize) {
+    let tim5 = embassy_stm32::pac::TIM5;
+    tim5.sr().write(|w| {
+        w.set_uif(true);
+        for index in 0..4 {
+            w.set_ccif(index, index != compare_index);
+            w.set_ccof(index, true);
+        }
+        w.set_tif(true);
+    });
+}
+
 #[inline]
 fn timer_is_before(a: u32, b: u32) -> bool {
     (a as i32).wrapping_sub(b as i32) < 0
@@ -75,7 +94,7 @@ pub(crate) fn arm_step_timer(clock: u32) {
     unsafe { cortex_m::peripheral::NVIC::unmask(embassy_stm32::pac::Interrupt::TIM5) };
     let clock = clamp_step_timer_clock(clock);
     tim5.ccr(0).write_value(clock);
-    tim5.sr().modify(|w| w.set_ccif(0, false)); // Clear pending CC1
+    clear_tim5_compare_flag(0);
     tim5.dier().modify(|w| w.set_ccie(0, true)); // Enable CC1 interrupt
 }
 
@@ -95,7 +114,7 @@ pub(crate) fn arm_step_timer_if_earlier(clock: u32) {
 
     if !tim5.dier().read().ccie(0) {
         tim5.ccr(0).write_value(clock);
-        tim5.sr().modify(|w| w.set_ccif(0, false));
+        clear_tim5_compare_flag(0);
         tim5.dier().modify(|w| w.set_ccie(0, true));
         return;
     }

@@ -48,6 +48,7 @@ mod commissioning_board_contract_tests {
     const TRIGGER_DOMAIN: &str = include_str!("../../src/trigger_domain.rs");
     const BOARD_INIT: &str = include_str!("../../src/board_init.rs");
     const INTERRUPTS: &str = include_str!("../../src/interrupts.rs");
+    const STEPPER_HELPERS: &str = include_str!("../../src/helpers/stepper.rs");
     const SHARED_AUTOTUNE_TYPES: &str =
         include_str!("../../../../shared/foci-firmware/src/autotune/types.rs");
     const SHARED_CALIBRATION: &str =
@@ -157,6 +158,21 @@ mod commissioning_board_contract_tests {
         );
         assert!(usb_clock.contains("set_usb_otg_hsen(true)"));
         assert!(extract_fn(MAIN, "init").contains("board_init::enable_usb_clock();"));
+    }
+
+    #[test]
+    fn tim5_compare_flags_use_race_safe_write_zero_to_clear_writes() {
+        let clear_compare = extract_fn(STEPPER_HELPERS, "clear_tim5_compare_flag");
+        assert!(clear_compare.contains("tim5.sr().write("));
+        assert!(!clear_compare.contains(".modify("));
+
+        for source in [MAIN, STEPPER_HELPERS, TRIGGER_DOMAIN] {
+            assert!(
+                !source.contains("tim5.sr().modify("),
+                "TIM5 compare flags must not use read-modify-write on a \
+                 write-zero-to-clear register"
+            );
+        }
     }
 
     #[test]

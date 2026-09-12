@@ -9,11 +9,13 @@
 
 use core::ops::{Deref, DerefMut};
 
-use crate::state::stepper::isr_stepper;
 use foci_firmware::context::trsync::{self, TriggerDispatchBoard, TriggerDomainState};
 use foci_firmware::diagnostic::StepperEventReason;
 use foci_klipper::step_queue::Consumer;
 use foci_klipper::stepper::StepMove;
+
+use crate::helpers::stepper::clear_tim5_compare_flag;
+use crate::state::stepper::isr_stepper;
 
 /// Detach a channel's `StepQueueChannel` consumer under a short,
 /// independent critical section, for a caller about to drain it outside
@@ -236,7 +238,7 @@ fn reprogram_cc2_inner(
         let clamped =
             foci_klipper::scheduler::timer_arm_clock(now, earliest, TRIGGER_TIMER_MIN_LEAD_TICKS);
         tim5.ccr(1).write_value(clamped);
-        tim5.sr().modify(|w| w.set_ccif(1, false));
+        clear_tim5_compare_flag(1);
         tim5.dier().modify(|w| w.set_ccie(1, true));
         // Ensure NVIC is unmasked (idempotent)
         unsafe {
@@ -339,7 +341,7 @@ fn stop_physical_stepper_inner(
     // 1. Disable CC1 only when this stop leaves no other channel active.
     if !other_active {
         tim5.dier().modify(|w| w.set_ccie(0, false));
-        tim5.sr().modify(|w| w.set_ccif(0, false));
+        clear_tim5_compare_flag(0);
     }
     // 2. Clear channel-local stepper atomics. Trigger-domain stops preserve
     // the electrical armed state; explicit P1 stop/disable paths clear
