@@ -125,6 +125,7 @@ pub(crate) type InternalTempAdcInstance = embassy_stm32::peripherals::ADC3;
 /// wire names intentionally follow this project's `STEP0`/`DIR0`
 /// convention, not the schematic's 1-indexed net labels -- do not "fix"
 /// this offset.
+#[allow(dead_code)] // consumed by Task 6's analog-in dispatch wiring
 pub(crate) fn analog_pin_channel(pin: u8) -> Option<u8> {
     match Pins::try_from(pin) {
         Ok(Pins::TH0) => Some(0),
