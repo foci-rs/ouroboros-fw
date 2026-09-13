@@ -20,8 +20,8 @@ use foci_firmware::context::stepper::{
 use foci_firmware::context::tmc as tmc_context;
 use foci_firmware::context::trsync::{self, TriggerDispatchBoard, TriggerDomainState, TrsyncBoard};
 use foci_firmware::context::{
-    BoardChannels, ClockSource, EndstopHost, QueueFull, ShutdownRecovery, StateAccess, StepperHost,
-    TmcHost, TrsyncHost,
+    AnalogInHost, BoardChannels, ClockSource, EndstopHost, QueueFull, ShutdownRecovery,
+    StateAccess, StepperHost, TmcHost, TrsyncHost,
 };
 use foci_firmware::diagnostic::StepperEventReason;
 use foci_firmware::state::trsync::ENDSTOP_PIN_IDS;
@@ -456,6 +456,12 @@ impl<'a> EndstopHost for FirmwareCtx<'a> {
             Ok(Pins::STALL1) => Some(1),
             _ => None,
         }
+    }
+}
+
+impl<'a> AnalogInHost for FirmwareCtx<'a> {
+    fn resolve_analog_pin(&self, pin: u8) -> Option<u8> {
+        crate::board_config::analog_pin_channel(pin)
     }
 }
 
