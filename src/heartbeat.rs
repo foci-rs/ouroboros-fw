@@ -6,7 +6,9 @@
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use embassy_stm32::peripherals;
 use embassy_stm32::wdg::IndependentWatchdog;
-use foci_firmware::ankyra::replies::{FociStepperEvent, FociStepperPerfEvent, Stats, TrsyncState};
+use foci_firmware::ankyra::replies::{
+    AnalogInState, FociStepperEvent, FociStepperPerfEvent, Stats, TrsyncState,
+};
 
 /// Period between independent-watchdog service ticks.
 pub const WATCHDOG_INTERVAL_MS: u64 = 5_000;
@@ -94,6 +96,90 @@ where
             );
         }
     });
+}
+
+/// Sample every configured analog-in channel that is due, sending
+/// `analog_in_state` replies. Returns `true` if any channel's sustained
+/// out-of-range readings require the caller to enter the shutdown state --
+/// this function itself has no access to `app_state` and must not dispatch
+/// a shutdown on its own. Called from the `analog_sampling` RTIC task's
+/// loop body; see `main.rs` for the `Mono::delay` wrapper and the
+/// clock-domain note on why `now` must be a TIM5 tick, not a `Mono` tick.
+#[must_use]
+pub fn analog_sampling_tick(
+    adc: &mut embassy_stm32::adc::Adc<'static, crate::board_config::ExternalAdcInstance>,
+    adc_internal: &mut embassy_stm32::adc::Adc<
+        'static,
+        crate::board_config::InternalTempAdcInstance,
+    >,
+    temp_channel: &mut embassy_stm32::adc::Vbat,
+    th0_pin: &mut embassy_stm32::Peri<'static, peripherals::PC4>,
+    th1_pin: &mut embassy_stm32::Peri<'static, peripherals::PC5>,
+    mcu_temp_calibration: &foci_firmware::mcu_temp::FactoryCalibration,
+    now: u32,
+) -> bool {
+    use embassy_stm32::adc::SampleTime;
+
+    let mut shutdown_requested = false;
+
+    if let Some(channel) = foci_firmware::analog_in::analog_channel(0)
+        && channel.is_due(now)
+    {
+        let raw = adc.blocking_read(th0_pin, SampleTime::CYCLES810_5);
+        shutdown_requested |= emit_analog_sample(channel, raw, now);
+    }
+    if let Some(channel) = foci_firmware::analog_in::analog_channel(1)
+        && channel.is_due(now)
+    {
+        let raw = adc.blocking_read(th1_pin, SampleTime::CYCLES810_5);
+        shutdown_requested |= emit_analog_sample(channel, raw, now);
+    }
+    if let Some(channel) = foci_firmware::analog_in::analog_channel(2)
+        && channel.is_due(now)
+    {
+        let raw_internal = adc_internal.blocking_read(temp_channel, SampleTime::CYCLES810_5);
+        let synthesized = foci_firmware::mcu_temp::synthesize_mcu_temp_reading(
+            mcu_temp_calibration,
+            raw_internal,
+            crate::ankyra::constants::ADC_MAX as f32,
+            1, // AnalogChannelState::record_sample's own accumulation enforces the host's sample_count
+        );
+        shutdown_requested |= emit_analog_sample(channel, synthesized, now);
+    }
+    shutdown_requested
+}
+
+/// Record one raw read, send its `analog_in_state` reply if a burst just
+/// completed, and report whether that report was a sustained out-of-range
+/// trip. Never dispatches a shutdown itself -- see the note above on why
+/// that must happen in the caller, which alone can lock `app_state`.
+#[must_use]
+fn emit_analog_sample(
+    channel: &foci_firmware::analog_in::AnalogChannelState,
+    raw: u16,
+    now: u32,
+) -> bool {
+    let Some(oid) = channel.oid() else {
+        return false;
+    };
+    if let foci_firmware::analog_in::SampleStep::Report {
+        value,
+        next_due_clock,
+        shutdown,
+        ..
+    } = channel.record_sample(raw, now)
+    {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            AnalogInState,
+            oid: u8 = oid,
+            next_clock: u32 = next_due_clock,
+            value: u16 = value,
+        );
+        shutdown
+    } else {
+        false
+    }
 }
 
 /// Drain pending stepper diagnostic events and emit host-visible replies.

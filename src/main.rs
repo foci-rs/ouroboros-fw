@@ -199,6 +199,13 @@ mod app {
         tmc_status0: Input<'static>,
         wdg: IndependentWatchdog<'static, peripherals::IWDG1>,
         integral_candidates: IntegralCandidatesTaskLocal,
+        adc: embassy_stm32::adc::Adc<'static, crate::board_config::ExternalAdcInstance>,
+        adc_internal:
+            embassy_stm32::adc::Adc<'static, crate::board_config::InternalTempAdcInstance>,
+        temp_channel: embassy_stm32::adc::Vbat,
+        th0_pin: embassy_stm32::Peri<'static, peripherals::PC4>,
+        th1_pin: embassy_stm32::Peri<'static, peripherals::PC5>,
+        mcu_temp_calibration: foci_firmware::mcu_temp::FactoryCalibration,
     }
 
     #[init(local = [
@@ -356,12 +363,46 @@ mod app {
                 .write(TriggerDomain::new());
         }
 
+        // TH0 (PC4) / TH1 (PC5) share ADC1; the internal temperature sensor
+        // is only wired to ADC3 on this chip (see board_config.rs's
+        // ExternalAdcInstance/InternalTempAdcInstance docs), so two separate
+        // Adc instances are constructed.
+        // embassy-stm32's Adc::new() leaves ADC_CFGR.RES at its hardware
+        // reset default, which real Klipper's stm32h7_adc.c explicitly
+        // overrides to 12-bit for ADC1/ADC2 (the H723's v4 IP resets to a
+        // wider mode); ADC_MAX and every downstream Steinhart-Hart/
+        // calibration computation in this feature assume 12-bit counts.
+        let adc = embassy_stm32::adc::Adc::new_with_config(
+            p.ADC1,
+            embassy_stm32::adc::AdcConfig {
+                resolution: Some(embassy_stm32::adc::Resolution::BITS12),
+                ..Default::default()
+            },
+        );
+        // ADC3's RES field is 2 bits wide at CFGR[4:3] (reset value 00 =
+        // 12-bit), unlike ADC1/ADC2's 3-bit field at CFGR[4:2]. Applying
+        // Resolution::BITS12's bit pattern (built for the 3-bit field) to
+        // ADC3 lands as RES=01 (10-bit), so retain ADC3's reset resolution.
+        let adc_internal = embassy_stm32::adc::Adc::new(p.ADC3);
+        // embassy-stm32 0.6.0 maps `Temperature` to ADC3 channel 18 for
+        // every stm32h7 part, but the H723's internal temperature sensor is
+        // wired to channel 17 (18 is unused on this variant). `Vbat`'s
+        // channel constant happens to be 17 in this crate version, so its
+        // marker reaches the right channel; `enable_temperature()` still
+        // asserts CCR.VSENSEEN to route the real VSENSE signal onto it.
+        adc_internal.enable_temperature();
+        let temp_channel = embassy_stm32::adc::Vbat;
+        let th0_pin = p.PC4;
+        let th1_pin = p.PC5;
+        let mcu_temp_calibration = crate::board_config::read_mcu_temp_calibration();
+
         // Spawn tasks
         stepper_reconcile::spawn().expect("stepper reconciliation worker must spawn exactly once");
         tmc_control::spawn().expect("tmc_control task must spawn exactly once");
         usb_task::spawn().expect("usb_task must spawn exactly once");
         stats::spawn().expect("stats task must spawn exactly once");
         watchdog::spawn().expect("watchdog task must spawn exactly once");
+        analog_sampling::spawn().expect("analog_sampling task must spawn exactly once");
 
         defmt::info!("FOCI Ouroboros initialized");
 
@@ -376,6 +417,12 @@ mod app {
                 tmc_status0,
                 wdg,
                 integral_candidates: IntegralCandidatesTaskLocal::new(),
+                adc,
+                adc_internal,
+                temp_channel,
+                th0_pin,
+                th1_pin,
+                mcu_temp_calibration,
             },
         )
     }
@@ -2111,6 +2158,47 @@ mod app {
         loop {
             Mono::delay(crate::heartbeat::WATCHDOG_INTERVAL_MS.millis()).await;
             crate::heartbeat::watchdog_tick(ctx.local.wdg);
+        }
+    }
+
+    /// Sample TH0/TH1/MCU_TEMP at low priority and report readings to the
+    /// host, entering the shutdown state on a sustained out-of-range
+    /// reading.
+    ///
+    /// The 1ms poll period is coarse relative to `AnalogChannelState`'s own
+    /// `sample_ticks`/`rest_ticks` pacing (in TIM5-domain ticks via
+    /// `read_tim5()`, not this loop's `Mono` wakeup) -- this task only needs
+    /// to wake often enough that no configured channel's due sample is ever
+    /// late by more than one period.
+    #[task(
+        priority = 1,
+        shared = [app_state],
+        local = [adc, adc_internal, temp_channel, th0_pin, th1_pin, mcu_temp_calibration]
+    )]
+    async fn analog_sampling(mut ctx: analog_sampling::Context) {
+        loop {
+            Mono::delay(1.millis()).await;
+            let now = read_tim5();
+            let shutdown_requested = crate::heartbeat::analog_sampling_tick(
+                ctx.local.adc,
+                ctx.local.adc_internal,
+                ctx.local.temp_channel,
+                ctx.local.th0_pin,
+                ctx.local.th1_pin,
+                ctx.local.mcu_temp_calibration,
+                now,
+            );
+            if shutdown_requested {
+                ctx.shared.app_state.lock(|state| {
+                    if crate::firmware_ctx::enter_shutdown(state) {
+                        foci_firmware::dispatch_shutdown!(
+                            foci_firmware::shutdown::ShutdownReason::AdcOutOfRange,
+                            now,
+                            &mut crate::_ankyra_config::Sender
+                        );
+                    }
+                });
+            }
         }
     }
 }

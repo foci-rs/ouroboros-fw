@@ -31,5 +31,8 @@
         ENA1,
         STALL0,
         STALL1,
+        TH0,
+        TH1,
+        MCU_TEMP,
     }
 }

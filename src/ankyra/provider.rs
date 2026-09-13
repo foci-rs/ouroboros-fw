@@ -31,6 +31,7 @@ ankyra::ankyra_provider! {
         crate::ankyra::enumerations::Pins,
     ],
     constants: [
+        crate::ankyra::constants::ADC_MAX,
         crate::ankyra::constants::CLOCK_FREQ,
         crate::ankyra::constants::ENVELOPE_ABSOLUTE_MARGIN_MREV_S,
         crate::ankyra::constants::ENVELOPE_PROPORTIONAL_DEN,
@@ -72,6 +73,7 @@ ankyra::ankyra_provider! {
         crate::ankyra::enumerations::Pins,
     ],
     constants: [
+        crate::ankyra::constants::ADC_MAX,
         crate::ankyra::constants::CLOCK_FREQ,
         crate::ankyra::constants::ENVELOPE_ABSOLUTE_MARGIN_MREV_S,
         crate::ankyra::constants::ENVELOPE_PROPORTIONAL_DEN,
