@@ -134,6 +134,37 @@ pub(crate) fn analog_pin_channel(pin: u8) -> Option<u8> {
     }
 }
 
+/// STM32H723 internal temperature sensor factory calibration, read from
+/// ST's documented system-memory addresses (RM0468 device electronic
+/// signature section). `TS_CAL1` is captured at 30C, `TS_CAL2` at 130C,
+/// both at 3.3V VDDA per the datasheet -- confirm this against the
+/// STM32H723 datasheet's "temperature sensor characteristics" table before
+/// relying on it.
+const TS_CAL1_ADDR: *const u16 = 0x1FF1_E820 as *const u16;
+const TS_CAL2_ADDR: *const u16 = 0x1FF1_E840 as *const u16;
+const TS_CAL1_TEMP_C: f32 = 30.0;
+const TS_CAL2_TEMP_C: f32 = 130.0;
+
+/// Read the STM32H723's factory-programmed temperature sensor calibration.
+///
+/// # Safety
+/// These addresses are ST's documented read-only system memory calibration
+/// area, valid on every STM32H723 device -- reading them is always safe;
+/// this function exists only to centralize the `unsafe` block, not because
+/// the read itself is conditionally unsafe.
+#[allow(dead_code)] // consumed by Task 8's MCU_TEMP init-time cache
+pub(crate) fn read_mcu_temp_calibration() -> foci_firmware::mcu_temp::FactoryCalibration {
+    // SAFETY: TS_CAL1_ADDR/TS_CAL2_ADDR are ST's documented factory
+    // calibration addresses in system memory, present and readable on
+    // every STM32H723 device.
+    let cal1 = unsafe { core::ptr::read_volatile(TS_CAL1_ADDR) };
+    let cal2 = unsafe { core::ptr::read_volatile(TS_CAL2_ADDR) };
+    foci_firmware::mcu_temp::FactoryCalibration {
+        cal_low: (TS_CAL1_TEMP_C, cal1),
+        cal_high: (TS_CAL2_TEMP_C, cal2),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
