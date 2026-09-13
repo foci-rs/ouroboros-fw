@@ -103,7 +103,6 @@ pub(crate) const FEEDBACK_CONFIGS: [foci_firmware::config::FeedbackConfig;
 /// ADC3.
 /// ADC1 and ADC2 see identical external inputs on this family, so either
 /// works; ADC1 is picked here for no reason other than being first.
-#[allow(dead_code)] // consumed by Task 8's ADC peripheral construction
 pub(crate) type ExternalAdcInstance = embassy_stm32::peripherals::ADC1;
 
 /// STM32H723 ADC instance carrying the internal temperature sensor channel.
@@ -115,7 +114,6 @@ pub(crate) type ExternalAdcInstance = embassy_stm32::peripherals::ADC1;
 /// channels are not present on ADC1/ADC2 at all. This differs from
 /// `ExternalAdcInstance` above, so Task 8 must construct and hold both ADC1
 /// and ADC3 peripheral instances rather than sharing one.
-#[allow(dead_code)] // consumed by Task 8's ADC peripheral construction
 pub(crate) type InternalTempAdcInstance = embassy_stm32::peripherals::ADC3;
 
 /// Return the `shared/foci-firmware` `ANALOG_CHANNELS` slot index for a
@@ -153,7 +151,6 @@ const TS_CAL2_TEMP_C: f32 = 130.0;
 /// area, valid on every STM32H723 device -- reading them is always safe;
 /// this function exists only to centralize the `unsafe` block, not because
 /// the read itself is conditionally unsafe.
-#[allow(dead_code)] // consumed by Task 8's MCU_TEMP init-time cache
 pub(crate) fn read_mcu_temp_calibration() -> foci_firmware::mcu_temp::FactoryCalibration {
     // SAFETY: TS_CAL1_ADDR/TS_CAL2_ADDR are ST's documented factory
     // calibration addresses in system memory, present and readable on
