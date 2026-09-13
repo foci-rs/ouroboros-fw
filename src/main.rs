@@ -202,7 +202,7 @@ mod app {
         adc: embassy_stm32::adc::Adc<'static, crate::board_config::ExternalAdcInstance>,
         adc_internal:
             embassy_stm32::adc::Adc<'static, crate::board_config::InternalTempAdcInstance>,
-        temp_channel: embassy_stm32::adc::Temperature,
+        temp_channel: embassy_stm32::adc::Vbat,
         th0_pin: embassy_stm32::Peri<'static, peripherals::PC4>,
         th1_pin: embassy_stm32::Peri<'static, peripherals::PC5>,
         mcu_temp_calibration: foci_firmware::mcu_temp::FactoryCalibration,
@@ -379,14 +379,19 @@ mod app {
                 ..Default::default()
             },
         );
-        let adc_internal = embassy_stm32::adc::Adc::new_with_config(
-            p.ADC3,
-            embassy_stm32::adc::AdcConfig {
-                resolution: Some(embassy_stm32::adc::Resolution::BITS12),
-                ..Default::default()
-            },
-        );
-        let temp_channel = adc_internal.enable_temperature();
+        // ADC3's RES field is 2 bits wide at CFGR[4:3] (reset value 00 =
+        // 12-bit), unlike ADC1/ADC2's 3-bit field at CFGR[4:2]. Applying
+        // Resolution::BITS12's bit pattern (built for the 3-bit field) to
+        // ADC3 lands as RES=01 (10-bit), so retain ADC3's reset resolution.
+        let adc_internal = embassy_stm32::adc::Adc::new(p.ADC3);
+        // embassy-stm32 0.6.0 maps `Temperature` to ADC3 channel 18 for
+        // every stm32h7 part, but the H723's internal temperature sensor is
+        // wired to channel 17 (18 is unused on this variant). `Vbat`'s
+        // channel constant happens to be 17 in this crate version, so its
+        // marker reaches the right channel; `enable_temperature()` still
+        // asserts CCR.VSENSEEN to route the real VSENSE signal onto it.
+        adc_internal.enable_temperature();
+        let temp_channel = embassy_stm32::adc::Vbat;
         let th0_pin = p.PC4;
         let th1_pin = p.PC5;
         let mcu_temp_calibration = crate::board_config::read_mcu_temp_calibration();

@@ -112,7 +112,7 @@ pub fn analog_sampling_tick(
         'static,
         crate::board_config::InternalTempAdcInstance,
     >,
-    temp_channel: &mut embassy_stm32::adc::Temperature,
+    temp_channel: &mut embassy_stm32::adc::Vbat,
     th0_pin: &mut embassy_stm32::Peri<'static, peripherals::PC4>,
     th1_pin: &mut embassy_stm32::Peri<'static, peripherals::PC5>,
     mcu_temp_calibration: &foci_firmware::mcu_temp::FactoryCalibration,
