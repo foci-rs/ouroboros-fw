@@ -367,8 +367,25 @@ mod app {
         // is only wired to ADC3 on this chip (see board_config.rs's
         // ExternalAdcInstance/InternalTempAdcInstance docs), so two separate
         // Adc instances are constructed.
-        let adc = embassy_stm32::adc::Adc::new(p.ADC1);
-        let adc_internal = embassy_stm32::adc::Adc::new(p.ADC3);
+        // embassy-stm32's Adc::new() leaves ADC_CFGR.RES at its hardware
+        // reset default, which real Klipper's stm32h7_adc.c explicitly
+        // overrides to 12-bit for ADC1/ADC2 (the H723's v4 IP resets to a
+        // wider mode); ADC_MAX and every downstream Steinhart-Hart/
+        // calibration computation in this feature assume 12-bit counts.
+        let adc = embassy_stm32::adc::Adc::new_with_config(
+            p.ADC1,
+            embassy_stm32::adc::AdcConfig {
+                resolution: Some(embassy_stm32::adc::Resolution::BITS12),
+                ..Default::default()
+            },
+        );
+        let adc_internal = embassy_stm32::adc::Adc::new_with_config(
+            p.ADC3,
+            embassy_stm32::adc::AdcConfig {
+                resolution: Some(embassy_stm32::adc::Resolution::BITS12),
+                ..Default::default()
+            },
+        );
         let temp_channel = adc_internal.enable_temperature();
         let th0_pin = p.PC4;
         let th1_pin = p.PC5;
