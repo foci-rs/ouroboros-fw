@@ -974,21 +974,6 @@ mod app {
             };
             let unit_cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(unit_start);
             scheduler.record(now_us(), unit_cycles);
-            // Throwaway attribution: revert with the rest of this
-            // instrumentation once the residual investigation note is
-            // written. `unit_cycles` is DWT cycles at the 520 MHz CPU
-            // clock; `busy` in `cpu_load` is TIM5-domain ticks at the
-            // 260 MHz `CLOCK_FREQ` -- halve to compare against the same
-            // tick domain as busy (the same conversion a prior idle-
-            // residency investigation established).
-            let attribution_ticks = unit_cycles / 2;
-            match unit.class {
-                UnitClass::Fast => foci_firmware::idle_attribution::record_fast(attribution_ticks),
-                UnitClass::Maintenance | UnitClass::MaintenanceFinalize => {
-                    foci_firmware::idle_attribution::record_maintenance(attribution_ticks)
-                }
-                _ => {}
-            }
             let Some(outcome) = outcome else {
                 continue;
             };
@@ -2081,9 +2066,6 @@ mod app {
     /// sends replies at P2 without holding the lock.
     #[task(priority = 2)]
     async fn report_task(_ctx: report_task::Context) {
-        // Throwaway attribution: revert with the rest of this
-        // instrumentation once the residual investigation note is written.
-        let start = cortex_m::peripheral::DWT::cycle_count();
         crate::heartbeat::emit_trigger_reports(
             |snaps| {
                 with_trigger_domain(|td| {
@@ -2096,19 +2078,12 @@ mod app {
             },
             &REPORT_PENDING,
         );
-        let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start);
-        foci_firmware::idle_attribution::record_report(cycles / 2);
     }
 
     /// Send pending stepper diagnostic events outside ISR/P1 contexts.
     #[task(priority = 2)]
     async fn stepper_diag_task(_ctx: stepper_diag_task::Context) {
-        // Throwaway attribution: revert with the rest of this
-        // instrumentation once the residual investigation note is written.
-        let start = cortex_m::peripheral::DWT::cycle_count();
         crate::heartbeat::emit_stepper_diagnostics(&STEPPER_DIAG_PENDING);
-        let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start);
-        foci_firmware::idle_attribution::record_stepper_diag(cycles / 2);
     }
 
     /// Periodic stats heartbeat sent to Klipper.
@@ -2121,18 +2096,12 @@ mod app {
         let mut accumulator = crate::heartbeat::StatsAccumulator::new(read_tim5());
         loop {
             Mono::delay(5000.millis()).await;
-            // Throwaway attribution: revert with the rest of this
-            // instrumentation once the residual investigation note is
-            // written. This measures the call, not the delay above it.
-            let start = cortex_m::peripheral::DWT::cycle_count();
             crate::heartbeat::stats_tick(
                 &mut accumulator,
                 read_tim5(),
                 &STATS_SEND_TIME,
                 &STATS_SEND_TIME_HIGH,
             );
-            let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start);
-            foci_firmware::idle_attribution::record_stats(cycles / 2);
         }
     }
 
@@ -2141,13 +2110,7 @@ mod app {
     async fn watchdog(ctx: watchdog::Context) {
         loop {
             Mono::delay(crate::heartbeat::WATCHDOG_INTERVAL_MS.millis()).await;
-            // Throwaway attribution: revert with the rest of this
-            // instrumentation once the residual investigation note is
-            // written.
-            let start = cortex_m::peripheral::DWT::cycle_count();
             crate::heartbeat::watchdog_tick(ctx.local.wdg);
-            let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start);
-            foci_firmware::idle_attribution::record_watchdog(cycles / 2);
         }
     }
 }
