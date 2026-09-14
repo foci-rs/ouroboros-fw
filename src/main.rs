@@ -477,14 +477,15 @@ mod app {
     )]
     async fn tmc_control(mut ctx: tmc_control::Context) {
         use crate::tmc_control::board::{
-            ChannelDevice, device_or_invalid, drive_ctx, enable_status_capture_ch1,
-            enable_status_exti_ch0, park_shutdown, status_levels,
+            ChannelDevice, STATUS_CRITICAL_MASK, device_or_invalid, drive_ctx,
+            enable_status_capture_ch1, enable_status_exti_ch0, park_shutdown, status_levels,
         };
         use core::sync::atomic::Ordering::Relaxed;
         use embassy_futures::select::{Either, select};
         use foci_firmware::tmc_control::scheduler::{ChannelMode, ChannelScheduler, UnitClass};
         use foci_firmware::tmc_control::{
             AuditResult, CommissionNext, CommissionWaitRequestDisposition, UnitOutcome,
+            bootstrap_tmc_safety,
         };
 
         let mux = ctx.local.tmc_mux;
@@ -553,6 +554,23 @@ mod app {
                 }
             }};
         }
+
+        per_channel!(|ch, _idx| {
+            match device_or_invalid(mux, ch) {
+                ChannelDevice::Device(device) => {
+                    let mut tmc = tmc_driver(device);
+                    let mut backend = ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
+                    if let Err(failure) =
+                        bootstrap_tmc_safety(&mut backend, ch, STATUS_CRITICAL_MASK).await
+                    {
+                        shutdown_reason!(failure.shutdown_reason(ch));
+                    }
+                }
+                ChannelDevice::Invalid => {
+                    shutdown!("Invalid TMC channel");
+                }
+            }
+        });
 
         'control_loop: loop {
             #[cfg(feature = "usb-p1-probe")]
