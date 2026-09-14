@@ -967,6 +967,40 @@ mod commissioning_board_contract_tests {
              runner's one-shot poll"
         );
     }
+
+    #[test]
+    fn safety_bootstrap_runs_before_the_first_status_pin_read_and_before_drive() {
+        let tmc_control_fn = extract_fn(MAIN, "tmc_control");
+        let bootstrap_pos = tmc_control_fn
+            .find("bootstrap_tmc_safety(")
+            .expect("eager safety-bootstrap call must exist in tmc_control()");
+        let status_read_pos = tmc_control_fn
+            .find("status_levels(status_pin0)")
+            .expect("the control loop's STATUS-pin read must exist in tmc_control()");
+        let drive_call_pos = tmc_control_fn
+            .find(".drive(unit, &mut backend, ctx_unit)")
+            .or_else(|| tmc_control_fn.find("drivers[idx].drive("))
+            .expect("a per-channel drive() call must exist in tmc_control()");
+        let window_end = (bootstrap_pos + 200).min(tmc_control_fn.len());
+
+        assert!(
+            bootstrap_pos < status_read_pos,
+            "safety bootstrap must run before the control loop's first STATUS-pin \
+             read -- a stale STATUS_MASK from a prior session can otherwise trip \
+             the emergency-disable branch before bootstrap ever corrects it, \
+             permanently skipping the correction on every subsequent boot"
+        );
+        assert!(
+            bootstrap_pos < drive_call_pos,
+            "safety bootstrap must run before any per-channel drive() call"
+        );
+        assert!(
+            tmc_control_fn[bootstrap_pos..window_end].contains(", ch,"),
+            "the eager bootstrap call must pass the per_channel! loop variable \
+             `ch`, not a hardcoded channel number -- otherwise only one of the \
+             two channels is protected"
+        );
+    }
 }
 
 #[path = "../../src/state/stepper.rs"]
