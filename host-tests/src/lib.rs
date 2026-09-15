@@ -184,6 +184,28 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn maintenance_quiescence_reads_handoff_sources_before_request_latches() {
+        let builder = extract_fn(BOARD, "maintenance_channel_snapshot");
+        let timer = builder
+            .find("step_timer_active:")
+            .expect("step-timer source read");
+        let queue = builder
+            .find("step_queue_empty:")
+            .expect("step-queue source read");
+        let feedforward = builder
+            .find("feedforward_reset:")
+            .expect("feed-forward request-latch read");
+        let pid = builder
+            .find("pid_error_sums_clear:")
+            .expect("PID-clear request-latch read");
+
+        for source in [timer, queue] {
+            assert!(source < feedforward);
+            assert!(source < pid);
+        }
+    }
+
+    #[test]
     fn tim5_compare_flags_use_race_safe_write_zero_to_clear_writes() {
         let clear_compare = extract_fn(STEPPER_HELPERS, "clear_tim5_compare_flag");
         assert!(clear_compare.contains("tim5.sr().write("));

@@ -181,12 +181,12 @@ fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelM
         motor_armed: tmc.motor_armed.load(Relaxed),
         commission_in_flight: tmc.commission_in_flight.load(Relaxed),
         config_apply_pending: tmc.config_apply_pending.load(Relaxed),
-        feedforward_reset: tmc.feedforward_reset.load(Relaxed),
-        pid_error_sums_clear: tmc.pid_error_sums_clear.load(Relaxed),
         homing_clamp_active: tmc.homing_clamp_active.load(Relaxed),
         stall_latched: tmc.stall_latched.load(Relaxed),
         step_timer_active: stepper.timer_active_mirror.load(Relaxed),
         step_queue_empty: STEP_QUEUE_CHANNELS[channel as usize].is_empty(),
+        feedforward_reset: tmc.feedforward_reset.load(Relaxed),
+        pid_error_sums_clear: tmc.pid_error_sums_clear.load(Relaxed),
     }
 }
 
