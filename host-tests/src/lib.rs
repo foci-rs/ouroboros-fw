@@ -63,6 +63,7 @@ mod commissioning_board_contract_tests {
     const TMC_STATE: &str = include_str!("../../src/state/tmc.rs");
     const TMC_HELPERS: &str = include_str!("../../src/helpers/tmc.rs");
     const FIRMWARE_CTX: &str = include_str!("../../src/firmware_ctx.rs");
+    const HOMING_WAKE: &str = include_str!("../../src/tmc_control/wake.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -941,10 +942,46 @@ mod commissioning_board_contract_tests {
         assert_eq!(control.matches("TmcControlEvent::").count(), 2);
         assert!(control.contains("TmcControlEvent::Request(req)"));
         assert!(control.contains("TmcControlEvent::HomingStart"));
-        assert!(
-            !control.contains("HOMING_START_PENDING.store(false"),
-            "this intermediate task must leave the authoritative latch set"
+        assert_eq!(
+            control
+                .matches("HOMING_START_PENDING.store(false, Release)")
+                .count(),
+            2,
+            "only successful state-1 advance and fail-closed containment release the latch"
         );
+    }
+
+    #[test]
+    fn homing_wake_keeps_the_control_wait_to_two_futures() {
+        let control = extract_fn(MAIN, "tmc_control");
+
+        assert_eq!(control.matches("select(").count(), 1);
+        assert!(control.contains("select(rx.recv(), control_sleep)"));
+        assert!(!control.contains("select3"));
+        assert!(!control.contains("select(rx.recv(), control_sleep,"));
+        assert!(control.contains("HomingWait::MaintenanceOnly"));
+        assert!(control.contains("scheduler.maintenance_due_us()"));
+        assert!(control.contains("HomingWait::ProcessRetained"));
+        assert!(HOMING_WAKE.contains("retained_request: Option<T>"));
+
+        let pre_wait_latch = control
+            .find("HOMING_START_PENDING.load(Acquire)")
+            .expect("authoritative latch check before the wait");
+        let select = control.find("select(rx.recv()").expect("two-future select");
+        let post_receive_latch = control[select..]
+            .find("HOMING_START_PENDING.load(Acquire)")
+            .expect("authoritative latch check after receive");
+        assert!(pre_wait_latch < select);
+        assert!(post_receive_latch > 0);
+
+        let maintenance_only = control
+            .find("HomingWait::MaintenanceOnly =>")
+            .expect("maintenance-only wait arm");
+        let receiver_wait = control[maintenance_only..]
+            .find("HomingWait::ReceiverOrDeadline =>")
+            .map(|offset| maintenance_only + offset)
+            .expect("receiver wait arm");
+        assert!(!control[maintenance_only..receiver_wait].contains("rx.recv()"));
     }
 
     #[test]
@@ -1142,6 +1179,100 @@ mod step_dispatch;
 
 #[path = "../../src/tmc_control/containment.rs"]
 mod containment;
+
+#[cfg(test)]
+mod homing_wake_policy_tests {
+    mod policy {
+        include!("../../src/tmc_control/wake.rs");
+    }
+
+    use policy::{
+        HomingPreparationProgress, HomingReceive, HomingWait, HomingWakeEvent, HomingWakePolicy,
+    };
+
+    #[test]
+    fn homing_wake_dispatches_unlatched_requests_and_doorbells() {
+        let mut policy = HomingWakePolicy::new();
+
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(7), false),
+            HomingReceive::Process(7)
+        );
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::<u8>::HomingStart, true),
+            HomingReceive::Doorbell
+        );
+        assert_eq!(policy.take_retained_request(), None);
+    }
+
+    #[test]
+    fn homing_wake_retains_a_racing_request_without_overwrite() {
+        let mut policy = HomingWakePolicy::new();
+
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(7), true),
+            HomingReceive::Retained
+        );
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(9), true),
+            HomingReceive::RetainedSlotOccupied(9)
+        );
+        assert_eq!(policy.take_retained_request(), Some(7));
+    }
+
+    #[test]
+    fn homing_wake_uses_only_maintenance_while_urgent() {
+        let mut policy = HomingWakePolicy::new();
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(7), true),
+            HomingReceive::Retained
+        );
+
+        assert_eq!(policy.next_wait(true, false), HomingWait::MaintenanceOnly);
+        assert_eq!(policy.next_wait(true, true), HomingWait::RunScheduler);
+        assert_eq!(policy.next_wait(false, false), HomingWait::ProcessRetained);
+    }
+
+    #[test]
+    fn homing_wake_retry_keeps_the_latch_and_success_releases_once() {
+        let mut policy = HomingWakePolicy::new();
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(7), true),
+            HomingReceive::Retained
+        );
+
+        assert!(!HomingWakePolicy::<u8>::should_clear_latch(
+            HomingPreparationProgress::Retry
+        ));
+        assert_eq!(policy.next_wait(true, true), HomingWait::RunScheduler);
+        assert!(HomingWakePolicy::<u8>::should_clear_latch(
+            HomingPreparationProgress::Advanced
+        ));
+        assert_eq!(policy.next_wait(false, false), HomingWait::ProcessRetained);
+        assert_eq!(policy.take_retained_request(), Some(7));
+        assert_eq!(policy.take_retained_request(), None);
+        assert_eq!(
+            policy.next_wait(false, false),
+            HomingWait::ReceiverOrDeadline
+        );
+    }
+
+    #[test]
+    fn homing_wake_fail_closed_releases_latch_ownership() {
+        let mut policy = HomingWakePolicy::new();
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(7), true),
+            HomingReceive::Retained
+        );
+
+        assert!(HomingWakePolicy::<u8>::should_clear_latch(
+            HomingPreparationProgress::FailClosed
+        ));
+        assert_eq!(policy.next_wait(false, false), HomingWait::ProcessRetained);
+        assert_eq!(policy.take_retained_request(), Some(7));
+        assert_eq!(policy.take_retained_request(), None);
+    }
+}
 
 #[cfg(test)]
 mod pulse_train_tests {
