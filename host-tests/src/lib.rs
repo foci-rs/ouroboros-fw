@@ -946,8 +946,8 @@ mod commissioning_board_contract_tests {
             control
                 .matches("HOMING_START_PENDING.store(false, Release)")
                 .count(),
-            2,
-            "only successful state-1 advance and fail-closed containment release the latch"
+            3,
+            "only state-1 advance, fail-closed containment, and queue flush release the latch"
         );
     }
 
@@ -982,6 +982,43 @@ mod commissioning_board_contract_tests {
             .map(|offset| maintenance_only + offset)
             .expect("receiver wait arm");
         assert!(!control[maintenance_only..receiver_wait].contains("rx.recv()"));
+    }
+
+    #[test]
+    fn homing_wake_shutdown_and_queue_flush_release_owned_state() {
+        let shutdown = extract_fn(FIRMWARE_CTX, "enter_shutdown");
+        let homing_reset = shutdown
+            .find("HOMING_STATE.store(0, Relaxed)")
+            .expect("shutdown homing-state reset");
+        let latch_release = shutdown
+            .find("HOMING_START_PENDING.store(false, Release)")
+            .expect("shutdown homing-start latch release");
+        assert!(homing_reset < latch_release);
+
+        let control = extract_fn(MAIN, "tmc_control");
+        let flush_epoch = control
+            .find("let queue_flush = critical_section::with")
+            .expect("atomic queue-flush epoch boundary");
+        let flush_claim = control
+            .find("TMC_QUEUE_FLUSH.swap(false, AcqRel)")
+            .expect("atomic queue-flush epoch claim");
+        let flush_latch_release = control[flush_claim..]
+            .find("HOMING_START_PENDING.store(false, Release)")
+            .map(|offset| flush_claim + offset)
+            .expect("queue-flush latch release");
+        let retained_reset = control[flush_latch_release..]
+            .find("homing_wake.reset_for_queue_flush()")
+            .map(|offset| flush_latch_release + offset)
+            .expect("queue-flush retained-slot reset");
+        let flush_body = control
+            .find("if queue_flush {")
+            .expect("claimed queue-flush body");
+        assert!(
+            flush_epoch < flush_claim
+                && flush_claim < flush_latch_release
+                && flush_latch_release < flush_body
+                && flush_body < retained_reset
+        );
     }
 
     #[test]
@@ -1271,6 +1308,23 @@ mod homing_wake_policy_tests {
         assert_eq!(policy.next_wait(false, false), HomingWait::ProcessRetained);
         assert_eq!(policy.take_retained_request(), Some(7));
         assert_eq!(policy.take_retained_request(), None);
+    }
+
+    #[test]
+    fn homing_wake_queue_flush_discards_the_retained_epoch() {
+        let mut policy = HomingWakePolicy::new();
+        assert_eq!(
+            policy.on_event(HomingWakeEvent::Request(7), true),
+            HomingReceive::Retained
+        );
+
+        policy.reset_for_queue_flush();
+
+        assert_eq!(policy.take_retained_request(), None);
+        assert_eq!(
+            policy.next_wait(false, false),
+            HomingWait::ReceiverOrDeadline
+        );
     }
 }
 

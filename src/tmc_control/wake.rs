@@ -106,6 +106,11 @@ impl<T> HomingWakePolicy<T> {
         self.retained_request.take()
     }
 
+    /// Discard work owned by the request epoch that a queue flush ends.
+    pub(crate) fn reset_for_queue_flush(&mut self) {
+        self.retained_request = None;
+    }
+
     /// Return whether an urgent preparation result releases the latch.
     pub(crate) const fn should_clear_latch(progress: HomingPreparationProgress) -> bool {
         match progress {

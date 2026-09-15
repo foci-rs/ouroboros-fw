@@ -480,7 +480,7 @@ mod app {
             ChannelDevice, STATUS_CRITICAL_MASK, device_or_invalid, drive_ctx,
             enable_status_capture_ch1, enable_status_exti_ch0, park_shutdown, status_levels,
         };
-        use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+        use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
         use embassy_futures::select::{Either, select};
         use foci_firmware::tmc_control::scheduler::{ChannelMode, ChannelScheduler, UnitClass};
         use foci_firmware::tmc_control::{
@@ -707,7 +707,16 @@ mod app {
                 crate::tmc_control::containment::LeaseCheckDisposition::Proceed => {}
             }
 
-            if TMC_QUEUE_FLUSH.swap(false, Relaxed) {
+            let queue_flush = critical_section::with(|_| {
+                if TMC_QUEUE_FLUSH.swap(false, AcqRel) {
+                    HOMING_START_PENDING.store(false, Release);
+                    true
+                } else {
+                    false
+                }
+            });
+            if queue_flush {
+                homing_wake.reset_for_queue_flush();
                 integral_candidates.invalidate_all();
                 while rx.try_recv().is_ok() {}
                 let needs_disarm = [

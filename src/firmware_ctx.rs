@@ -306,7 +306,7 @@ impl<'a> TrsyncBoard for OuroborosTrsyncBoard<'a> {
 /// delegates to this function so handler-path and RTIC-path shutdowns
 /// share the same cleanup.
 pub(crate) fn enter_shutdown(state: &mut State) -> bool {
-    use core::sync::atomic::Ordering::Relaxed;
+    use core::sync::atomic::Ordering::{Relaxed, Release};
     use foci_firmware::state::lifecycle::REPORT_PENDING;
     use foci_firmware::state::trsync::{HOMING_STATE, HOMING_TRIGGERED};
 
@@ -320,6 +320,7 @@ pub(crate) fn enter_shutdown(state: &mut State) -> bool {
         REPORT_PENDING.store(false, Relaxed);
         HOMING_TRIGGERED.store(0xFF, Relaxed);
         HOMING_STATE.store(0, Relaxed);
+        HOMING_START_PENDING.store(false, Release);
     }
     entered
 }
