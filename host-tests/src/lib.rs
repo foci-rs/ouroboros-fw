@@ -64,6 +64,7 @@ mod commissioning_board_contract_tests {
     const TMC_HELPERS: &str = include_str!("../../src/helpers/tmc.rs");
     const FIRMWARE_CTX: &str = include_str!("../../src/firmware_ctx.rs");
     const HOMING_WAKE: &str = include_str!("../../src/tmc_control/wake.rs");
+    const MAINTENANCE: &str = include_str!("../../src/tmc_control/maintenance.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -162,6 +163,24 @@ mod commissioning_board_contract_tests {
         );
         assert!(usb_clock.contains("set_usb_otg_hsen(true)"));
         assert!(extract_fn(MAIN, "init").contains("board_init::enable_usb_clock();"));
+    }
+
+    #[test]
+    fn maintenance_quiescence_snapshot_builder_reads_both_complete_channels() {
+        let builder = extract_fn(BOARD, "live_maintenance_arm");
+        let channel_builder = extract_fn(BOARD, "maintenance_channel_snapshot");
+
+        assert!(builder.contains("maintenance_arm(MaintenanceSnapshot {"));
+        assert!(builder.contains("maintenance_channel_snapshot(0, &drivers[0])"));
+        assert!(builder.contains("maintenance_channel_snapshot(1, &drivers[1])"));
+        assert!(channel_builder.contains("driver.maintenance_obligations_clear()"));
+        assert!(!channel_builder.contains("driver.runtime"));
+        assert!(channel_builder.contains("STEP_QUEUE_CHANNELS[channel as usize].is_empty()"));
+        assert!(builder.contains("trace_enabled: cfg!(feature = \"trace\")"));
+        assert!(!MAIN.contains("live_maintenance_arm("));
+        assert!(!MAINTENANCE.contains("embassy_"));
+        assert!(!MAINTENANCE.contains("rtic"));
+        assert!(!MAINTENANCE.contains("crate::state"));
     }
 
     #[test]
@@ -1216,6 +1235,166 @@ mod step_dispatch;
 
 #[path = "../../src/tmc_control/containment.rs"]
 mod containment;
+
+#[cfg(test)]
+mod maintenance_quiescence_tests {
+    mod predicate {
+        include!("../../src/tmc_control/maintenance.rs");
+    }
+
+    use foci_firmware::tmc_control::ChannelMode;
+    use predicate::{
+        ChannelMaintenanceSnapshot, MaintenanceArm, MaintenanceSnapshot, maintenance_arm,
+    };
+
+    fn quiescent_channel() -> ChannelMaintenanceSnapshot {
+        ChannelMaintenanceSnapshot {
+            mode: ChannelMode::Ready,
+            driver_obligations_clear: true,
+            enable_pin_asserted: false,
+            motor_armed: false,
+            commission_in_flight: false,
+            config_apply_pending: 0,
+            feedforward_reset: false,
+            pid_error_sums_clear: false,
+            homing_clamp_active: false,
+            stall_latched: false,
+            step_timer_active: false,
+            step_queue_empty: true,
+        }
+    }
+
+    fn quiescent_snapshot() -> MaintenanceSnapshot {
+        MaintenanceSnapshot {
+            shutdown_active: false,
+            fault_active: false,
+            queue_flush_pending: false,
+            disable_signal_pending: false,
+            homing_state: 0,
+            homing_triggered: 0xFF,
+            homing_start_pending: false,
+            channels: [quiescent_channel(), quiescent_channel()],
+            trace_enabled: false,
+        }
+    }
+
+    #[test]
+    fn maintenance_quiescence_requires_every_snapshot_field() {
+        type Invalidate = fn(&mut MaintenanceSnapshot);
+        let invalidations: &[(&str, Invalidate)] = &[
+            ("shutdown", |s| s.shutdown_active = true),
+            ("fault", |s| s.fault_active = true),
+            ("queue flush", |s| s.queue_flush_pending = true),
+            ("disable signal", |s| s.disable_signal_pending = true),
+            ("homing state", |s| s.homing_state = 1),
+            ("homing trigger", |s| s.homing_triggered = 0),
+            ("homing start", |s| s.homing_start_pending = true),
+            ("channel 0 mode", |s| {
+                s.channels[0].mode = ChannelMode::Parked
+            }),
+            ("channel 1 mode", |s| {
+                s.channels[1].mode = ChannelMode::Parked
+            }),
+            ("channel 0 driver", |s| {
+                s.channels[0].driver_obligations_clear = false
+            }),
+            ("channel 1 driver", |s| {
+                s.channels[1].driver_obligations_clear = false
+            }),
+            ("channel 0 enable", |s| {
+                s.channels[0].enable_pin_asserted = true
+            }),
+            ("channel 1 enable", |s| {
+                s.channels[1].enable_pin_asserted = true
+            }),
+            ("channel 0 armed", |s| s.channels[0].motor_armed = true),
+            ("channel 1 armed", |s| s.channels[1].motor_armed = true),
+            ("channel 0 commission", |s| {
+                s.channels[0].commission_in_flight = true
+            }),
+            ("channel 1 commission", |s| {
+                s.channels[1].commission_in_flight = true
+            }),
+            ("channel 0 config", |s| {
+                s.channels[0].config_apply_pending = 1
+            }),
+            ("channel 1 config", |s| {
+                s.channels[1].config_apply_pending = 1
+            }),
+            ("channel 0 feedforward", |s| {
+                s.channels[0].feedforward_reset = true
+            }),
+            ("channel 1 feedforward", |s| {
+                s.channels[1].feedforward_reset = true
+            }),
+            ("channel 0 PID", |s| {
+                s.channels[0].pid_error_sums_clear = true
+            }),
+            ("channel 1 PID", |s| {
+                s.channels[1].pid_error_sums_clear = true
+            }),
+            ("channel 0 clamp", |s| {
+                s.channels[0].homing_clamp_active = true
+            }),
+            ("channel 1 clamp", |s| {
+                s.channels[1].homing_clamp_active = true
+            }),
+            ("channel 0 stall", |s| s.channels[0].stall_latched = true),
+            ("channel 1 stall", |s| s.channels[1].stall_latched = true),
+            ("channel 0 timer", |s| {
+                s.channels[0].step_timer_active = true
+            }),
+            ("channel 1 timer", |s| {
+                s.channels[1].step_timer_active = true
+            }),
+            ("channel 0 queue", |s| {
+                s.channels[0].step_queue_empty = false
+            }),
+            ("channel 1 queue", |s| {
+                s.channels[1].step_queue_empty = false
+            }),
+            ("trace", |s| s.trace_enabled = true),
+        ];
+
+        assert_eq!(
+            maintenance_arm(quiescent_snapshot()),
+            MaintenanceArm::Disarmed
+        );
+        for (name, invalidate) in invalidations {
+            let mut snapshot = quiescent_snapshot();
+            invalidate(&mut snapshot);
+            assert_eq!(maintenance_arm(snapshot), MaintenanceArm::Armed, "{name}");
+        }
+    }
+
+    #[test]
+    fn maintenance_quiescence_fails_active_for_unsupported_modes_and_multiple_work_items() {
+        for mode in [
+            ChannelMode::Bootstrap,
+            ChannelMode::Commissioning,
+            ChannelMode::Restore,
+            ChannelMode::Parked,
+        ] {
+            let mut snapshot = quiescent_snapshot();
+            snapshot.channels[0].mode = mode;
+            assert_eq!(maintenance_arm(snapshot), MaintenanceArm::Armed);
+        }
+
+        let mut snapshot = quiescent_snapshot();
+        snapshot.channels[0].motor_armed = true;
+        snapshot.channels[1].step_queue_empty = false;
+        snapshot.fault_active = true;
+        assert_eq!(maintenance_arm(snapshot), MaintenanceArm::Armed);
+    }
+
+    #[test]
+    fn maintenance_snapshot_is_owned_copy_state() {
+        fn assert_owned_copy_static<T: Copy + 'static>() {}
+
+        assert_owned_copy_static::<MaintenanceSnapshot>();
+        assert_owned_copy_static::<ChannelMaintenanceSnapshot>();
+    }
+}
 
 #[cfg(test)]
 mod homing_wake_policy_tests {

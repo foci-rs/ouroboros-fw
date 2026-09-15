@@ -1,12 +1,14 @@
 //! Ouroboros TMC control board accessors.
 
-use core::sync::atomic::Ordering::Relaxed;
+use core::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use embassy_stm32::gpio::{Input, Output};
 use foci_firmware::commission_dispatch::CommissionRetention;
 use foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlot;
 use foci_firmware::shutdown::ShutdownReason;
-use foci_firmware::state::trsync::HOMING_STATE;
+use foci_firmware::state::lifecycle::{FAULT_ACTIVE, SHUTDOWN_ACTIVE};
+use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
+use foci_firmware::state::trsync::{HOMING_STATE, HOMING_TRIGGERED};
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_control::helpers::refresh_velocity_scale_from_state;
 use foci_firmware::tmc_control::{
@@ -18,7 +20,13 @@ use crate::ankyra::constants::CLOCK_FREQ;
 use crate::app_types::TmcSpiDevice;
 use crate::board_config::{TMC_CHANNEL_COUNT, TMC_CONFIG};
 use crate::commissioning_backend::OuroborosBackend;
+use crate::state::stepper::STEP_QUEUE_CHANNELS;
+use crate::state::tmc::HOMING_START_PENDING;
 use crate::tmc_mux::{SelectedTmcDevice, TmcSpiMux};
+
+use super::maintenance::{
+    ChannelMaintenanceSnapshot, MaintenanceArm, MaintenanceSnapshot, maintenance_arm,
+};
 
 pub(crate) type TmcEnablePins = [Output<'static>; TMC_CHANNEL_COUNT as usize];
 
@@ -140,6 +148,46 @@ pub(crate) fn channel_needs_safe_state(channel: u8, driver: &ChannelDriver) -> b
         || driver.runtime.is_commission_active()
         || tmc_state(channel).motor_armed.load(Relaxed)
         || tmc_state(channel).commission_in_flight.load(Relaxed)
+}
+
+/// Build and immediately consume the current dual-channel maintenance snapshot.
+#[allow(dead_code)] // Scheduler wiring lands with the measured empty-group integration.
+pub(crate) fn live_maintenance_arm(
+    drivers: &[ChannelDriver; TMC_CHANNEL_COUNT as usize],
+) -> MaintenanceArm {
+    maintenance_arm(MaintenanceSnapshot {
+        shutdown_active: SHUTDOWN_ACTIVE.load(Relaxed),
+        fault_active: FAULT_ACTIVE.load(Relaxed),
+        queue_flush_pending: TMC_QUEUE_FLUSH.load(Relaxed),
+        disable_signal_pending: TMC_DISABLE_SIGNAL.signaled(),
+        homing_state: HOMING_STATE.load(Relaxed),
+        homing_triggered: HOMING_TRIGGERED.load(Relaxed),
+        homing_start_pending: HOMING_START_PENDING.load(Acquire),
+        channels: [
+            maintenance_channel_snapshot(0, &drivers[0]),
+            maintenance_channel_snapshot(1, &drivers[1]),
+        ],
+        trace_enabled: cfg!(feature = "trace"),
+    })
+}
+
+fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelMaintenanceSnapshot {
+    let tmc = tmc_state(channel);
+    let stepper = stepper_state(channel);
+    ChannelMaintenanceSnapshot {
+        mode: driver.mode(),
+        driver_obligations_clear: driver.maintenance_obligations_clear(),
+        enable_pin_asserted: tmc.enable_pin_asserted.load(Relaxed),
+        motor_armed: tmc.motor_armed.load(Relaxed),
+        commission_in_flight: tmc.commission_in_flight.load(Relaxed),
+        config_apply_pending: tmc.config_apply_pending.load(Relaxed),
+        feedforward_reset: tmc.feedforward_reset.load(Relaxed),
+        pid_error_sums_clear: tmc.pid_error_sums_clear.load(Relaxed),
+        homing_clamp_active: tmc.homing_clamp_active.load(Relaxed),
+        stall_latched: tmc.stall_latched.load(Relaxed),
+        step_timer_active: stepper.timer_active_mirror.load(Relaxed),
+        step_queue_empty: STEP_QUEUE_CHANNELS[channel as usize].is_empty(),
+    }
 }
 
 pub(crate) fn commissioning_request_blocked(
