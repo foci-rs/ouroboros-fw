@@ -1081,10 +1081,19 @@ mod app {
                     });
                 }
                 UnitOutcome::Maintenance { homing } => {
-                    group_all_ready &= matches!(
-                        homing,
-                        foci_firmware::tmc_control::HomingMaintenanceResult::ReadyToAdvance
-                    );
+                    match homing {
+                        foci_firmware::tmc_control::HomingMaintenanceResult::ReadyToAdvance => {}
+                        foci_firmware::tmc_control::HomingMaintenanceResult::RetryCurrentState => {
+                            group_all_ready = false;
+                        }
+                        foci_firmware::tmc_control::HomingMaintenanceResult::FailClosed => {
+                            group_all_ready = false;
+                            tmc_state(ch).homing_clamp_active.store(false, Relaxed);
+                            tmc_state(ch).stall_latched.store(false, Relaxed);
+                            drivers[idx].runtime.clear_homing_runtime();
+                            TMC_DISABLE_SIGNAL.signal(());
+                        }
+                    }
                     #[cfg(feature = "trace")]
                     {
                         let refs = foci_firmware::tmc_control::TmcControlStateRefs::new(

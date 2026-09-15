@@ -768,6 +768,18 @@ mod commissioning_board_contract_tests {
         panic!("no matching closing brace found for the brace at byte {open_brace_pos}");
     }
 
+    fn extract_match_arm<'a>(text: &'a str, variant: &str) -> &'a str {
+        let start = text
+            .find(variant)
+            .unwrap_or_else(|| panic!("missing match arm for {variant}"));
+        let open = text[start..]
+            .find('{')
+            .map(|offset| start + offset)
+            .unwrap_or_else(|| panic!("missing match arm block for {variant}"));
+        let close = find_matching_close_brace(text, open);
+        &text[start..=close]
+    }
+
     #[test]
     fn stop_physical_stepper_side_effects_are_not_duplicated_per_queue_access_branch() {
         assert_eq!(
@@ -816,6 +828,52 @@ mod commissioning_board_contract_tests {
         assert!(
             MAIN.matches("HOMING_STATE.load(Relaxed) == 1").count() >= 3,
             "every step-dispatch entry must defer while HOMING_STATE == 1"
+        );
+    }
+
+    #[test]
+    fn homing_maintenance_outcomes_preserve_retry_and_fail_closed_containment() {
+        let maintenance = MAIN
+            .split("UnitOutcome::Maintenance { homing } => {")
+            .nth(1)
+            .expect("maintenance outcome arm")
+            .split("UnitOutcome::Audit(result) => {")
+            .next()
+            .expect("maintenance outcome body");
+
+        assert!(maintenance.contains("match homing {"));
+        assert_eq!(maintenance.matches("HomingMaintenanceResult::").count(), 3);
+
+        let ready_arm = extract_match_arm(maintenance, "HomingMaintenanceResult::ReadyToAdvance");
+        assert!(!ready_arm.contains("group_all_ready = false"));
+
+        let retry_arm =
+            extract_match_arm(maintenance, "HomingMaintenanceResult::RetryCurrentState");
+        assert!(retry_arm.contains("group_all_ready = false"));
+        assert!(!retry_arm.contains("TMC_DISABLE_SIGNAL.signal(())"));
+        assert!(!retry_arm.contains("clear_homing_runtime()"));
+
+        let fail_closed_arm = extract_match_arm(maintenance, "HomingMaintenanceResult::FailClosed");
+        assert!(fail_closed_arm.contains("group_all_ready = false"));
+        assert!(
+            fail_closed_arm.contains("tmc_state(ch).homing_clamp_active.store(false, Relaxed)")
+        );
+        assert!(fail_closed_arm.contains("tmc_state(ch).stall_latched.store(false, Relaxed)"));
+        assert!(fail_closed_arm.contains("drivers[idx].runtime.clear_homing_runtime()"));
+        assert!(fail_closed_arm.contains("TMC_DISABLE_SIGNAL.signal(())"));
+
+        assert_eq!(maintenance.matches("group_all_ready = false").count(), 2);
+        assert_eq!(
+            maintenance
+                .matches("homing_clamp_active.store(false")
+                .count(),
+            1
+        );
+        assert_eq!(maintenance.matches("stall_latched.store(false").count(), 1);
+        assert_eq!(maintenance.matches("clear_homing_runtime()").count(), 1);
+        assert_eq!(
+            maintenance.matches("TMC_DISABLE_SIGNAL.signal(())").count(),
+            1
         );
     }
 
