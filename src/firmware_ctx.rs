@@ -3,10 +3,8 @@
 //!
 //! Starts as a thin wrapper around `foci_klipper::state::State` and
 //! grows into the board-side implementation of every capability trait
-//! declared in `foci_firmware::context`. The trait-method bodies
-//! forward verbatim to the board-local helpers (`helpers::*`,
-//! `trigger_domain::with_trigger_domain`, `state::tmc::
-//! TMC_REQUEST_SENDER`) that the handlers call today — no new logic.
+//! declared in `foci_firmware::context`. The implementations bind those
+//! capabilities to board-local helpers and state.
 //!
 //! The full handler audit driving this surface lives at
 //! `docs/notes/foci-firmware-lift-handler-audit.md`. Tasks 10–17 move
@@ -36,6 +34,7 @@ use crate::helpers::stepper_diag::record_stepper_event;
 use crate::helpers::tmc::OuroborosTmcQueue;
 use crate::helpers::trsync::{gpio_configure_input, gpio_read_pin};
 use crate::state::stepper::{isr_stepper, p2_stepper};
+use crate::state::tmc::{HOMING_START_PENDING, TMC_CONTROL_SENDER, TmcControlEvent};
 use crate::trigger_domain::{
     OuroborosDispatchBoard, PHYSICAL_STEPPER_INDICES, disarm_trigger_scheduler, reprogram_cc2,
     set_timer_active, with_trigger_domain, with_trigger_domain_site,
@@ -571,6 +570,24 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
             };
             trsync::link_stepper_stop(td.state_mut(), &board, stepper_idx, trsync_oid)
                 .map_err(|_| ())
+        })
+    }
+
+    fn notify_homing_start(&mut self) -> Result<(), ()> {
+        use core::sync::atomic::Ordering::AcqRel;
+        use rtic_sync::channel::TrySendError;
+
+        if HOMING_START_PENDING.swap(true, AcqRel) {
+            return Ok(());
+        }
+        critical_section::with(|cs| {
+            let mut sender = TMC_CONTROL_SENDER.borrow(cs).borrow_mut();
+            let Some(sender) = sender.as_mut() else {
+                return Err(());
+            };
+            match sender.try_send(TmcControlEvent::HomingStart) {
+                Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::NoReceiver(_)) => Ok(()),
+            }
         })
     }
 }

@@ -3,6 +3,7 @@
 //! `foci_firmware::state::tmc`.
 
 use core::cell::RefCell;
+use core::sync::atomic::AtomicBool;
 
 use critical_section::Mutex;
 use foci_firmware::tmc::TmcRequest;
@@ -10,7 +11,19 @@ use rtic_sync::channel::Sender;
 
 use crate::board_config;
 
-/// Channel depth for TMC control requests.
+/// Board-local messages consumed by the TMC control task.
+#[derive(Debug, defmt::Format)]
+pub(crate) enum TmcControlEvent {
+    /// An ordinary host-originated TMC request.
+    Request(TmcRequest),
+    /// A coalescing doorbell for urgent homing preparation.
+    HomingStart,
+}
+
+/// Authoritative record that urgent homing preparation is pending.
+pub(crate) static HOMING_START_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Channel depth for TMC control events.
 ///
 /// Connect-time TMC config handlers apply state directly instead of
 /// enqueuing (see `foci_firmware::state::tmc::CONNECT_TIME_QUEUE_SLOTS_PER_CHANNEL`);
@@ -26,8 +39,7 @@ const _: () = assert!(
         <= TMC_CHANNEL_SIZE
 );
 
-/// Shared sender handle for the TMC control channel. Populated in RTIC
-/// `init`, used by P2 command handlers to enqueue [`TmcRequest`]s.
-pub(crate) static TMC_REQUEST_SENDER: Mutex<
-    RefCell<Option<Sender<'static, TmcRequest, TMC_CHANNEL_SIZE>>>,
+/// Shared sender handle for the TMC control channel. Populated in RTIC `init`.
+pub(crate) static TMC_CONTROL_SENDER: Mutex<
+    RefCell<Option<Sender<'static, TmcControlEvent, TMC_CHANNEL_SIZE>>>,
 > = Mutex::new(RefCell::new(None));

@@ -106,7 +106,7 @@ mod app {
     static P1_PROBE_LAST_US: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
     use foci_firmware::diagnostic::StepperEventReason;
-    use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
+    use foci_firmware::tmc::TmcRequestKind;
 
     use crate::board_config::TMC_CONFIG;
     use crate::helpers::stepper_diag::{UNKNOWN_QUEUE_LEN, record_stepper_event};
@@ -195,7 +195,7 @@ mod app {
     struct Local {
         tmc_mux: crate::tmc_mux::TmcSpiMux,
         tmc_enable: TmcEnablePins,
-        tmc_rx: Receiver<'static, TmcRequest, TMC_CHANNEL_SIZE>,
+        tmc_rx: Receiver<'static, TmcControlEvent, TMC_CHANNEL_SIZE>,
         tmc_status0: Input<'static>,
         wdg: IndependentWatchdog<'static, peripherals::IWDG1>,
         integral_candidates: IntegralCandidatesTaskLocal,
@@ -209,7 +209,7 @@ mod app {
     }
 
     #[init(local = [
-        tmc_channel: rtic_sync::channel::Channel<TmcRequest, TMC_CHANNEL_SIZE> =
+        tmc_channel: rtic_sync::channel::Channel<TmcControlEvent, TMC_CHANNEL_SIZE> =
             rtic_sync::channel::Channel::new(),
         uid_str: [u8; 24] = [0; 24],
     ])]
@@ -315,7 +315,7 @@ mod app {
         // TMC register request channel
         let (tmc_tx, tmc_rx) = ctx.local.tmc_channel.split();
         critical_section::with(|cs| {
-            TMC_REQUEST_SENDER.borrow(cs).replace(Some(tmc_tx));
+            TMC_CONTROL_SENDER.borrow(cs).replace(Some(tmc_tx));
         });
 
         defmt::info!("SPI2 configured: 8 MHz, Mode 3, DMA");
@@ -873,119 +873,125 @@ mod app {
             ));
             let selected = select(rx.recv(), control_sleep).await;
 
-            if let Either::First(Ok(req)) = selected {
-                if req.channel >= crate::board_config::TMC_CHANNEL_COUNT {
-                    emit_invalid_channel_diagnostic(req.channel);
-                    shutdown!("Invalid TMC channel");
-                    continue;
-                }
-                let channel = req.channel;
-                let idx = channel as usize;
-                let commissioning = matches!(
-                    drivers[idx].mode(),
-                    ChannelMode::Commissioning | ChannelMode::Restore
-                );
-                let disposition = if commissioning {
-                    crate::tmc_control::effects::commission_wait_request_disposition(&req)
-                } else {
-                    CommissionWaitRequestDisposition::Cancel
+            if let Either::First(Ok(event)) = selected {
+                let request = match event {
+                    TmcControlEvent::Request(req) => Some(req),
+                    TmcControlEvent::HomingStart => None,
                 };
-                match disposition {
-                    CommissionWaitRequestDisposition::Cancel => {
-                        if commissioning {
-                            let route =
-                                crate::tmc_control::effects::classify_commission_wait_cancel(
-                                    channel,
-                                    req.channel,
-                                    crate::board_config::TMC_CHANNEL_COUNT,
-                                );
-                            if matches!(
-                                route,
-                                crate::tmc_control::effects::CommissionWaitCancelRoute::Invalid
-                            ) {
-                                emit_invalid_channel_diagnostic(req.channel);
-                                shutdown!("Invalid TMC channel");
-                                drivers[idx].runtime.request_restore_cancel(); // invalid-route site
+                if let Some(req) = request {
+                    if req.channel >= crate::board_config::TMC_CHANNEL_COUNT {
+                        emit_invalid_channel_diagnostic(req.channel);
+                        shutdown!("Invalid TMC channel");
+                        continue;
+                    }
+                    let channel = req.channel;
+                    let idx = channel as usize;
+                    let commissioning = matches!(
+                        drivers[idx].mode(),
+                        ChannelMode::Commissioning | ChannelMode::Restore
+                    );
+                    let disposition = if commissioning {
+                        crate::tmc_control::effects::commission_wait_request_disposition(&req)
+                    } else {
+                        CommissionWaitRequestDisposition::Cancel
+                    };
+                    match disposition {
+                        CommissionWaitRequestDisposition::Cancel => {
+                            if commissioning {
+                                let route =
+                                    crate::tmc_control::effects::classify_commission_wait_cancel(
+                                        channel,
+                                        req.channel,
+                                        crate::board_config::TMC_CHANNEL_COUNT,
+                                    );
+                                if matches!(
+                                    route,
+                                    crate::tmc_control::effects::CommissionWaitCancelRoute::Invalid
+                                ) {
+                                    emit_invalid_channel_diagnostic(req.channel);
+                                    shutdown!("Invalid TMC channel");
+                                    drivers[idx].runtime.request_restore_cancel(); // invalid-route site
+                                    continue 'control_loop;
+                                }
+                                enable_pin(enable_pins, channel).set_low();
+                                tmc_state(channel)
+                                    .commission_in_flight
+                                    .store(false, Relaxed);
+                            }
+                            let commissioning_blocked = match &req.kind {
+                                TmcRequestKind::SetEnable(true) => {
+                                    !drivers[idx].runtime.is_calibrated()
+                                        && commissioning_request_blocked(drivers, channel)
+                                }
+                                TmcRequestKind::Calibrate { .. }
+                                | TmcRequestKind::Commission { .. }
+                                | TmcRequestKind::Tune { .. }
+                                | TmcRequestKind::SelfTest { .. } => {
+                                    commissioning_request_blocked(drivers, channel)
+                                }
+                                _ => false,
+                            };
+                            let outcome = match device_or_invalid(mux, channel) {
+                                ChannelDevice::Device(device) => {
+                                    let mut tmc = tmc_driver(device);
+                                    crate::tmc_control::request::handle_tmc_control_request(
+                                        req,
+                                        TmcPreRequestDisposition::ContinueRequest,
+                                        crate::tmc_control::request::TmcControlRequestContext {
+                                            channel,
+                                            commissioning_blocked,
+                                            drivers: &mut *drivers,
+                                            tmc: &mut tmc,
+                                            enable_pins,
+                                            integral_candidates: &mut *integral_candidates,
+                                        },
+                                    )
+                                    .await
+                                }
+                                ChannelDevice::Invalid => {
+                                    shutdown!("Invalid TMC channel");
+                                    continue;
+                                }
+                            };
+                            if let Some(reason) = outcome.shutdown {
+                                ctx.shared.app_state.lock(|state| {
+                                    if crate::firmware_ctx::enter_shutdown(state) {
+                                        crate::tmc_control::effects::emit_shutdown(reason);
+                                    }
+                                });
+                            }
+                            if outcome.should_refresh_velocity_scale {
+                                refresh_velocity_scale(channel, &mut drivers[idx].runtime);
+                            }
+                            if !commissioning
+                                && matches!(drivers[idx].mode(), ChannelMode::Commissioning)
+                            {
+                                scheduler.set_commission_due(channel, Some(now_us()));
+                            }
+                            if commissioning {
+                                drivers[idx].runtime.request_restore_cancel(); // in-commissioning cancel site
                                 continue 'control_loop;
                             }
-                            enable_pin(enable_pins, channel).set_low();
-                            tmc_state(channel)
-                                .commission_in_flight
-                                .store(false, Relaxed);
-                        }
-                        let commissioning_blocked = match &req.kind {
-                            TmcRequestKind::SetEnable(true) => {
-                                !drivers[idx].runtime.is_calibrated()
-                                    && commissioning_request_blocked(drivers, channel)
+                            if matches!(outcome.tail, TmcControlRequestTail::SkipTickTail) {
+                                continue 'control_loop;
                             }
-                            TmcRequestKind::Calibrate { .. }
-                            | TmcRequestKind::Commission { .. }
-                            | TmcRequestKind::Tune { .. }
-                            | TmcRequestKind::SelfTest { .. } => {
-                                commissioning_request_blocked(drivers, channel)
+                        }
+                        CommissionWaitRequestDisposition::RejectBusy => {
+                            let outcome =
+                                crate::tmc_control::effects::handle_commission_wait_reject(req);
+                            if let Some(reason) = outcome.shutdown {
+                                ctx.shared.app_state.lock(|state| {
+                                    if crate::firmware_ctx::enter_shutdown(state) {
+                                        crate::tmc_control::effects::emit_shutdown(reason);
+                                    }
+                                });
                             }
-                            _ => false,
-                        };
-                        let outcome = match device_or_invalid(mux, channel) {
-                            ChannelDevice::Device(device) => {
-                                let mut tmc = tmc_driver(device);
-                                crate::tmc_control::request::handle_tmc_control_request(
-                                    req,
-                                    TmcPreRequestDisposition::ContinueRequest,
-                                    crate::tmc_control::request::TmcControlRequestContext {
-                                        channel,
-                                        commissioning_blocked,
-                                        drivers: &mut *drivers,
-                                        tmc: &mut tmc,
-                                        enable_pins,
-                                        integral_candidates: &mut *integral_candidates,
-                                    },
-                                )
-                                .await
-                            }
-                            ChannelDevice::Invalid => {
-                                shutdown!("Invalid TMC channel");
-                                continue;
-                            }
-                        };
-                        if let Some(reason) = outcome.shutdown {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    crate::tmc_control::effects::emit_shutdown(reason);
-                                }
-                            });
                         }
-                        if outcome.should_refresh_velocity_scale {
-                            refresh_velocity_scale(channel, &mut drivers[idx].runtime);
-                        }
-                        if !commissioning
-                            && matches!(drivers[idx].mode(), ChannelMode::Commissioning)
-                        {
-                            scheduler.set_commission_due(channel, Some(now_us()));
-                        }
-                        if commissioning {
-                            drivers[idx].runtime.request_restore_cancel(); // in-commissioning cancel site
-                            continue 'control_loop;
-                        }
-                        if matches!(outcome.tail, TmcControlRequestTail::SkipTickTail) {
-                            continue 'control_loop;
-                        }
+                        CommissionWaitRequestDisposition::DropBusy => {}
                     }
-                    CommissionWaitRequestDisposition::RejectBusy => {
-                        let outcome =
-                            crate::tmc_control::effects::handle_commission_wait_reject(req);
-                        if let Some(reason) = outcome.shutdown {
-                            ctx.shared.app_state.lock(|state| {
-                                if crate::firmware_ctx::enter_shutdown(state) {
-                                    crate::tmc_control::effects::emit_shutdown(reason);
-                                }
-                            });
-                        }
-                    }
-                    CommissionWaitRequestDisposition::DropBusy => {}
+                    scheduler.set_mode(0, drivers[0].mode(), now_us());
+                    scheduler.set_mode(1, drivers[1].mode(), now_us());
                 }
-                scheduler.set_mode(0, drivers[0].mode(), now_us());
-                scheduler.set_mode(1, drivers[1].mode(), now_us());
             }
 
             let now = now_us();

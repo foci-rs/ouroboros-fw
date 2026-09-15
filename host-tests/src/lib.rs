@@ -60,6 +60,9 @@ mod commissioning_board_contract_tests {
     const BOARD: &str = include_str!("../../src/tmc_control/board.rs");
     const STATE_USB_TRACE: &str = include_str!("../../src/state/usb_trace.rs");
     const TMC_DIAGNOSTICS: &str = include_str!("../../src/tmc_diagnostics.rs");
+    const TMC_STATE: &str = include_str!("../../src/state/tmc.rs");
+    const TMC_HELPERS: &str = include_str!("../../src/helpers/tmc.rs");
+    const FIRMWARE_CTX: &str = include_str!("../../src/firmware_ctx.rs");
 
     const REPLY_ID_WORST_CASE_BYTES: usize = 3;
     const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
@@ -874,6 +877,59 @@ mod commissioning_board_contract_tests {
         assert_eq!(
             maintenance.matches("TMC_DISABLE_SIGNAL.signal(())").count(),
             1
+        );
+    }
+
+    #[test]
+    fn tmc_control_event_wraps_requests_without_changing_queue_capacity() {
+        assert!(TMC_STATE.contains("pub(crate) const TMC_CHANNEL_SIZE: usize = 8;"));
+        assert!(TMC_STATE.contains("enum TmcControlEvent"));
+        assert!(TMC_STATE.contains("Request(TmcRequest)"));
+        assert!(TMC_STATE.contains("HomingStart"));
+        assert!(TMC_STATE.contains("Sender<'static, TmcControlEvent, TMC_CHANNEL_SIZE>"));
+
+        let enqueue = extract_fn(TMC_HELPERS, "try_send_tmc_request");
+        assert!(enqueue.contains("sender.try_send(TmcControlEvent::Request(req)).is_ok()"));
+        assert_eq!(enqueue.matches("try_send(").count(), 1);
+    }
+
+    #[test]
+    fn tmc_control_event_homing_notifications_latch_before_coalescing() {
+        let notify = extract_fn(FIRMWARE_CTX, "notify_homing_start");
+        let latch = notify
+            .find("HOMING_START_PENDING.swap(true")
+            .expect("homing-start notification must set the authoritative latch");
+        let sender = notify
+            .find("TMC_CONTROL_SENDER")
+            .expect("homing-start notification must inspect the board event sender");
+
+        assert!(latch < sender, "the latch must be set before sender access");
+        assert!(notify.contains("if HOMING_START_PENDING.swap(true, AcqRel)"));
+        assert!(
+            notify.contains("return Ok(())"),
+            "repeated notifications must coalesce"
+        );
+        assert!(notify.contains("let Some(sender)"));
+        assert!(notify.contains("else {\n                return Err(())"));
+        assert!(notify.contains("TmcControlEvent::HomingStart"));
+        assert!(notify.contains("TrySendError::Full(_)"));
+        assert!(notify.contains("TrySendError::NoReceiver(_)"));
+        assert!(notify.contains("=> Ok(())"));
+    }
+
+    #[test]
+    fn tmc_control_event_receiver_dispatches_every_event_variant() {
+        assert!(MAIN.contains("Receiver<'static, TmcControlEvent, TMC_CHANNEL_SIZE>"));
+        assert!(MAIN.contains("Channel<TmcControlEvent, TMC_CHANNEL_SIZE>"));
+
+        let control = extract_fn(MAIN, "tmc_control");
+        assert!(control.contains("match event {"));
+        assert_eq!(control.matches("TmcControlEvent::").count(), 2);
+        assert!(control.contains("TmcControlEvent::Request(req)"));
+        assert!(control.contains("TmcControlEvent::HomingStart"));
+        assert!(
+            !control.contains("HOMING_START_PENDING.store(false"),
+            "this intermediate task must leave the authoritative latch set"
         );
     }
 
