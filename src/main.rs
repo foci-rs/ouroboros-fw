@@ -58,8 +58,10 @@ mod app {
     use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
     use crate::tmc_control::board::{
         TmcEnablePins, channel_needs_safe_state, commissioning_request_blocked, enable_pin,
-        ouroboros_backend, refresh_velocity_scale, stepper_state, tmc_driver, tmc_state,
+        live_maintenance_arm, ouroboros_backend, refresh_velocity_scale, stepper_state, tmc_driver,
+        tmc_state,
     };
+    use crate::tmc_control::maintenance::MaintenanceArm;
     use crate::trigger_domain::{
         TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain, with_trigger_domain_site,
     };
@@ -881,6 +883,11 @@ mod app {
             scheduler.set_mode(1, drivers[1].mode(), now_us());
 
             let now = now_us();
+            if matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)
+                && scheduler.maintenance_group().is_none()
+            {
+                scheduler.advance_quiescent_maintenance_grid(now);
+            }
             let wait = homing_wake.next_wait(
                 HOMING_START_PENDING.load(Acquire),
                 scheduler.earliest_due_us().is_some_and(|due| due <= now),
@@ -1045,6 +1052,11 @@ mod app {
             }
 
             let now = now_us();
+            if matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)
+                && scheduler.maintenance_group().is_none()
+            {
+                scheduler.advance_quiescent_maintenance_grid(now);
+            }
             let homing_state = HOMING_STATE.load(Relaxed);
             let Some(unit) = scheduler.pick(now, homing_state) else {
                 continue;

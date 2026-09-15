@@ -177,32 +177,88 @@ mod commissioning_board_contract_tests {
         assert!(!channel_builder.contains("driver.runtime"));
         assert!(channel_builder.contains("STEP_QUEUE_CHANNELS[channel as usize].is_empty()"));
         assert!(builder.contains("trace_enabled: cfg!(feature = \"trace\")"));
-        assert!(!MAIN.contains("live_maintenance_arm("));
         assert!(!MAINTENANCE.contains("embassy_"));
         assert!(!MAINTENANCE.contains("rtic"));
         assert!(!MAINTENANCE.contains("crate::state"));
     }
 
     #[test]
-    fn maintenance_quiescence_reads_handoff_sources_before_request_latches() {
+    fn empty_maintenance_group_orders_handoff_sources_before_fence_and_request_latches() {
         let builder = extract_fn(BOARD, "maintenance_channel_snapshot");
         let timer = builder
-            .find("step_timer_active:")
+            .find("timer_active_mirror.load(Relaxed)")
             .expect("step-timer source read");
         let queue = builder
-            .find("step_queue_empty:")
+            .find("STEP_QUEUE_CHANNELS[channel as usize].is_empty()")
             .expect("step-queue source read");
+        let fence = builder
+            .find("compiler_fence(Acquire)")
+            .expect("compiler handoff fence");
         let feedforward = builder
-            .find("feedforward_reset:")
+            .find("feedforward_reset.load(Relaxed)")
             .expect("feed-forward request-latch read");
         let pid = builder
-            .find("pid_error_sums_clear:")
+            .find("pid_error_sums_clear.load(Relaxed)")
             .expect("PID-clear request-latch read");
 
         for source in [timer, queue] {
-            assert!(source < feedforward);
-            assert!(source < pid);
+            assert!(source < fence);
         }
+        for latch in [feedforward, pid] {
+            assert!(fence < latch);
+        }
+    }
+
+    #[test]
+    fn empty_maintenance_group_recomputes_quiescence_at_both_decision_boundaries() {
+        let body = extract_fn(MAIN, "tmc_control");
+        let calls: std::vec::Vec<_> = body
+            .match_indices("live_maintenance_arm(drivers)")
+            .map(|(offset, _)| offset)
+            .collect();
+        let wait = body
+            .find("let wait = homing_wake.next_wait(")
+            .expect("wait decision");
+        let receive = body
+            .find("let received_event = match wait")
+            .expect("receive path");
+        let request = body
+            .find("if let Some(req) = request")
+            .expect("request path");
+        let pick = body
+            .find("scheduler.pick(now, homing_state)")
+            .expect("scheduler pick");
+
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0] < wait);
+        assert!(!body[calls[0]..wait].contains(".await"));
+        assert!(receive < calls[1]);
+        assert!(request < calls[1]);
+        assert!(calls[1] < pick);
+        assert!(!body[calls[1]..pick].contains(".await"));
+    }
+
+    #[test]
+    fn empty_maintenance_group_elision_requires_disarmed_and_no_open_group() {
+        let body = extract_fn(MAIN, "tmc_control");
+        let seam = "scheduler.advance_quiescent_maintenance_grid(now);";
+        let calls: std::vec::Vec<_> = body.match_indices(seam).map(|(offset, _)| offset).collect();
+
+        assert_eq!(calls.len(), 2);
+        for call in calls {
+            let guard = &body[call.saturating_sub(240)..call];
+            assert!(guard.contains("live_maintenance_arm(drivers)"));
+            assert!(guard.contains("MaintenanceArm::Disarmed"));
+            assert!(guard.contains("scheduler.maintenance_group().is_none()"));
+        }
+
+        let post_wait_call = body.rfind(seam).expect("post-wait elision seam");
+        let pick = body[post_wait_call..]
+            .find("scheduler.pick(now, homing_state)")
+            .map(|offset| post_wait_call + offset)
+            .expect("original scheduler path after elision decision");
+        assert!(body[pick..].contains("UnitClass::MaintenanceFinalize"));
+        assert!(!body[post_wait_call..pick].contains("ouroboros_backend("));
     }
 
     #[test]

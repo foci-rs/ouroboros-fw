@@ -1,6 +1,9 @@
 //! Ouroboros TMC control board accessors.
 
-use core::sync::atomic::Ordering::{Acquire, Relaxed};
+use core::sync::atomic::{
+    Ordering::{Acquire, Relaxed},
+    compiler_fence,
+};
 
 use embassy_stm32::gpio::{Input, Output};
 use foci_firmware::commission_dispatch::CommissionRetention;
@@ -151,7 +154,6 @@ pub(crate) fn channel_needs_safe_state(channel: u8, driver: &ChannelDriver) -> b
 }
 
 /// Build and immediately consume the current dual-channel maintenance snapshot.
-#[allow(dead_code)] // Scheduler wiring lands with the measured empty-group integration.
 pub(crate) fn live_maintenance_arm(
     drivers: &[ChannelDriver; TMC_CHANNEL_COUNT as usize],
 ) -> MaintenanceArm {
@@ -174,6 +176,11 @@ pub(crate) fn live_maintenance_arm(
 fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelMaintenanceSnapshot {
     let tmc = tmc_state(channel);
     let stepper = stepper_state(channel);
+    let step_timer_active = stepper.timer_active_mirror.load(Relaxed);
+    let step_queue_empty = STEP_QUEUE_CHANNELS[channel as usize].is_empty();
+    compiler_fence(Acquire);
+    let feedforward_reset = tmc.feedforward_reset.load(Relaxed);
+    let pid_error_sums_clear = tmc.pid_error_sums_clear.load(Relaxed);
     ChannelMaintenanceSnapshot {
         mode: driver.mode(),
         driver_obligations_clear: driver.maintenance_obligations_clear(),
@@ -183,10 +190,10 @@ fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelM
         config_apply_pending: tmc.config_apply_pending.load(Relaxed),
         homing_clamp_active: tmc.homing_clamp_active.load(Relaxed),
         stall_latched: tmc.stall_latched.load(Relaxed),
-        step_timer_active: stepper.timer_active_mirror.load(Relaxed),
-        step_queue_empty: STEP_QUEUE_CHANNELS[channel as usize].is_empty(),
-        feedforward_reset: tmc.feedforward_reset.load(Relaxed),
-        pid_error_sums_clear: tmc.pid_error_sums_clear.load(Relaxed),
+        step_timer_active,
+        step_queue_empty,
+        feedforward_reset,
+        pid_error_sums_clear,
     }
 }
 
