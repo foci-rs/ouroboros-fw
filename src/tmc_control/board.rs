@@ -14,6 +14,9 @@ use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
 use foci_firmware::state::trsync::{HOMING_STATE, HOMING_TRIGGERED};
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_control::helpers::refresh_velocity_scale_from_state;
+use foci_firmware::tmc_control::scheduler::{
+    ChannelScheduler, MaintenanceArm as SchedulerMaintenanceArm,
+};
 use foci_firmware::tmc_control::{
     ChannelDriver, DriveCtx, ParkReason, TmcControlConfig, TmcSafetyBootstrapFailure,
 };
@@ -153,11 +156,13 @@ pub(crate) fn channel_needs_safe_state(channel: u8, driver: &ChannelDriver) -> b
         || tmc_state(channel).commission_in_flight.load(Relaxed)
 }
 
-/// Build and immediately consume the current dual-channel maintenance snapshot.
-pub(crate) fn live_maintenance_arm(
+/// Apply a fresh dual-channel maintenance decision to the scheduler.
+pub(crate) fn apply_live_maintenance_arm(
+    scheduler: &mut ChannelScheduler<2>,
     drivers: &[ChannelDriver; TMC_CHANNEL_COUNT as usize],
-) -> MaintenanceArm {
-    maintenance_arm(MaintenanceSnapshot {
+    now_us: u64,
+) {
+    let arm = match maintenance_arm(MaintenanceSnapshot {
         shutdown_active: SHUTDOWN_ACTIVE.load(Relaxed),
         fault_active: FAULT_ACTIVE.load(Relaxed),
         queue_flush_pending: TMC_QUEUE_FLUSH.load(Relaxed),
@@ -170,7 +175,11 @@ pub(crate) fn live_maintenance_arm(
             maintenance_channel_snapshot(1, &drivers[1]),
         ],
         trace_enabled: cfg!(feature = "trace"),
-    })
+    }) {
+        MaintenanceArm::Armed => SchedulerMaintenanceArm::Armed,
+        MaintenanceArm::Disarmed => SchedulerMaintenanceArm::Disarmed,
+    };
+    scheduler.set_maintenance_arm(arm, now_us);
 }
 
 fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelMaintenanceSnapshot {

@@ -57,11 +57,10 @@ mod app {
     use crate::state::tmc::*;
     use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
     use crate::tmc_control::board::{
-        TmcEnablePins, channel_needs_safe_state, commissioning_request_blocked, enable_pin,
-        live_maintenance_arm, ouroboros_backend, refresh_velocity_scale, stepper_state, tmc_driver,
-        tmc_state,
+        TmcEnablePins, apply_live_maintenance_arm, channel_needs_safe_state,
+        commissioning_request_blocked, enable_pin, ouroboros_backend, refresh_velocity_scale,
+        stepper_state, tmc_driver, tmc_state,
     };
-    use crate::tmc_control::maintenance::MaintenanceArm;
     use crate::trigger_domain::{
         TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain, with_trigger_domain_site,
     };
@@ -484,7 +483,9 @@ mod app {
         };
         use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
         use embassy_futures::select::{Either, select};
-        use foci_firmware::tmc_control::scheduler::{ChannelMode, ChannelScheduler, UnitClass};
+        use foci_firmware::tmc_control::scheduler::{
+            ChannelMode, ChannelScheduler, MaintenanceArm, UnitClass,
+        };
         use foci_firmware::tmc_control::{
             AuditResult, CommissionNext, CommissionWaitRequestDisposition, UnitOutcome,
             bootstrap_tmc_safety,
@@ -883,19 +884,15 @@ mod app {
             scheduler.set_mode(1, drivers[1].mode(), now_us());
 
             let now = now_us();
+            apply_live_maintenance_arm(&mut scheduler, drivers, now);
             let wait = homing_wake.next_wait(
                 HOMING_START_PENDING.load(Acquire),
                 scheduler.earliest_due_us().is_some_and(|due| due <= now),
             );
-            if matches!(wait, HomingWait::ReceiverOrDeadline)
-                && matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)
-                && scheduler.maintenance_group().is_none()
-            {
-                scheduler.advance_quiescent_maintenance_grid(now);
-            }
             let received_event = match wait {
                 HomingWait::ProcessRetained | HomingWait::RunScheduler => None,
                 HomingWait::MaintenanceOnly => {
+                    scheduler.set_maintenance_arm(MaintenanceArm::Armed, now_us());
                     Mono::delay_until(fugit::Instant::<u64, 1, 1_000_000>::from_ticks(
                         scheduler.maintenance_due_us(),
                     ))
@@ -915,6 +912,7 @@ mod app {
                     }
                 }
             };
+            apply_live_maintenance_arm(&mut scheduler, drivers, now_us());
 
             let request = if matches!(wait, HomingWait::ProcessRetained) {
                 homing_wake.take_retained_request()
@@ -1053,11 +1051,7 @@ mod app {
             }
 
             let now = now_us();
-            if matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)
-                && scheduler.maintenance_group().is_none()
-            {
-                scheduler.advance_quiescent_maintenance_grid(now);
-            }
+            apply_live_maintenance_arm(&mut scheduler, drivers, now);
             let homing_state = HOMING_STATE.load(Relaxed);
             let Some(unit) = scheduler.pick(now, homing_state) else {
                 continue;
@@ -1257,8 +1251,9 @@ mod app {
                         let c1 = scheduler.commission_stats(1);
                         let m = scheduler.maintenance_stats();
                         let a = scheduler.audit_stats();
+                        let arm = scheduler.maintenance_arm_stats();
                         defmt::info!(
-                            "sched fast0 req={} svc={} miss={} late={}us cyc={} | fast1 req={} svc={} miss={} late={}us cyc={} | comm0 svc={} late={}us | comm1 svc={} late={}us | maint svc={} miss={} late={}us | audit svc={} miss={}",
+                            "sched fast0 req={} svc={} miss={} late={}us cyc={} | fast1 req={} svc={} miss={} late={}us cyc={} | comm0 svc={} late={}us | comm1 svc={} late={}us | maint svc={} miss={} late={}us | audit svc={} miss={} | maint arm={:?} a2d={} d2a={}",
                             f0.requested,
                             f0.serviced,
                             f0.missed,
@@ -1278,6 +1273,9 @@ mod app {
                             m.max_lateness_us,
                             a.serviced,
                             a.missed,
+                            arm.state,
+                            arm.armed_to_disarmed,
+                            arm.disarmed_to_armed,
                         );
                     }
                 }

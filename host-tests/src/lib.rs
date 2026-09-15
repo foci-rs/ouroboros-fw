@@ -166,11 +166,20 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn maintenance_quiescence_snapshot_builder_reads_both_complete_channels() {
-        let builder = extract_fn(BOARD, "live_maintenance_arm");
+    fn maintenance_arm_integration_applies_a_fresh_complete_snapshot() {
+        let builder = extract_fn(BOARD, "apply_live_maintenance_arm");
         let channel_builder = extract_fn(BOARD, "maintenance_channel_snapshot");
 
-        assert!(builder.contains("maintenance_arm(MaintenanceSnapshot {"));
+        let decision = builder
+            .find("let arm = match maintenance_arm(MaintenanceSnapshot {")
+            .expect("fresh arm decision");
+        let apply = builder
+            .find("scheduler.set_maintenance_arm(arm, now_us);")
+            .expect("immediate scheduler application");
+        assert!(decision < apply);
+        assert!(!builder[decision..apply].contains(".await"));
+        assert!(builder.contains("MaintenanceArm::Armed => SchedulerMaintenanceArm::Armed"));
+        assert!(builder.contains("MaintenanceArm::Disarmed => SchedulerMaintenanceArm::Disarmed"));
         assert!(builder.contains("maintenance_channel_snapshot(0, &drivers[0])"));
         assert!(builder.contains("maintenance_channel_snapshot(1, &drivers[1])"));
         assert!(channel_builder.contains("driver.maintenance_obligations_clear()"));
@@ -183,7 +192,7 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn empty_maintenance_group_orders_handoff_sources_before_fence_and_request_latches() {
+    fn maintenance_arm_integration_orders_handoff_before_request_latches() {
         let builder = extract_fn(BOARD, "maintenance_channel_snapshot");
         let timer = builder
             .find("timer_active_mirror.load(Relaxed)")
@@ -210,10 +219,10 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn empty_maintenance_group_recomputes_quiescence_at_both_decision_boundaries() {
+    fn maintenance_arm_integration_recomputes_at_every_control_boundary() {
         let body = extract_fn(MAIN, "tmc_control");
         let calls: std::vec::Vec<_> = body
-            .match_indices("live_maintenance_arm(drivers)")
+            .match_indices("apply_live_maintenance_arm(")
             .map(|(offset, _)| offset)
             .collect();
         let wait = body
@@ -225,52 +234,87 @@ mod commissioning_board_contract_tests {
         let request = body
             .find("if let Some(req) = request")
             .expect("request path");
+        let request_await = body[request..]
+            .find(".await")
+            .map(|offset| request + offset)
+            .expect("request handler await");
         let pick = body
             .find("scheduler.pick(now, homing_state)")
             .expect("scheduler pick");
+        let final_receive_await = body[..request].rfind(".await").expect("receive wait");
 
-        assert_eq!(calls.len(), 2);
-        assert!(wait < calls[0]);
-        assert!(calls[0] < receive);
-        assert!(!body[calls[0]..receive].contains(".await"));
-        assert!(receive < calls[1]);
-        assert!(request < calls[1]);
-        assert!(calls[1] < pick);
-        assert!(!body[calls[1]..pick].contains(".await"));
+        assert_eq!(calls.len(), 3);
+        assert!(calls[0] < wait);
+        assert!(!body[calls[0]..wait].contains(".await"));
+        assert!(receive < final_receive_await);
+        assert!(final_receive_await < calls[1]);
+        assert!(calls[1] < request);
+        assert!(request_await < calls[2]);
+        assert!(calls[2] < pick);
+        assert!(!body[calls[2]..pick].contains(".await"));
     }
 
     #[test]
-    fn empty_maintenance_group_elision_requires_disarmed_and_no_open_group() {
+    fn maintenance_arm_integration_removes_the_empty_group_seam() {
         let body = extract_fn(MAIN, "tmc_control");
-        let seam = "scheduler.advance_quiescent_maintenance_grid(now);";
-        let pre_wait_guard = concat!(
-            "if matches!(wait, HomingWait::ReceiverOrDeadline)\n",
-            "                && matches!(live_maintenance_arm(drivers), ",
-            "MaintenanceArm::Disarmed)\n",
-            "                && scheduler.maintenance_group().is_none()\n",
-            "            {\n",
-            "                scheduler.advance_quiescent_maintenance_grid(now);\n",
-            "            }",
-        );
-        let post_wait_guard = concat!(
-            "if matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)\n",
-            "                && scheduler.maintenance_group().is_none()\n",
-            "            {\n",
-            "                scheduler.advance_quiescent_maintenance_grid(now);\n",
-            "            }",
-        );
+        let helper = extract_fn(BOARD, "apply_live_maintenance_arm");
+        let first_apply = body
+            .find("apply_live_maintenance_arm(")
+            .expect("level-driven arm application");
+        let wait = body
+            .find("let wait = homing_wake.next_wait(")
+            .expect("wait decision");
+        let finalize = body
+            .find("UnitClass::MaintenanceFinalize")
+            .expect("maintenance finalize path");
+        let record = body[finalize..]
+            .find("scheduler.record(")
+            .map(|offset| finalize + offset)
+            .expect("finalize record");
+        let next_iteration = body[record..]
+            .find("let Some(outcome) = outcome else {\n                continue;")
+            .expect("finalize continues to the next level-driven decision");
 
-        assert_eq!(body.matches(seam).count(), 2);
-        assert_eq!(body.matches(pre_wait_guard).count(), 1);
-        assert_eq!(body.matches(post_wait_guard).count(), 1);
+        assert!(!body.contains("advance_quiescent_maintenance_grid"));
+        assert!(!BOARD.contains("fn live_maintenance_arm"));
+        assert!(!helper.contains("maintenance_group"));
+        assert!(first_apply < wait);
+        assert!(next_iteration > 0);
+    }
 
-        let post_wait_call = body.rfind(seam).expect("post-wait elision seam");
-        let pick = body[post_wait_call..]
-            .find("scheduler.pick(now, homing_state)")
-            .map(|offset| post_wait_call + offset)
-            .expect("original scheduler path after elision decision");
-        assert!(body[pick..].contains("UnitClass::MaintenanceFinalize"));
-        assert!(!body[post_wait_call..pick].contains("ouroboros_backend("));
+    #[test]
+    fn maintenance_arm_integration_arms_urgent_homing_before_reading_its_deadline() {
+        let body = extract_fn(MAIN, "tmc_control");
+        let urgent_start = body
+            .find("HomingWait::MaintenanceOnly =>")
+            .expect("urgent homing wait arm");
+        let urgent_end = body[urgent_start..]
+            .find("HomingWait::ReceiverOrDeadline =>")
+            .map(|offset| urgent_start + offset)
+            .expect("receiver wait arm");
+        let urgent = &body[urgent_start..urgent_end];
+        let arm = urgent
+            .find("scheduler.set_maintenance_arm(MaintenanceArm::Armed, now_us());")
+            .expect("explicit urgent rearm");
+        let deadline = urgent
+            .find("scheduler.maintenance_due_us()")
+            .expect("urgent maintenance deadline read");
+        let await_point = urgent.find(".await").expect("urgent deadline await");
+
+        assert!(arm < deadline);
+        assert!(deadline < await_point);
+    }
+
+    #[test]
+    fn maintenance_arm_integration_reports_state_and_transition_counts() {
+        let body = extract_fn(MAIN, "tmc_control");
+
+        assert!(body.contains("let arm = scheduler.maintenance_arm_stats();"));
+        assert!(body.contains("maint arm={:?} a2d={} d2a={}"));
+        assert!(body.contains("arm.state"));
+        assert!(body.contains("arm.armed_to_disarmed"));
+        assert!(body.contains("arm.disarmed_to_armed"));
+        assert_eq!(body.matches("maintenance_arm_stats()").count(), 1);
     }
 
     #[test]
