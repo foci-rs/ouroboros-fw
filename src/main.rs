@@ -883,15 +883,16 @@ mod app {
             scheduler.set_mode(1, drivers[1].mode(), now_us());
 
             let now = now_us();
-            if matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)
-                && scheduler.maintenance_group().is_none()
-            {
-                scheduler.advance_quiescent_maintenance_grid(now);
-            }
             let wait = homing_wake.next_wait(
                 HOMING_START_PENDING.load(Acquire),
                 scheduler.earliest_due_us().is_some_and(|due| due <= now),
             );
+            if matches!(wait, HomingWait::ReceiverOrDeadline)
+                && matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)
+                && scheduler.maintenance_group().is_none()
+            {
+                scheduler.advance_quiescent_maintenance_grid(now);
+            }
             let received_event = match wait {
                 HomingWait::ProcessRetained | HomingWait::RunScheduler => None,
                 HomingWait::MaintenanceOnly => {

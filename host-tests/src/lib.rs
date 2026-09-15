@@ -230,8 +230,9 @@ mod commissioning_board_contract_tests {
             .expect("scheduler pick");
 
         assert_eq!(calls.len(), 2);
-        assert!(calls[0] < wait);
-        assert!(!body[calls[0]..wait].contains(".await"));
+        assert!(wait < calls[0]);
+        assert!(calls[0] < receive);
+        assert!(!body[calls[0]..receive].contains(".await"));
         assert!(receive < calls[1]);
         assert!(request < calls[1]);
         assert!(calls[1] < pick);
@@ -242,15 +243,26 @@ mod commissioning_board_contract_tests {
     fn empty_maintenance_group_elision_requires_disarmed_and_no_open_group() {
         let body = extract_fn(MAIN, "tmc_control");
         let seam = "scheduler.advance_quiescent_maintenance_grid(now);";
-        let calls: std::vec::Vec<_> = body.match_indices(seam).map(|(offset, _)| offset).collect();
+        let pre_wait_guard = concat!(
+            "if matches!(wait, HomingWait::ReceiverOrDeadline)\n",
+            "                && matches!(live_maintenance_arm(drivers), ",
+            "MaintenanceArm::Disarmed)\n",
+            "                && scheduler.maintenance_group().is_none()\n",
+            "            {\n",
+            "                scheduler.advance_quiescent_maintenance_grid(now);\n",
+            "            }",
+        );
+        let post_wait_guard = concat!(
+            "if matches!(live_maintenance_arm(drivers), MaintenanceArm::Disarmed)\n",
+            "                && scheduler.maintenance_group().is_none()\n",
+            "            {\n",
+            "                scheduler.advance_quiescent_maintenance_grid(now);\n",
+            "            }",
+        );
 
-        assert_eq!(calls.len(), 2);
-        for call in calls {
-            let guard = &body[call.saturating_sub(240)..call];
-            assert!(guard.contains("live_maintenance_arm(drivers)"));
-            assert!(guard.contains("MaintenanceArm::Disarmed"));
-            assert!(guard.contains("scheduler.maintenance_group().is_none()"));
-        }
+        assert_eq!(body.matches(seam).count(), 2);
+        assert_eq!(body.matches(pre_wait_guard).count(), 1);
+        assert_eq!(body.matches(post_wait_guard).count(), 1);
 
         let post_wait_call = body.rfind(seam).expect("post-wait elision seam");
         let pick = body[post_wait_call..]
