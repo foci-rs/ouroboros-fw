@@ -912,9 +912,23 @@ mod commissioning_board_contract_tests {
         assert!(notify.contains("let Some(sender)"));
         assert!(notify.contains("else {\n                return Err(())"));
         assert!(notify.contains("TmcControlEvent::HomingStart"));
-        assert!(notify.contains("TrySendError::Full(_)"));
-        assert!(notify.contains("TrySendError::NoReceiver(_)"));
-        assert!(notify.contains("=> Ok(())"));
+
+        let result_match = notify
+            .find("match sender.try_send(TmcControlEvent::HomingStart)")
+            .expect("homing-start enqueue result match");
+        let result_open = notify[result_match..]
+            .find('{')
+            .map(|offset| result_match + offset)
+            .expect("homing-start enqueue result body");
+        let result_close = find_matching_close_brace(notify, result_open);
+        let normalized = notify[result_open + 1..result_close]
+            .split_whitespace()
+            .collect::<std::string::String>();
+        assert_eq!(
+            normalized,
+            "Ok(())|Err(TrySendError::Full(_))|Err(TrySendError::NoReceiver(_))=>Ok(()),",
+            "every initialized-sender result must acknowledge the authoritative latch"
+        );
     }
 
     #[test]
