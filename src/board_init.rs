@@ -175,18 +175,15 @@ pub fn init_tim5_clock() {
     tim5.sr().write_value(Default::default());
 }
 
-/// Keep the debug/trace clock domain alive while the core sleeps.
+/// Disable the D1 debug clock while the core sleeps.
 ///
-/// The `#[idle]` task's `wfi()` puts the Cortex-M7 core into D1-domain
-/// Sleep mode whenever no interrupt is pending -- most of the time, given
-/// the 10 kHz control tick. Without `DBGSLEEP_D1` set, an attached
-/// debugger can lose the core or stall RTT reads across every sleep
-/// entry. `DBGSTOP_D1`/`DBGSTBY_D1` are left unset: this firmware never
-/// sets `SLEEPDEEP`, so it never reaches D1 Stop or Standby.
-pub fn enable_debug_clock_during_sleep() {
+/// Production leaves `DBGSLEEP_D1` clear to preserve the validated USB/WFI
+/// behavior. Continuous RTT access across Sleep is not guaranteed; supporting
+/// it requires a separate, explicit debug-only build decision.
+pub fn disable_debug_clock_during_sleep() {
     embassy_stm32::pac::DBGMCU
         .cr()
-        .modify(|w| w.set_dbgsleep_d1(true));
+        .modify(|w| w.set_dbgsleep_d1(false));
 }
 
 /// Configure verified Ouroboros STEP/DIR outputs at very high speed.

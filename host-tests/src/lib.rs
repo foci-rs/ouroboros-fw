@@ -166,6 +166,49 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn debug_sleep_clock_is_disabled_before_idle() {
+        assert!(
+            !BOARD_INIT.contains("set_dbgsleep_d1(true)"),
+            "production must not keep the D1 debug clock running during Sleep"
+        );
+
+        let helper_name = "disable_debug_clock_during_sleep";
+        let helper = extract_fn(BOARD_INIT, helper_name);
+        assert!(
+            helper.contains(".modify(|w| w.set_dbgsleep_d1(false));"),
+            "the board helper must explicitly clear DBGSLEEP_D1 on every boot"
+        );
+
+        let helper_start = BOARD_INIT
+            .find(&std::format!("pub fn {helper_name}"))
+            .expect("missing debug-sleep helper declaration");
+        let declaration_start = BOARD_INIT[..helper_start]
+            .rfind("\n}\n")
+            .map_or(0, |offset| offset + 3);
+        assert!(
+            !BOARD_INIT[declaration_start..helper_start].contains("#[cfg"),
+            "the debug-sleep helper must not be feature-gated"
+        );
+
+        let init = extract_fn(MAIN, "init");
+        let hal_init = init
+            .find("embassy_stm32::init(crate::board_init::rcc_config())")
+            .expect("application init must initialize the HAL");
+        let call = init
+            .find("crate::board_init::disable_debug_clock_during_sleep();")
+            .expect("application init must disable the D1 debug clock");
+        let scheduler_start = init
+            .find("stepper_reconcile::spawn()")
+            .expect("application init must start the scheduler tasks");
+        assert!(hal_init < call);
+        assert!(call < scheduler_start);
+        assert!(
+            !init[hal_init..call].contains("#[cfg") && !init[hal_init..call].contains("cfg!("),
+            "the boot-path debug-sleep call must be unconditional"
+        );
+    }
+
+    #[test]
     fn maintenance_arm_integration_applies_a_fresh_complete_snapshot() {
         let builder = extract_fn(BOARD, "apply_live_maintenance_arm");
         let channel_builder = extract_fn(BOARD, "maintenance_channel_snapshot");

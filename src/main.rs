@@ -240,7 +240,7 @@ mod app {
         let p = embassy_stm32::init(crate::board_init::rcc_config());
         defmt::info!("SYSCLK: 520 MHz, USB: 48 MHz");
         crate::board_init::verify_dma_interrupt_priority();
-        crate::board_init::enable_debug_clock_during_sleep();
+        crate::board_init::disable_debug_clock_during_sleep();
 
         // One-time reset-cause diagnostic. RCC_RSR latches why the MCU last
         // reset and holds the flags until RMVF clears them. Log the cause by
