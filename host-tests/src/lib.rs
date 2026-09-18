@@ -1032,6 +1032,37 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn specific_tmc_fault_classification_is_reported_before_stepper_too_far_in_past() {
+        let adc_pos = MAIN
+            .find("EmergencyDisableFault::AdcCurrentClipped =>")
+            .expect("ADC-clip fault arm");
+        let status_read_pos = MAIN
+            .find("EmergencyDisableFault::StatusReadFailed =>")
+            .expect("status-read-failed fault arm");
+        let deadline_pos = MAIN
+            .find("ShutdownReason::StepperTooFarInPast")
+            .expect("StepperTooFarInPast shutdown call");
+        assert!(
+            adc_pos < deadline_pos && status_read_pos < deadline_pos,
+            "a specific TMC fault classification (ADC current clipped, STATUS_FLAGS read \
+             failed) must be checked and reported before falling back to \
+             StepperTooFarInPast -- a stepper naturally misses its own deadline the \
+             instant its motor is emergency-disabled, so an unconditional preference for \
+             the deadline-miss label masks the real electrical fault that caused it"
+        );
+
+        let generic_pos = MAIN
+            .find("EmergencyDisableFault::Generic =>")
+            .expect("Generic fault arm");
+        assert!(
+            generic_pos < deadline_pos,
+            "StepperTooFarInPast must be reported only from within the Generic-fault \
+             arm (no specific TMC fault was observed), not as an unconditional \
+             override ahead of fault classification"
+        );
+    }
+
+    #[test]
     fn homing_maintenance_outcomes_preserve_retry_and_fail_closed_containment() {
         let maintenance = MAIN
             .split("UnitOutcome::Maintenance { homing } => {")

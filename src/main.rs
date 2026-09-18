@@ -831,17 +831,19 @@ mod app {
                     FAULT_ACTIVE.store(false, Relaxed);
                 }
 
-                if deadline_channel != NO_STEPPER_CHANNEL {
-                    shutdown_reason!(foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast);
-                } else {
-                    match fault {
-                        foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped => {
-                            shutdown!("TMC4671: ADC current clipped (overcurrent)");
-                        }
-                        foci_firmware::tmc_control::EmergencyDisableFault::StatusReadFailed => {
-                            shutdown!("TMC4671: STATUS_FLAGS read failed");
-                        }
-                        foci_firmware::tmc_control::EmergencyDisableFault::Generic => {
+                match fault {
+                    foci_firmware::tmc_control::EmergencyDisableFault::AdcCurrentClipped => {
+                        shutdown!("TMC4671: ADC current clipped (overcurrent)");
+                    }
+                    foci_firmware::tmc_control::EmergencyDisableFault::StatusReadFailed => {
+                        shutdown!("TMC4671: STATUS_FLAGS read failed");
+                    }
+                    foci_firmware::tmc_control::EmergencyDisableFault::Generic => {
+                        if deadline_channel != NO_STEPPER_CHANNEL {
+                            shutdown_reason!(
+                                foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast
+                            );
+                        } else {
                             shutdown!("TMC4671 fault");
                         }
                     }
