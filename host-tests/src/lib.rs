@@ -1257,6 +1257,10 @@ mod commissioning_board_contract_tests {
             .find("HOMING_START_PENDING.store(false, Release)")
             .expect("shutdown homing-start latch release");
         assert!(homing_reset < latch_release);
+        assert!(
+            shutdown.contains("HOMING_REENTER_PENDING.store(false, Relaxed)"),
+            "shutdown must drop a queued homing re-entry or the next restore re-arms homing"
+        );
 
         let control = extract_fn(MAIN, "tmc_control");
         let flush_epoch = control
