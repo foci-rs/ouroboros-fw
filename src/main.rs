@@ -512,6 +512,7 @@ mod app {
         let mut scheduler = ChannelScheduler::<2>::new(now_us(), [1_000, 1_000]);
         let mut homing_wake = HomingWakePolicy::new();
         let mut group_all_ready = true;
+        let mut group_retry = false;
         let mut shutdown_handled = false;
 
         macro_rules! shutdown {
@@ -1070,8 +1071,10 @@ mod app {
             let outcome = if unit.class == UnitClass::MaintenanceFinalize {
                 let progress = if group_all_ready {
                     HomingPreparationProgress::Advanced
-                } else {
+                } else if group_retry {
                     HomingPreparationProgress::Retry
+                } else {
+                    HomingPreparationProgress::Deferred
                 };
                 foci_firmware::tmc_control::TmcControlRuntime::advance_homing_state_after_channels(
                     foci_firmware::tmc_control::TmcControlHomingRefs::new(
@@ -1088,6 +1091,7 @@ mod app {
                     HOMING_START_PENDING.store(false, Release);
                 }
                 group_all_ready = true;
+                group_retry = false;
                 None
             } else {
                 match device_or_invalid(mux, ch) {
@@ -1161,9 +1165,14 @@ mod app {
                         foci_firmware::tmc_control::HomingMaintenanceResult::ReadyToAdvance => {}
                         foci_firmware::tmc_control::HomingMaintenanceResult::RetryCurrentState => {
                             group_all_ready = false;
+                            group_retry = true;
+                        }
+                        foci_firmware::tmc_control::HomingMaintenanceResult::Deferred => {
+                            group_all_ready = false;
                         }
                         foci_firmware::tmc_control::HomingMaintenanceResult::FailClosed => {
                             group_all_ready = false;
+                            group_retry = true;
                             tmc_state(ch).homing_clamp_active.store(false, Relaxed);
                             tmc_state(ch).stall_latched.store(false, Relaxed);
                             drivers[idx].runtime.clear_homing_runtime();
@@ -1554,11 +1563,6 @@ mod app {
             next_event_clocks[idx] = None;
             return StepDispatchOutcome::Continue;
         }
-        if HOMING_STATE.load(Relaxed) == 1 {
-            // P1 has not finished homing preparation; re-check in 1 ms.
-            next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
-            return StepDispatchOutcome::Continue;
-        }
         let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
             return StepDispatchOutcome::Continue;
@@ -1665,11 +1669,6 @@ mod app {
             next_event_clocks[idx] = None;
             return StepDispatchOutcome::Continue;
         }
-        if HOMING_STATE.load(Relaxed) == 1 {
-            // P1 has not finished homing preparation; re-check in 1 ms.
-            next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
-            return StepDispatchOutcome::Continue;
-        }
         let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
             clear_step_channel(channel, next_event_clocks);
             return StepDispatchOutcome::Continue;
@@ -1684,6 +1683,10 @@ mod app {
         if !stepper.has_active_segment() {
             next_event_clocks[idx] = None;
             return load_next_step_move(channel, next_event_clocks);
+        }
+        if step_held_for_homing(stepper.next_step_clock()) {
+            next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
+            return StepDispatchOutcome::Continue;
         }
 
         let result = stepper.step_event();
@@ -1746,15 +1749,10 @@ mod app {
     fn refresh_step_channels(
         next_event_clocks: &mut [Option<u32>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
     ) -> StepDispatchOutcome {
-        use core::sync::atomic::Ordering::Relaxed;
-
         for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
             let channel = idx as u8;
             if !channel_stepper_ready(channel) {
                 next_event_clocks[idx] = None;
-            } else if HOMING_STATE.load(Relaxed) == 1 {
-                // P1 has not finished homing preparation; re-check in 1 ms.
-                next_event_clocks[idx] = Some(read_tim5().wrapping_add(CLOCK_FREQ / 1000));
             } else if next_event_clocks[idx].is_none()
                 && load_next_step_move(channel, next_event_clocks) == StepDispatchOutcome::Fatal
             {

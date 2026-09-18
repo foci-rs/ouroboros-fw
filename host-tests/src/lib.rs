@@ -1024,10 +1024,38 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn step_dispatch_holds_while_homing_preparation_is_pending() {
+    fn step_dispatch_hold_is_gated_on_the_homing_start_clock() {
+        assert_eq!(
+            MAIN.matches("step_held_for_homing(stepper.next_step_clock())")
+                .count(),
+            1,
+            "the only homing hold sits where a due step is emitted and keys off \
+             that step's scheduled clock"
+        );
         assert!(
-            MAIN.matches("HOMING_STATE.load(Relaxed) == 1").count() >= 3,
-            "every step-dispatch entry must defer while HOMING_STATE == 1"
+            !MAIN.contains("HOMING_STATE.load(Relaxed) == 1"),
+            "a hold keyed on HOMING_STATE alone stalls the previous move's \
+             in-flight steps past their deadline: Klipper sends \
+             stepper_stop_on_trigger as soon as it plans the home, often \
+             seconds before the homing move starts"
+        );
+    }
+
+    #[test]
+    fn deferred_homing_preparation_keeps_state_without_containment() {
+        let maintenance = MAIN
+            .split("UnitOutcome::Maintenance { homing } => {")
+            .nth(1)
+            .expect("maintenance outcome arm");
+        let deferred_arm = extract_match_arm(maintenance, "HomingMaintenanceResult::Deferred");
+        assert!(deferred_arm.contains("group_all_ready = false"));
+        assert!(!deferred_arm.contains("TMC_DISABLE_SIGNAL.signal(())"));
+        assert!(!deferred_arm.contains("clear_homing_runtime()"));
+        assert!(!deferred_arm.contains("homing_clamp_active.store(false"));
+        assert!(
+            MAIN.contains("HomingPreparationProgress::Deferred"),
+            "a deferred group must release the homing-start latch so P1 returns \
+             to its normal wait instead of spinning on urgent maintenance"
         );
     }
 
@@ -1073,7 +1101,7 @@ mod commissioning_board_contract_tests {
             .expect("maintenance outcome body");
 
         assert!(maintenance.contains("match homing {"));
-        assert_eq!(maintenance.matches("HomingMaintenanceResult::").count(), 3);
+        assert_eq!(maintenance.matches("HomingMaintenanceResult::").count(), 4);
 
         let ready_arm = extract_match_arm(maintenance, "HomingMaintenanceResult::ReadyToAdvance");
         assert!(!ready_arm.contains("group_all_ready = false"));
@@ -1093,7 +1121,7 @@ mod commissioning_board_contract_tests {
         assert!(fail_closed_arm.contains("drivers[idx].runtime.clear_homing_runtime()"));
         assert!(fail_closed_arm.contains("TMC_DISABLE_SIGNAL.signal(())"));
 
-        assert_eq!(maintenance.matches("group_all_ready = false").count(), 2);
+        assert_eq!(maintenance.matches("group_all_ready = false").count(), 3);
         assert_eq!(
             maintenance
                 .matches("homing_clamp_active.store(false")
@@ -1669,6 +1697,11 @@ mod homing_wake_policy_tests {
             HomingPreparationProgress::Retry
         ));
         assert_eq!(policy.next_wait(true, true), HomingWait::RunScheduler);
+        assert!(
+            HomingWakePolicy::<u8>::should_clear_latch(HomingPreparationProgress::Deferred),
+            "a deferred clamp window is not a failure: release the latch so P1 waits \
+             on its normal deadline instead of spinning on urgent maintenance"
+        );
         assert!(HomingWakePolicy::<u8>::should_clear_latch(
             HomingPreparationProgress::Advanced
         ));

@@ -564,7 +564,7 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
         })
     }
 
-    fn link_stepper_stop(&mut self, stepper_idx: usize, trsync_oid: u8) -> Result<(), ()> {
+    fn link_stepper_stop(&mut self, stepper_idx: usize, trsync_oid: u8) -> Result<u32, ()> {
         with_trigger_domain(|td| {
             let board = OuroborosTrsyncBoard {
                 state: &*self.state,

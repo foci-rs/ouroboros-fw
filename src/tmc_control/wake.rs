@@ -42,6 +42,8 @@ pub(crate) enum HomingPreparationProgress {
     Retry,
     /// State 1 advanced successfully.
     Advanced,
+    /// The clamp window has not opened; state 1 waits for a later group.
+    Deferred,
     /// The fail-closed path took ownership of containment.
     FailClosed,
 }
@@ -115,7 +117,9 @@ impl<T> HomingWakePolicy<T> {
     pub(crate) const fn should_clear_latch(progress: HomingPreparationProgress) -> bool {
         match progress {
             HomingPreparationProgress::Retry => false,
-            HomingPreparationProgress::Advanced | HomingPreparationProgress::FailClosed => true,
+            HomingPreparationProgress::Advanced
+            | HomingPreparationProgress::Deferred
+            | HomingPreparationProgress::FailClosed => true,
         }
     }
 }

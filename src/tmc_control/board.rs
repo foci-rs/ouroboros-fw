@@ -11,14 +11,15 @@ use foci_firmware::commissioning::outer::velocity::integral_reproduction::Integr
 use foci_firmware::shutdown::ShutdownReason;
 use foci_firmware::state::lifecycle::{FAULT_ACTIVE, SHUTDOWN_ACTIVE};
 use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, TMC_QUEUE_FLUSH};
-use foci_firmware::state::trsync::{HOMING_STATE, HOMING_TRIGGERED};
+use foci_firmware::state::trsync::{HOMING_START_CLOCK, HOMING_STATE, HOMING_TRIGGERED};
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_control::helpers::refresh_velocity_scale_from_state;
 use foci_firmware::tmc_control::scheduler::{
     ChannelScheduler, MaintenanceArm as SchedulerMaintenanceArm,
 };
 use foci_firmware::tmc_control::{
-    ChannelDriver, DriveCtx, ParkReason, TmcControlConfig, TmcSafetyBootstrapFailure,
+    ChannelDriver, DriveCtx, HomingClockWindow, ParkReason, TmcControlConfig,
+    TmcSafetyBootstrapFailure,
 };
 use foci_tmc4671::spi::{RetryPolicy, Tmc4671Spi};
 
@@ -58,6 +59,10 @@ pub(crate) fn drive_ctx<'a>(
         now_us,
         homing_active: HOMING_STATE.load(Relaxed) != 0,
         homing_snapshot,
+        homing_clock: HomingClockWindow {
+            now: crate::helpers::lifecycle::read_tim5(),
+            start: HOMING_START_CLOCK.load(Relaxed),
+        },
         status_pin_asserted,
         status_mask: STATUS_CRITICAL_MASK,
         config,
