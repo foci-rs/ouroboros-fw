@@ -882,6 +882,14 @@ mod commissioning_board_contract_tests {
                 "band_lower_percent: u8",
                 "band_upper_percent: u8",
                 "band_position_q: u16",
+                "nominal_bandwidth_hz: u32",
+                "inner_bandwidth_rad_s: u32",
+                "dither_margin_milli: i32",
+                "settling_time_us: u32",
+                "overshoot_counts: u32",
+                "final_position_error_counts: i32",
+                "oscillation_detected: bool",
+                "position_tune_outcome_code: u8",
             ],
         );
     }

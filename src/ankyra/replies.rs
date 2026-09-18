@@ -321,6 +321,14 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             band_lower_percent: u8 = result.provenance.band_lower_percent,
             band_upper_percent: u8 = result.provenance.band_upper_percent,
             band_position_q: u16 = result.provenance.band_position_q,
+            nominal_bandwidth_hz: u32 = result.position_tune.nominal_bandwidth_hz,
+            inner_bandwidth_rad_s: u32 = result.position_tune.inner_bandwidth_rad_s,
+            dither_margin_milli: i32 = result.position_tune.dither_margin_milli,
+            settling_time_us: u32 = result.position_tune.settling_time_us,
+            overshoot_counts: u32 = result.position_tune.overshoot_counts,
+            final_position_error_counts: i32 = result.position_tune.final_position_error_counts,
+            oscillation_detected: bool = result.position_tune.oscillation_detected,
+            position_tune_outcome_code: u8 = result.position_tune_outcome_code,
         );
     }
 
