@@ -1084,10 +1084,7 @@ mod app {
                     snapshot,
                     group_all_ready,
                 );
-                if snapshot == 1
-                    && HOMING_STATE.load(Relaxed) != 1
-                    && HomingWakePolicy::<TmcRequest>::should_clear_latch(progress)
-                {
+                if snapshot == 1 && HomingWakePolicy::<TmcRequest>::should_clear_latch(progress) {
                     HOMING_START_PENDING.store(false, Release);
                 }
                 group_all_ready = true;

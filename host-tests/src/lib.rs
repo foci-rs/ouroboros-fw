@@ -1057,6 +1057,14 @@ mod commissioning_board_contract_tests {
             "a deferred group must release the homing-start latch so P1 returns \
              to its normal wait instead of spinning on urgent maintenance"
         );
+        assert!(
+            MAIN.contains(
+                "if snapshot == 1 && HomingWakePolicy::<TmcRequest>::should_clear_latch(progress)"
+            ) && !MAIN.contains("&& HOMING_STATE.load(Relaxed) != 1"),
+            "the finalize latch release must not require HOMING_STATE to have left 1: \
+             a deferred group keeps state 1 on purpose, and gating on the state \
+             would keep the latch set and starve requests until the window opens"
+        );
     }
 
     #[test]
