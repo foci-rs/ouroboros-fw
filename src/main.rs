@@ -399,6 +399,7 @@ mod app {
 
         // Spawn tasks
         stepper_reconcile::spawn().expect("stepper reconciliation worker must spawn exactly once");
+        trigger_drain_task::spawn().expect("trigger drain worker must spawn exactly once");
         tmc_control::spawn().expect("tmc_control task must spawn exactly once");
         usb_task::spawn().expect("usb_task must spawn exactly once");
         stats::spawn().expect("stats task must spawn exactly once");
@@ -1786,6 +1787,30 @@ mod app {
                     let mut board = crate::firmware_ctx::OuroborosStepperBoard { tmc_state: None };
                     drain_stepper_reconciliation(td.state_mut(), &mut board, pending);
                 });
+            }
+        }
+    }
+
+    /// Upper bound on `drain_all_populated_slots` retry passes per wake.
+    /// Not a correctness requirement -- `Signal` is lossless regardless
+    /// (see the spec's "Lossless wake-up"), so capping this only bounds
+    /// how long one wake can run before yielding back to `.wait()`, and
+    /// any slot still populated after the cap wakes the task again on the
+    /// signal that populated it (already delivered) or the next one.
+    const MAX_DRAIN_RETRY_PASSES: u8 = 4;
+
+    /// P2 software task: drain step queues detached by masked trigger
+    /// stops (trigger dispatch, shutdown, reset). Runs with interrupts
+    /// enabled -- see
+    /// docs/specs/2026-09-17-foci-16-trigger-drain-outside-critical-section.md.
+    #[task(priority = 2)]
+    async fn trigger_drain_task(_ctx: trigger_drain_task::Context) {
+        loop {
+            crate::trigger_domain::TRIGGER_DRAIN_WAKE.wait().await;
+            for _ in 0..MAX_DRAIN_RETRY_PASSES {
+                if !crate::trigger_domain::drain_all_populated_slots() {
+                    break;
+                }
             }
         }
     }

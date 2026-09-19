@@ -146,6 +146,50 @@ fn store_pending_drain(channel: u8, drain: PendingStopDrain) {
     TRIGGER_DRAIN_WAKE.signal(());
 }
 
+/// Take channel `idx`'s pending drain, if any, under its own short masked
+/// window -- never held across the drain loop below. Mirrors
+/// `detach_consumer`'s own critical-section shape.
+fn take_pending_drain(idx: usize) -> Option<PendingStopDrain> {
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: see `store_pending_drain` -- same exclusivity argument.
+        unsafe { (*TRIGGER_DRAIN_SLOTS.0[idx].get()).take() }
+    })
+}
+
+/// Drain and reattach every channel with a pending stop, once. Returns
+/// `true` if anything was found (so the caller can retry-until-stable --
+/// see the spec's "Slot access and lossless wake-up").
+///
+/// Called only from `trigger_drain_task` (P2), never from an ISR: this
+/// runs the actual dequeue loop with interrupts enabled, which is the
+/// entire point of this mechanism.
+pub(crate) fn drain_all_populated_slots() -> bool {
+    let mut found_any = false;
+    for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
+        let Some(pending) = take_pending_drain(idx) else {
+            continue;
+        };
+        found_any = true;
+        let mut consumer = pending.consumer;
+        let mut drained_segments = 0u32;
+        let mut drained_steps = 0u32;
+        while let Some(m) = consumer.dequeue() {
+            drained_segments = drained_segments.saturating_add(1);
+            drained_steps = drained_steps.saturating_add(u32::from(m.count));
+        }
+        crate::state::stepper_diag::record_physical_stop(
+            idx as u8,
+            pending.reason,
+            pending.remaining_events,
+            pending.queue_len,
+            drained_segments,
+            drained_steps,
+        );
+        attach_consumer(idx as u8, consumer);
+    }
+    found_any
+}
+
 fn tmc_state(channel: u8) -> Option<&'static foci_firmware::state::tmc::TmcChannelState> {
     foci_firmware::state::tmc::tmc_channel(channel)
 }
