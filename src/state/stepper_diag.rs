@@ -13,7 +13,7 @@ use crate::state::stepper::STEPPER_CHANNEL_COUNT;
 
 static STEPPER_EXECUTION_STATS: StepperExecutionStats<STEPPER_CHANNEL_COUNT> =
     StepperExecutionStats::new();
-static STEPPER_PERF_COUNTERS: StepperPerfCounters<520> = StepperPerfCounters::new();
+static STEPPER_PERF_COUNTERS: StepperPerfCounters<520, 260> = StepperPerfCounters::new();
 
 pub(crate) const STEPPER_DIAG_QUEUE_DEPTH: usize = 16;
 pub(crate) const STEPPER_PERF_EVENT_QUEUE_DEPTH: usize = 4;
@@ -158,6 +158,36 @@ pub(crate) fn perf_snapshot(
     clear: bool,
 ) -> foci_firmware::diagnostic::StepperPerfSnapshot {
     STEPPER_PERF_COUNTERS.snapshot(channel, clear, cfg!(feature = "trace"))
+}
+
+/// Return a step-dispatch performance snapshot and, if `clear`, start a
+/// fresh measurement window at `now_ticks`. The elapsed-window value always
+/// describes the window that is ending, measured before any clear.
+///
+/// When `clear` is set, the snapshot's coherent read/clear of the cumulative
+/// totals (inside `StepperPerfCounters::snapshot`) and the window-start
+/// re-stamp (inside `record_window_reset`) run under one critical section,
+/// so no P2/P3 write can land between the totals being cleared and the new
+/// window starting.
+pub(crate) fn perf_snapshot_and_reset_window(
+    channel: u8,
+    clear: bool,
+    now_ticks: u64,
+) -> (foci_firmware::diagnostic::StepperPerfSnapshot, (u32, u32)) {
+    let elapsed = STEPPER_PERF_COUNTERS.elapsed_cycles(now_ticks);
+    if clear {
+        let snapshot = critical_section::with(|_| {
+            let snapshot = STEPPER_PERF_COUNTERS.snapshot(channel, true, cfg!(feature = "trace"));
+            STEPPER_PERF_COUNTERS.record_window_reset(now_ticks);
+            snapshot
+        });
+        (snapshot, elapsed)
+    } else {
+        (
+            STEPPER_PERF_COUNTERS.snapshot(channel, false, cfg!(feature = "trace")),
+            elapsed,
+        )
+    }
 }
 
 pub(crate) fn record_critical_section(site: u8, cycles: u32) {

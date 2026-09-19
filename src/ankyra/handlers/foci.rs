@@ -23,6 +23,7 @@ use foci_firmware::context::TmcHost;
 use foci_firmware::context::{ClockSource, ShutdownRecovery, StateAccess};
 use foci_firmware::diagnostic::{MotionScaleDiagnosticSnapshot, StepperExecutionSnapshot};
 use foci_firmware::shutdown::ShutdownReason;
+use foci_firmware::state::lifecycle::{STATS_SEND_TIME, STATS_SEND_TIME_HIGH};
 
 use crate::firmware_ctx::FirmwareCtx;
 use crate::helpers::tmc::{FociTuneParams, foci_tune_inner};
@@ -248,7 +249,11 @@ pub fn foci_stepper_perf_stats(ctx: &mut FirmwareCtx<'_>, oid: u8, clear: u8) {
             return;
         }
     };
-    let snapshot = crate::state::stepper_diag::perf_snapshot(channel, clear != 0);
+    let cur = ctx.now();
+    let high = STATS_SEND_TIME_HIGH.load(Relaxed) + u32::from(cur < STATS_SEND_TIME.load(Relaxed));
+    let now_ticks = (u64::from(high) << 32) | u64::from(cur);
+    let (snapshot, (elapsed_cycles_lo, elapsed_cycles_hi)) =
+        crate::state::stepper_diag::perf_snapshot_and_reset_window(channel, clear != 0, now_ticks);
 
     ::ankyra::klipper_reply_from!(
         &mut crate::_ankyra_config::Sender,
@@ -289,6 +294,12 @@ pub fn foci_stepper_perf_stats(ctx: &mut FirmwareCtx<'_>, oid: u8, clear: u8) {
         reset_site_max_cycles: u32 = snapshot.reset_site_max_cycles,
         trigger_stop_site_count: u32 = snapshot.trigger_stop_site_count,
         trigger_stop_site_max_cycles: u32 = snapshot.trigger_stop_site_max_cycles,
+        total_irq_cycles_lo: u32 = snapshot.total_irq_cycles_lo,
+        total_irq_cycles_hi: u32 = snapshot.total_irq_cycles_hi,
+        total_dispatch_cycles_lo: u32 = snapshot.total_dispatch_cycles_lo,
+        total_dispatch_cycles_hi: u32 = snapshot.total_dispatch_cycles_hi,
+        elapsed_cycles_lo: u32 = elapsed_cycles_lo,
+        elapsed_cycles_hi: u32 = elapsed_cycles_hi,
     );
 }
 
