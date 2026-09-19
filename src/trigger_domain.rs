@@ -55,12 +55,16 @@ fn attach_consumer(channel: u8, consumer: Consumer<'static, StepMove>) {
 
 /// Borrow a channel's `StepQueueChannel` consumer in place, under a short
 /// independent critical section, for a caller already inside an outer
-/// mask that stays in place here (reset, shutdown, trigger-dispatch
-/// stop). Returns `None` if a concurrent unmasked drain
-/// (`stop_physical_stepper_unmasked`) currently holds the consumer
+/// mask that stays in place here. Returns `None` if a concurrent unmasked
+/// drain (`stop_physical_stepper_unmasked`) currently holds the consumer
 /// detached -- callers must perform their non-queue side effects and
 /// report zero *additional* drained work in that case: the in-flight
 /// unmasked drain already owns draining this queue.
+///
+/// Used by [`crate::firmware_ctx::OuroborosStepperBoard::drain_step_queue`]
+/// (the stepper-reset command path) -- unrelated to
+/// `stop_physical_stepper_inner`'s trigger-dispatch stop path, which now
+/// hands off via `store_pending_drain` instead of calling this.
 pub(crate) fn with_consumer_locked<R>(
     channel: u8,
     f: impl FnOnce(&mut Consumer<'static, StepMove>) -> R,
@@ -84,11 +88,6 @@ pub(crate) const PHYSICAL_STEPPER_INDICES: &[usize] = &[0, 1];
 /// awaiting drain by `trigger_drain_task`. Everything `record_physical_stop`
 /// needs is captured here because it is only known at stop time (before the
 /// drain), not at drain time.
-///
-/// `#[allow(dead_code)]`: unused until Task 3 constructs a `PendingStopDrain`.
-/// Remove this attribute in that task, in the same edit that adds the
-/// construction site.
-#[allow(dead_code)]
 struct PendingStopDrain {
     consumer: Consumer<'static, StepMove>,
     reason: StepperEventReason,
@@ -131,11 +130,6 @@ pub(crate) static TRIGGER_DRAIN_WAKE: embassy_sync::signal::Signal<
 /// Store a freshly detached consumer for `channel` and wake the drain task.
 /// Called only from inside `stop_physical_stepper`'s existing masked window
 /// (Task 3) -- never call this outside `cortex_m::interrupt::free`.
-///
-/// `#[allow(dead_code)]`: unused until Task 3 wires it into
-/// `stop_physical_stepper_inner`. Remove this attribute in that task, in
-/// the same edit that adds the call -- it must not survive past Task 3.
-#[allow(dead_code)]
 fn store_pending_drain(channel: u8, drain: PendingStopDrain) {
     // SAFETY: caller holds `cortex_m::interrupt::free` already (see the
     // doc comment above); this is the same exclusivity argument
@@ -479,9 +473,13 @@ fn stop_physical_stepper_inner(
             stepper.reset();
         }
     }
-    // 4. Drain queue -- access mode depends on caller context.
+    // 4. Drain queue -- access mode depends on caller context. The
+    // LockedInPlace arm hands the detached consumer to trigger_drain_task
+    // instead of draining here: draining under with_trigger_domain's mask
+    // is exactly the critical-section-duration problem this ticket fixes.
     let mut drained_segments = 0u32;
     let mut drained_steps = 0u32;
+    let mut deferred_record = false;
     match access {
         QueueAccess::Unmasked => {
             let mut consumer = detach_consumer(channel);
@@ -496,41 +494,39 @@ fn stop_physical_stepper_inner(
             }
             // else: a concurrent locked drain already owns the queue --
             // this path is unreachable for QueueAccess::Unmasked in
-            // practice (P1 is the only Unmasked caller and detach_consumer
-            // only returns None if *this* channel's consumer was already
-            // detached by another Unmasked call, which cannot happen
-            // concurrently since P1 stops are not reentrant), but the
-            // detach/no-op fallback keeps this branch total.
+            // practice (unchanged from before this ticket).
         }
         QueueAccess::LockedInPlace => {
-            let result = with_consumer_locked(channel, |consumer| {
-                let mut segments = 0u32;
-                let mut steps = 0u32;
-                while let Some(m) = consumer.dequeue() {
-                    segments = segments.saturating_add(1);
-                    steps = steps.saturating_add(u32::from(m.count));
-                }
-                (segments, steps)
-            });
-            if let Some((segments, steps)) = result {
-                drained_segments = segments;
-                drained_steps = steps;
+            if let Some(consumer) = detach_consumer(channel) {
+                store_pending_drain(
+                    channel,
+                    PendingStopDrain {
+                        consumer,
+                        reason,
+                        remaining_events,
+                        queue_len,
+                    },
+                );
+                deferred_record = true;
             }
-            // else: None means a P1 unmasked drain currently holds the
-            // consumer detached. Per the spec's recovery rule: report zero
-            // additional drained work here and continue with the rest of
-            // this sequence (steps 5-6 below) unconditionally -- P1's own
-            // in-flight drain already owns draining the queue.
+            // else: `detach_consumer` returned `None` -- either a P1
+            // unmasked drain, or `trigger_drain_task` itself, currently
+            // holds this channel's consumer detached. Nothing to hand
+            // off; fall through and record zero additional drained work
+            // below now, exactly matching the pre-existing recovery-rule
+            // behavior for this case.
         }
     }
-    crate::state::stepper_diag::record_physical_stop(
-        channel,
-        reason,
-        remaining_events,
-        queue_len,
-        drained_segments,
-        drained_steps,
-    );
+    if !deferred_record {
+        crate::state::stepper_diag::record_physical_stop(
+            channel,
+            reason,
+            remaining_events,
+            queue_len,
+            drained_segments,
+            drained_steps,
+        );
+    }
     // 5. Reset direction state to the default forward value.
     channel_stepper_state.direction.store(true, Relaxed);
     // 6. Reset STEP/DIR GPIOs to LOW.
