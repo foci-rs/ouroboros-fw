@@ -185,16 +185,14 @@ impl CommissionBackendHooks for OuroborosHooks {
             return Err(StimulusError::NotEnergized);
         }
         with_trigger_domain(|td| {
-            // Capture the prior value only on the genuine false-to-true
-            // transition. A second arm() before an intervening stop() (no
-            // caller does this yet, but the hook must not assume it never
-            // will) would otherwise read back `true` from the first call
-            // and clobber the real pre-stimulus value, leaving `stop`
-            // unable to restore it.
-            if !tmc_state.motor_armed.load(Relaxed) {
-                tmc_state.stimulus_prior_motor_armed.store(false, Relaxed);
-                tmc_state.motor_armed.store(true, Relaxed);
-            }
+            // Captures whatever `motor_armed` actually holds -- true or
+            // false -- once per stimulus session; a channel a prior
+            // commissioning run left armed (e.g. an ArmPreservePosition
+            // post-action) is not distinguishable here from a channel this
+            // hook itself just armed, so the session-scoped capture guard
+            // lives on `TmcChannelState`, not a bare `motor_armed` read.
+            tmc_state.stimulus_capture_motor_armed_once();
+            tmc_state.motor_armed.store(true, Relaxed);
             let mut board = OuroborosStepperBoard {
                 tmc_state: Some(tmc_state),
             };
@@ -215,9 +213,7 @@ impl CommissionBackendHooks for OuroborosHooks {
             crate::trigger_domain::stop_physical_stepper_masked(idx, StepperEventReason::P1Stop);
             td.set_timer_active(idx, false);
             td.state_mut().stepper_stop[idx].need_reset = true;
-            tmc_state
-                .motor_armed
-                .store(tmc_state.stimulus_prior_motor_armed.load(Relaxed), Relaxed);
+            tmc_state.stimulus_restore_motor_armed();
         });
     }
 }
