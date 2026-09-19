@@ -111,7 +111,8 @@ struct PendingStopDrain {
 /// of `UnsafeCell`s directly does not make the array itself `Sync`, only a
 /// named type can carry that impl.
 struct TriggerDrainSlots(
-    [core::cell::UnsafeCell<Option<PendingStopDrain>>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+    [core::cell::UnsafeCell<Option<PendingStopDrain>>;
+        crate::state::stepper::STEPPER_CHANNEL_COUNT],
 );
 
 // SAFETY: every access to the contained cells goes through
