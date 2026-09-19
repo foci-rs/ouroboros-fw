@@ -58,6 +58,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             torque_i: u16 = inner.torque_i,
             lambda_us: u32 = inner.lambda_us,
             theta_e_us: u32 = inner.theta_e_us,
+            theta_source: u8 = inner.theta_source,
             ringing_count: u8 = inner.ringing_count,
             bandwidth_hz: u32 = inner.bandwidth_hz,
             fallback_velocity_p: u16 = result.fallback_velocity_p,
