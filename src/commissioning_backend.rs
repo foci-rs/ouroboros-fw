@@ -56,6 +56,10 @@ impl CommissionBackendHooks for OuroborosHooks {
         )
     }
 
+    fn commission_cycle_count() -> u32 {
+        cortex_m::peripheral::DWT::cycle_count()
+    }
+
     async fn commission_delay_us(us: u32) {
         Mono::delay((us as u64).micros()).await;
     }
