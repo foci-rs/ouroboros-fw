@@ -1068,6 +1068,20 @@ mod commissioning_board_contract_tests {
              direction-GPIO and STEP-GPIO reset must run unconditionally for every \
              stop, and an early return from an arm would skip them"
         );
+
+        let reset_idle_pos = TRIGGER_DOMAIN
+            .find("stepper_pins::reset_idle(")
+            .expect("stop_physical_stepper_inner must reset STEP/DIR GPIOs to idle");
+        let locked_open_marker = TRIGGER_DOMAIN
+            .find("QueueAccess::LockedInPlace => {")
+            .expect("stop_physical_stepper_inner must branch on QueueAccess::LockedInPlace");
+        let locked_open_brace = locked_open_marker + "QueueAccess::LockedInPlace => ".len();
+        let locked_close_brace = find_matching_close_brace(TRIGGER_DOMAIN, locked_open_brace);
+        assert!(
+            locked_close_brace < reset_idle_pos,
+            "the GPIO idle reset must run after the LockedInPlace arm's actual \
+             closing brace, not nested inside it"
+        );
     }
 
     #[test]

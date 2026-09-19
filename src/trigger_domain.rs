@@ -116,7 +116,7 @@ struct TriggerDrainSlots(
 );
 
 // SAFETY: every access to the contained cells goes through
-// `cortex_m::interrupt::free` (see `store_pending_drain` and Task 2's
+// `cortex_m::interrupt::free` (see `store_pending_drain` and
 // `take_pending_drain`), which provides the exclusive access `UnsafeCell`
 // requires. This mirrors `STEP_QUEUE_CHANNELS`' own access discipline in
 // this same file.
@@ -135,7 +135,7 @@ pub(crate) static TRIGGER_DRAIN_WAKE: embassy_sync::signal::Signal<
 
 /// Store a freshly detached consumer for `channel` and wake the drain task.
 /// Called only from inside `stop_physical_stepper`'s existing masked window
-/// (Task 3) -- never call this outside `cortex_m::interrupt::free`.
+/// -- never call this outside `cortex_m::interrupt::free`.
 fn store_pending_drain(channel: u8, drain: PendingStopDrain) {
     // SAFETY: caller holds `cortex_m::interrupt::free` already (see the
     // doc comment above); this is the same exclusivity argument
@@ -485,7 +485,7 @@ fn stop_physical_stepper_inner(
     // 4. Drain queue -- access mode depends on caller context. The
     // LockedInPlace arm hands the detached consumer to trigger_drain_task
     // instead of draining here: draining under with_trigger_domain's mask
-    // is exactly the critical-section-duration problem this ticket fixes.
+    // is exactly the critical-section-duration problem this hand-off avoids.
     let mut drained_segments = 0u32;
     let mut drained_steps = 0u32;
     let mut deferred_record = false;
@@ -501,9 +501,15 @@ fn stop_physical_stepper_inner(
             if let Some(consumer) = consumer {
                 attach_consumer(channel, consumer);
             }
-            // else: a concurrent locked drain already owns the queue --
-            // this path is unreachable for QueueAccess::Unmasked in
-            // practice (unchanged from before this ticket).
+            // else: `detach_consumer` returned `None` -- possible because
+            // a pending hand-off for this channel is sitting in
+            // `TRIGGER_DRAIN_SLOTS`, or because `trigger_drain_task`
+            // itself currently holds this channel's consumer detached
+            // mid-drain. Neither is reachable from this Unmasked (P1)
+            // caller in practice: `trigger_drain_task` runs at priority 2,
+            // which outranks P1, and the hand-off/drain sequence contains
+            // no `.await` point where a lower-priority P1 caller could
+            // interleave and observe the detached window.
         }
         QueueAccess::LockedInPlace => {
             if let Some(consumer) = detach_consumer(channel) {
@@ -518,12 +524,17 @@ fn stop_physical_stepper_inner(
                 );
                 deferred_record = true;
             }
-            // else: `detach_consumer` returned `None` -- either a P1
-            // unmasked drain, or `trigger_drain_task` itself, currently
-            // holds this channel's consumer detached. Nothing to hand
-            // off; fall through and record zero additional drained work
-            // below now, exactly matching the pre-existing recovery-rule
-            // behavior for this case.
+            // else: `detach_consumer` returned `None` -- possible because
+            // a P1 unmasked drain, or `trigger_drain_task` itself, holds
+            // this channel's consumer detached, or because a prior
+            // hand-off for this channel is still sitting untaken in
+            // `TRIGGER_DRAIN_SLOTS` (no drain in flight at all -- just
+            // waiting for `trigger_drain_task` to be scheduled). Nothing
+            // to hand off in any of these cases; fall through and record
+            // zero additional drained work below now: whichever drain
+            // already owns this channel's consumer, in flight or queued
+            // to be taken by `trigger_drain_task`, already owns draining
+            // this queue.
         }
     }
     if !deferred_record {
