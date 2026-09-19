@@ -7,19 +7,26 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use embassy_stm32::gpio::Output;
 use foci_firmware::commissioning::backend::{
-    CommissionBackendHooks, SharedCommissioningBackend, shutdown_requested_from,
+    CommissionBackendHooks, SharedCommissioningBackend, StimulusError, shutdown_requested_from,
 };
 use foci_firmware::config::TmcConfig;
+use foci_firmware::context::stepper::{self, StepperEnqueueError};
+use foci_firmware::diagnostic::StepperEventReason;
 use foci_firmware::state::lifecycle::{FAULT_ACTIVE, SHUTDOWN_ACTIVE};
-use foci_firmware::state::tmc::TMC_DISABLE_SIGNAL;
+use foci_firmware::state::tmc::{TMC_DISABLE_SIGNAL, tmc_channel};
+use foci_klipper::commands::CommandError;
+use foci_klipper::scheduler::SchedulerEventKind;
+use foci_klipper::stepper::StepMove;
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;
 
 use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
 use crate::board_config::TMC_CONFIG;
+use crate::firmware_ctx::OuroborosStepperBoard;
 use crate::helpers::lifecycle::read_tim5;
 use crate::tmc_control::containment::lease_expired;
+use crate::trigger_domain::with_trigger_domain;
 
 pub(crate) struct OuroborosHooks;
 
@@ -82,6 +89,130 @@ impl CommissionBackendHooks for OuroborosHooks {
         record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,
     ) {
         crate::usb_trace::request_velocity_sweep_evidence(channel, record);
+    }
+
+    fn commission_step_timer_hz() -> u32 {
+        crate::state::stepper::STEP_TIMER_HZ
+    }
+
+    fn commission_step_clock_now() -> u32 {
+        read_tim5()
+    }
+
+    fn commission_stimulus_queue_free(channel: u8) -> usize {
+        // `StepQueueChannel::len` is a lock-free atomic load, sound from
+        // any priority whether or not the consumer is attached. The wrapped
+        // `heapless::spsc::Queue<_, N>` holds at most `N - 1` items.
+        crate::state::stepper::STEP_QUEUE_CHANNELS
+            .get(channel as usize)
+            .map_or(0, |queue| {
+                (crate::state::stepper::STEP_QUEUE_DEPTH - 1).saturating_sub(queue.len())
+            })
+    }
+
+    fn commission_stimulus_trigger_blocked(channel: u8) -> bool {
+        with_trigger_domain(|td| {
+            td.state()
+                .stepper_stop
+                .get(channel as usize)
+                .is_none_or(|stop| stop.blocked_by_trigger)
+        })
+    }
+
+    fn commission_stimulus_set_direction(channel: u8, forward: bool) {
+        with_trigger_domain(|_| {
+            // SAFETY: the trigger-domain lock serialises this against the P2
+            // command handlers that otherwise own the P2 stepper; the host
+            // sends no stepper commands while commissioning owns the channel.
+            if let Some(stepper) = unsafe { crate::state::stepper::p2_stepper(channel) } {
+                stepper.set_next_step_dir(forward);
+            }
+        });
+    }
+
+    fn commission_stimulus_reset_step_clock(channel: u8, clock: u32) -> Result<(), StimulusError> {
+        let tmc_state = tmc_channel(channel).ok_or(StimulusError::InvalidChannel)?;
+        with_trigger_domain(|td| {
+            let mut board = OuroborosStepperBoard {
+                tmc_state: Some(tmc_state),
+            };
+            stepper::reset_step_clock(td.state_mut(), &mut board, channel, clock).map_err(
+                |error| match error {
+                    CommandError::StepperActive => StimulusError::TimerActive,
+                    _ => StimulusError::InvalidChannel,
+                },
+            )?;
+            if td.state().stepper_stop[channel as usize].need_reset {
+                return Err(StimulusError::TriggerBlocked);
+            }
+            Ok(())
+        })
+    }
+
+    fn commission_stimulus_queue_segment(
+        channel: u8,
+        segment: StepMove,
+    ) -> Result<(), StimulusError> {
+        let tmc_state = tmc_channel(channel).ok_or(StimulusError::InvalidChannel)?;
+        with_trigger_domain(|td| {
+            let mut board = OuroborosStepperBoard {
+                tmc_state: Some(tmc_state),
+            };
+            let was_len = crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].len();
+            match stepper::queue_step_move(td.state_mut(), &mut board, channel, segment) {
+                Ok(()) => {
+                    if td.state().stepper_stop[channel as usize].need_reset {
+                        Err(StimulusError::NeedsReset)
+                    } else {
+                        Ok(())
+                    }
+                }
+                Err(StepperEnqueueError::QueueFull { queue_len, .. }) => {
+                    Err(StimulusError::QueueRefused {
+                        queue_len: queue_len as u32,
+                    })
+                }
+                Err(_) => Err(StimulusError::QueueRefused {
+                    queue_len: was_len as u32,
+                }),
+            }
+        })
+    }
+
+    fn commission_stimulus_arm(channel: u8) -> Result<(), StimulusError> {
+        let tmc_state = tmc_channel(channel).ok_or(StimulusError::InvalidChannel)?;
+        if !tmc_state.enable_pin_asserted.load(Relaxed) {
+            return Err(StimulusError::NotEnergized);
+        }
+        with_trigger_domain(|td| {
+            tmc_state
+                .stimulus_prior_motor_armed
+                .store(tmc_state.motor_armed.load(Relaxed), Relaxed);
+            tmc_state.motor_armed.store(true, Relaxed);
+            let mut board = OuroborosStepperBoard {
+                tmc_state: Some(tmc_state),
+            };
+            stepper::arm_check(td.state_mut(), &mut board, channel);
+        });
+        Ok(())
+    }
+
+    fn commission_stimulus_stop(channel: u8) {
+        let Some(tmc_state) = tmc_channel(channel) else {
+            return;
+        };
+        let idx = channel as usize;
+        with_trigger_domain(|td| {
+            td.state_mut()
+                .scheduler
+                .cancel(|kind| matches!(kind, SchedulerEventKind::Stepper(i) if *i == idx));
+            crate::trigger_domain::stop_physical_stepper_masked(idx, StepperEventReason::P1Stop);
+            td.set_timer_active(idx, false);
+            td.state_mut().stepper_stop[idx].need_reset = true;
+            tmc_state
+                .motor_armed
+                .store(tmc_state.stimulus_prior_motor_armed.load(Relaxed), Relaxed);
+        });
     }
 }
 
