@@ -80,6 +80,72 @@ pub(crate) fn with_consumer_locked<R>(
 /// Ouroboros production-v1 has two physical stepper channels.
 pub(crate) const PHYSICAL_STEPPER_INDICES: &[usize] = &[0, 1];
 
+/// A physical stepper's detached step queue, captured at stop time,
+/// awaiting drain by `trigger_drain_task`. Everything `record_physical_stop`
+/// needs is captured here because it is only known at stop time (before the
+/// drain), not at drain time.
+///
+/// `#[allow(dead_code)]`: unused until Task 3 constructs a `PendingStopDrain`.
+/// Remove this attribute in that task, in the same edit that adds the
+/// construction site.
+#[allow(dead_code)]
+struct PendingStopDrain {
+    consumer: Consumer<'static, StepMove>,
+    reason: StepperEventReason,
+    remaining_events: u32,
+    queue_len: u16,
+}
+
+/// One slot per physical stepper channel, written by `stop_physical_stepper`
+/// (masked, O(1)) and taken by `trigger_drain_task` (its own short masked
+/// window per channel, never across the drain loop). See
+/// `docs/specs/2026-09-17-foci-16-trigger-drain-outside-critical-section.md`,
+/// "Slot access and lossless wake-up".
+///
+/// `UnsafeCell` is `!Sync` by default, so the array is wrapped in this
+/// newtype to give it an explicit `unsafe impl Sync` -- wrapping an array
+/// of `UnsafeCell`s directly does not make the array itself `Sync`, only a
+/// named type can carry that impl.
+struct TriggerDrainSlots(
+    [core::cell::UnsafeCell<Option<PendingStopDrain>>; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+);
+
+// SAFETY: every access to the contained cells goes through
+// `cortex_m::interrupt::free` (see `store_pending_drain` and Task 2's
+// `take_pending_drain`), which provides the exclusive access `UnsafeCell`
+// requires. This mirrors `STEP_QUEUE_CHANNELS`' own access discipline in
+// this same file.
+unsafe impl Sync for TriggerDrainSlots {}
+
+static TRIGGER_DRAIN_SLOTS: TriggerDrainSlots = TriggerDrainSlots(
+    [const { core::cell::UnsafeCell::new(None) }; crate::state::stepper::STEPPER_CHANNEL_COUNT],
+);
+
+/// Wakes `trigger_drain_task`. `signal(())` is lossless regardless of the
+/// task's current execution state -- see the spec's "Lossless wake-up".
+pub(crate) static TRIGGER_DRAIN_WAKE: embassy_sync::signal::Signal<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    (),
+> = embassy_sync::signal::Signal::new();
+
+/// Store a freshly detached consumer for `channel` and wake the drain task.
+/// Called only from inside `stop_physical_stepper`'s existing masked window
+/// (Task 3) -- never call this outside `cortex_m::interrupt::free`.
+///
+/// `#[allow(dead_code)]`: unused until Task 3 wires it into
+/// `stop_physical_stepper_inner`. Remove this attribute in that task, in
+/// the same edit that adds the call -- it must not survive past Task 3.
+#[allow(dead_code)]
+fn store_pending_drain(channel: u8, drain: PendingStopDrain) {
+    // SAFETY: caller holds `cortex_m::interrupt::free` already (see the
+    // doc comment above); this is the same exclusivity argument
+    // `detach_consumer`'s own SAFETY comment makes.
+    unsafe {
+        *TRIGGER_DRAIN_SLOTS.0[channel as usize].get() = Some(drain);
+    }
+    TRIGGER_DRAIN_WAKE.signal(());
+}
+
 fn tmc_state(channel: u8) -> Option<&'static foci_firmware::state::tmc::TmcChannelState> {
     foci_firmware::state::tmc::tmc_channel(channel)
 }
