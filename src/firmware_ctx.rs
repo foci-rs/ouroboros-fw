@@ -196,9 +196,12 @@ impl StepperResetBoard for OuroborosStepperBoard {
             }
         });
         if drained.is_none() {
-            // A concurrent P1 unmasked drain holds the consumer detached;
-            // it already owns draining this queue. Report zero additional
-            // drained work for this reset -- see the spec's recovery rule.
+            // The consumer is detached elsewhere: either a concurrent P1
+            // unmasked drain, or a pending trigger-stop hand-off for this
+            // channel awaiting trigger_drain_task (both P2, so this can
+            // race a not-yet-serviced hand-off). Whichever it is already
+            // owns draining this queue -- report zero additional drained
+            // work for this reset -- see the spec's recovery rule.
         }
         Ok(stats)
     }

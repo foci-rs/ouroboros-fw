@@ -55,11 +55,16 @@ fn attach_consumer(channel: u8, consumer: Consumer<'static, StepMove>) {
 
 /// Borrow a channel's `StepQueueChannel` consumer in place, under a short
 /// independent critical section, for a caller already inside an outer
-/// mask that stays in place here. Returns `None` if a concurrent unmasked
-/// drain (`stop_physical_stepper_unmasked`) currently holds the consumer
-/// detached -- callers must perform their non-queue side effects and
-/// report zero *additional* drained work in that case: the in-flight
-/// unmasked drain already owns draining this queue.
+/// mask that stays in place here. Returns `None` if the consumer is
+/// currently detached elsewhere -- either a concurrent unmasked drain
+/// (`stop_physical_stepper_unmasked`), or a pending hand-off for this
+/// channel sitting in `TRIGGER_DRAIN_SLOTS`, detached by
+/// `stop_physical_stepper_masked` via `store_pending_drain` but not yet
+/// taken by `trigger_drain_task` (reachable when `trigger_drain_task` and
+/// this function's caller are both P2 and the hand-off has not yet been
+/// serviced). Callers must perform their non-queue side effects and report
+/// zero *additional* drained work in that case: whichever in-flight
+/// drain currently owns the consumer already owns draining this queue.
 ///
 /// Used by [`crate::firmware_ctx::OuroborosStepperBoard::drain_step_queue`]
 /// (the stepper-reset command path) -- unrelated to
@@ -401,7 +406,9 @@ enum QueueAccess {
     /// enabled, reattach.
     Unmasked,
     /// Trigger-dispatch/shutdown: caller already holds an outer mask this
-    /// call is not unmasking; drain in place under it.
+    /// call is not unmasking; detach the consumer and hand it off to
+    /// `trigger_drain_task` via `store_pending_drain` instead of draining
+    /// it here.
     LockedInPlace,
 }
 
@@ -415,7 +422,8 @@ enum QueueAccess {
 ///    with no critical section; P2 producers can preempt).
 ///
 /// Per spec: disable CC1, clear interval, snapshot stop stats, reset ISR
-/// stepper engine, drain queue, reset direction GPIO.
+/// stepper engine, drain queue (or hand it off, for `LockedInPlace`), reset
+/// direction GPIO.
 fn stop_physical_stepper_inner(
     stepper_idx: usize,
     reason: StepperEventReason,
@@ -553,10 +561,11 @@ pub(crate) fn stop_physical_stepper_unmasked(stepper_idx: usize, reason: Stepper
 }
 
 /// Stop a physical stepper from inside an active `with_trigger_domain`
-/// closure (trigger-dispatch, shutdown). The queue drain stays inline
-/// under the mask the caller already holds -- moving it outside that
-/// mask requires restructuring the shared-crate call contract this
-/// closure runs inside, which is a separate, larger change.
+/// closure (trigger-dispatch, shutdown). Detaches the consumer under the
+/// mask the caller already holds and hands it off to `trigger_drain_task`
+/// via `store_pending_drain`; the queue drain itself runs later, outside
+/// this mask, with interrupts enabled. `stop_physical_stepper_unmasked`'s
+/// drain path above is unchanged.
 ///
 /// This is the only correct caller. Calling this without an active mask
 /// already held is a bug (not compiler-prevented -- enforced by single
