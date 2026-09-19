@@ -185,10 +185,16 @@ impl CommissionBackendHooks for OuroborosHooks {
             return Err(StimulusError::NotEnergized);
         }
         with_trigger_domain(|td| {
-            tmc_state
-                .stimulus_prior_motor_armed
-                .store(tmc_state.motor_armed.load(Relaxed), Relaxed);
-            tmc_state.motor_armed.store(true, Relaxed);
+            // Capture the prior value only on the genuine false-to-true
+            // transition. A second arm() before an intervening stop() (no
+            // caller does this yet, but the hook must not assume it never
+            // will) would otherwise read back `true` from the first call
+            // and clobber the real pre-stimulus value, leaving `stop`
+            // unable to restore it.
+            if !tmc_state.motor_armed.load(Relaxed) {
+                tmc_state.stimulus_prior_motor_armed.store(false, Relaxed);
+                tmc_state.motor_armed.store(true, Relaxed);
+            }
             let mut board = OuroborosStepperBoard {
                 tmc_state: Some(tmc_state),
             };
