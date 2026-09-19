@@ -981,13 +981,7 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn stop_physical_stepper_side_effects_are_not_duplicated_per_queue_access_branch() {
-        assert_eq!(
-            TRIGGER_DOMAIN.matches("record_physical_stop(").count(),
-            1,
-            "diagnostic recording must be shared after the QueueAccess branch, not \
-             duplicated per arm -- duplicated tail logic can silently diverge between arms"
-        );
+    fn locked_arm_hands_off_instead_of_draining_inline() {
         let locked_open_marker = TRIGGER_DOMAIN
             .find("QueueAccess::LockedInPlace => {")
             .expect("stop_physical_stepper_inner must branch on QueueAccess::LockedInPlace");
@@ -997,29 +991,145 @@ mod commissioning_board_contract_tests {
             "{"
         );
         let locked_close_brace = find_matching_close_brace(TRIGGER_DOMAIN, locked_open_brace);
+        let locked_arm = &TRIGGER_DOMAIN[locked_open_brace..=locked_close_brace];
 
-        let record_pos = TRIGGER_DOMAIN
+        assert!(
+            locked_arm.contains("detach_consumer("),
+            "the LockedInPlace arm must detach the consumer, not borrow it in place"
+        );
+        assert!(
+            !locked_arm.contains(".dequeue()"),
+            "the LockedInPlace arm must never drain the queue itself -- that is exactly \
+             the critical-section-duration problem this ticket fixes. Draining belongs \
+             only in drain_all_populated_slots, run by trigger_drain_task with interrupts \
+             enabled."
+        );
+        assert!(
+            locked_arm.contains("store_pending_drain("),
+            "the LockedInPlace arm must hand the detached consumer to trigger_drain_task"
+        );
+        assert!(
+            !locked_arm.contains("record_physical_stop("),
+            "diagnostic recording for a masked stop that was successfully handed off must \
+             happen in drain_all_populated_slots (after the drain, with real segment/step \
+             counts), not inside stop_physical_stepper_inner's LockedInPlace arm itself"
+        );
+    }
+
+    #[test]
+    fn locked_stop_still_resets_gpio_state_unconditionally() {
+        // Regression guard for a defect caught in this plan's own cross-agent
+        // review: an early `return` *inside* the LockedInPlace arm would skip
+        // direction/STEP GPIO reset, corrupting the next segment's pulse
+        // parity. This must check from the start of the match (so it covers
+        // the match arms themselves, where the original defect actually
+        // lived) through the end of the function -- an earlier draft of this
+        // guard checked only after the match's closing brace, which does not
+        // cover a `return` inside an arm and would not have caught the
+        // defect it was written to guard against. A legitimate early
+        // `return` exists before the match (the
+        // `!PHYSICAL_STEPPER_INDICES.contains(...)` bounds check at the top
+        // of the function) and must stay outside this checked region.
+        let fn_open_marker = TRIGGER_DOMAIN
+            .find("fn stop_physical_stepper_inner(")
+            .expect("trigger_domain.rs must define stop_physical_stepper_inner");
+        let fn_open_brace = TRIGGER_DOMAIN[fn_open_marker..]
+            .find('{')
+            .map(|offset| fn_open_marker + offset)
+            .expect("stop_physical_stepper_inner must have a body");
+        let fn_close_brace = find_matching_close_brace(TRIGGER_DOMAIN, fn_open_brace);
+        let fn_body = &TRIGGER_DOMAIN[fn_open_brace..=fn_close_brace];
+
+        let match_pos = fn_body
+            .find("match access {")
+            .expect("stop_physical_stepper_inner must branch on QueueAccess");
+        let from_match_onward = &fn_body[match_pos..];
+
+        // Word-boundary match, not a plain substring search: the region
+        // legitimately contains the comment word "returned" (describing
+        // detach_consumer's Option), which a bare `contains("return")`
+        // would misfire on even though it is not the `return` keyword.
+        let has_return_keyword = from_match_onward.match_indices("return").any(|(pos, _)| {
+            let before_ok = from_match_onward[..pos]
+                .chars()
+                .next_back()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_');
+            let after_ok = from_match_onward["return".len() + pos..]
+                .chars()
+                .next()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_');
+            before_ok && after_ok
+        });
+        assert!(
+            !has_return_keyword,
+            "no `return` is allowed anywhere from the start of the QueueAccess match \
+             through the end of stop_physical_stepper_inner -- this includes inside \
+             either match arm, not just after the match closes -- because \
+             direction-GPIO and STEP-GPIO reset must run unconditionally for every \
+             stop, and an early return from an arm would skip them"
+        );
+    }
+
+    #[test]
+    fn drain_all_populated_slots_scans_every_channel_and_records_after_draining() {
+        let fn_open_marker = TRIGGER_DOMAIN
+            .find("pub(crate) fn drain_all_populated_slots()")
+            .expect("trigger_domain.rs must define drain_all_populated_slots");
+        let fn_open_brace = TRIGGER_DOMAIN[fn_open_marker..]
+            .find('{')
+            .map(|offset| fn_open_marker + offset)
+            .expect("drain_all_populated_slots must have a body");
+        let fn_close_brace = find_matching_close_brace(TRIGGER_DOMAIN, fn_open_brace);
+        let fn_body = &TRIGGER_DOMAIN[fn_open_brace..=fn_close_brace];
+
+        assert!(
+            fn_body.contains("STEPPER_CHANNEL_COUNT"),
+            "drain_all_populated_slots must scan every physical stepper channel, not a \
+             hardcoded single index -- Ouroboros has two independently detachable channels"
+        );
+        // A loop that iterates `STEPPER_CHANNEL_COUNT` times but calls
+        // take_pending_drain/attach_consumer with a hardcoded index (e.g.
+        // always 0) would still pass the assertion above. Requiring the
+        // loop's own index variable to appear in both calls closes that
+        // gap -- this pins the exact identifier the reference
+        // implementation uses (`idx`); if a future implementation
+        // legitimately renames it, update this string alongside the code,
+        // not the other way around.
+        assert!(
+            fn_body.contains("take_pending_drain(idx)"),
+            "each channel's take must use the loop's own index, not a hardcoded channel -- \
+             otherwise every iteration would drain (at most) the same single slot"
+        );
+        assert!(
+            fn_body.contains("attach_consumer(idx as u8"),
+            "each channel's reattach must use the loop's own index, not a hardcoded channel -- \
+             otherwise a drained channel other than the hardcoded one would never be reattached"
+        );
+        let dequeue_pos = fn_body
+            .find(".dequeue()")
+            .expect("drain_all_populated_slots must actually drain the detached consumer");
+        let record_pos = fn_body
             .find("record_physical_stop(")
-            .expect("stop_physical_stepper_inner must record the stop");
-        let reset_idle_pos = TRIGGER_DOMAIN
-            .find("stepper_pins::reset_idle(")
-            .expect("stop_physical_stepper_inner must reset STEP/DIR GPIOs to idle");
+            .expect("drain_all_populated_slots must record the stop after draining it");
+        let attach_pos = fn_body
+            .find("attach_consumer(")
+            .expect("drain_all_populated_slots must reattach the consumer after draining");
 
         assert!(
-            locked_close_brace < record_pos,
-            "diagnostic recording must run after the LockedInPlace arm's actual \
-             closing brace, not nested inside it"
+            dequeue_pos < record_pos,
+            "must record the drained segment/step counts after actually draining, \
+             not before (the counts would be wrong -- always zero)"
         );
         assert!(
-            locked_close_brace < reset_idle_pos,
-            "the GPIO idle reset must run after the LockedInPlace arm's actual \
-             closing brace, not nested inside it"
+            record_pos < attach_pos,
+            "must record before reattaching, matching the existing Unmasked-arm ordering \
+             (detach -> drain -> record -> reattach)"
         );
         assert!(
-            record_pos < reset_idle_pos,
-            "diagnostic recording must run before the GPIO idle reset, both \
-             unconditionally outside the branch -- so both happen regardless of \
-             whether the locked path observed None"
+            !fn_body.contains("interrupt::free"),
+            "drain_all_populated_slots must never hold a critical section across the \
+             drain loop -- masking belongs only inside take_pending_drain/attach_consumer, \
+             per-channel, never across the dequeue loop"
         );
     }
 
