@@ -1606,7 +1606,19 @@ mod app {
         let loaded_steps = u32::from(move_.count);
 
         let old_direction = stepper.dir_state();
-        stepper.load_move(move_);
+        let phase_transition = stepper.load_move(move_);
+        #[cfg(feature = "trace")]
+        if let Some((old_class, new_class)) = phase_transition {
+            crate::usb_trace::request_event(
+                foci_firmware::trace::events::EVENT_LEVEL_INFO,
+                foci_firmware::trace::events::SUBSYSTEM_STEP_TIMER,
+                foci_firmware::trace::events::EVENT_PHASE_BOUNDARY,
+                [i32::from(channel), old_class as i32, new_class as i32, 0],
+                3,
+            );
+        }
+        #[cfg(not(feature = "trace"))]
+        let _ = phase_transition;
         let dir_changed = old_direction != stepper.dir_state();
         stepper_state
             .interval
