@@ -53,10 +53,9 @@ pub(crate) fn enable_pin_channel(pin: u32) -> Option<u8> {
 
 /// Board-specific TMC4671 hardware configuration for Ouroboros production v1.
 ///
-/// Initial values borrow existing regression-board defaults except for the
-/// current scale. They are compile-only defaults until hardware bring-up
-/// confirms production-v1 current sensing and power-stage timing.
-const OUROBOROS_PROD_V1_PWM_MAXCNT: u16 = 3999;
+/// Values validated on the live production-v1 board; the PWM rate is the
+/// one that keeps a 1600 Hz current loop damped.
+const OUROBOROS_PROD_V1_PWM_MAXCNT: u16 = 1999;
 const OUROBOROS_PROD_V1_DSADC_MDEC: u16 =
     foci_firmware::config::dsadc_mdec_from_pwm_maxcnt(OUROBOROS_PROD_V1_PWM_MAXCNT);
 
