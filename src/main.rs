@@ -239,6 +239,8 @@ mod app {
 
         let p = embassy_stm32::init(crate::board_init::rcc_config());
         defmt::info!("SYSCLK: 520 MHz, USB: 48 MHz");
+        let mut core = ctx.core;
+        crate::board_init::enable_instruction_cache(&mut core);
         crate::board_init::verify_dma_interrupt_priority();
         crate::board_init::disable_debug_clock_during_sleep();
 

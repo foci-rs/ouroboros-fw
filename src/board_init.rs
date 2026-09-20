@@ -331,3 +331,30 @@ pub fn verify_dma_interrupt_priority() {
         "SPI DMA interrupt priority is at or above RTIC P3 (TIM5/USB/STATUS)"
     );
 }
+
+/// Enable the Cortex-M7 instruction cache.
+///
+/// Code runs from flash behind wait states and neither the HAL nor the
+/// runtime enables the cache, so the cost of a hot path such as the
+/// commissioning capture's per-slot SPI dispatch otherwise depends on where
+/// the linker placed it. The data cache stays off: SPI DMA buffers and the
+/// RTT block would need cache maintenance the HAL does not provide.
+///
+/// `SCB::enable_icache` is not used because cortex-m 0.7 routes it through
+/// its prebuilt assembly object, whose debug sections this link rejects
+/// under orphan-handling; the sequence below is that routine's inline form.
+pub(crate) fn enable_instruction_cache(core: &mut cortex_m::Peripherals) {
+    const SCB_CCR_IC: u32 = 1 << 17;
+    if core.SCB.ccr.read() & SCB_CCR_IC != 0 {
+        return;
+    }
+    core.CBP.iciallu();
+    cortex_m::asm::dsb();
+    cortex_m::asm::isb();
+    cortex_m::interrupt::free(|_| {
+        // SAFETY: exclusive access to SCB through `&mut`, interrupts masked.
+        unsafe { core.SCB.ccr.modify(|ccr| ccr | SCB_CCR_IC) };
+        cortex_m::asm::dsb();
+        cortex_m::asm::isb();
+    });
+}
