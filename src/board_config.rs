@@ -56,9 +56,6 @@ pub(crate) fn enable_pin_channel(pin: u32) -> Option<u8> {
 /// Initial values borrow existing regression-board defaults except for the
 /// current scale. They are compile-only defaults until hardware bring-up
 /// confirms production-v1 current sensing and power-stage timing.
-/// Current-loop P uses the physical-bandwidth formula. Keep the
-/// compile-time default aligned with OpenFFBoard; Ouroboros hardware still
-/// needs target validation before this is treated as signed off.
 const OUROBOROS_PROD_V1_PWM_MAXCNT: u16 = 3999;
 const OUROBOROS_PROD_V1_DSADC_MDEC: u16 =
     foci_firmware::config::dsadc_mdec_from_pwm_maxcnt(OUROBOROS_PROD_V1_PWM_MAXCNT);
@@ -73,7 +70,7 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     // Preserve the pre-bringup routing until Ouroboros current sense is verified.
     adc_i_select: 0x1000_0100,
     excitation_voltage: 512,
-    bandwidth_hz: 600.0,
+    bandwidth_hz: 1000.0,
     electrical_model_theta_e_us: 160,
     high_rate_delay_period_us: 20,
     high_rate_delay_cycles_per_us: 520,
