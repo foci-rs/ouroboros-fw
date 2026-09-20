@@ -116,41 +116,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
-    fn foci_encoder_alignment(
-        &mut self,
-        report: foci_firmware::tmc_diagnostics::EncoderAlignmentReport,
-    ) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociEncoderAlignment,
-            oid: u8 = report.oid,
-            encoder_count: u32 = report.encoder_count,
-            electrical_residual_counts: u16 = report.electrical_residual_counts,
-            stability_counts: u16 = report.stability_counts,
-            movement_counts: u16 = report.movement_counts,
-            min_movement_counts: u16 = report.min_movement_counts,
-            counts_per_electrical_rev: u16 = report.counts_per_electrical_rev,
-        );
-    }
-
-    fn foci_adc_residual(&mut self, report: foci_firmware::tmc_diagnostics::AdcResidualReport) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociAdcResidual,
-            oid: u8 = report.oid,
-            stage: u8 = report.stage,
-            sample_count: u8 = report.sample_count,
-            pwm_sv_chop: u8 = report.pwm_sv_chop,
-            pwm_bbm: u32 = report.pwm_bbm,
-            adc_i0_scale_offset: u32 = report.adc_i0_scale_offset,
-            adc_i1_scale_offset: u32 = report.adc_i1_scale_offset,
-            adc_iux_mean_count: i16 = report.adc_iux_mean_count,
-            adc_iwy_mean_count: i16 = report.adc_iwy_mean_count,
-            pid_flux_mean_count: i16 = report.pid_flux_mean_count,
-            pid_torque_mean_count: i16 = report.pid_torque_mean_count,
-        );
-    }
-
     fn foci_inductance_run(&mut self, report: foci_firmware::tmc_diagnostics::InductanceRunReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
