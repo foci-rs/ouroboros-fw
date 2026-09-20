@@ -69,7 +69,6 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     // Preserve the pre-bringup routing until Ouroboros current sense is verified.
     adc_i_select: 0x1000_0100,
     excitation_voltage: 512,
-    bandwidth_hz: 1000.0,
     electrical_model_theta_e_us: 160,
     high_rate_delay_period_us: 20,
     high_rate_delay_cycles_per_us: 520,
