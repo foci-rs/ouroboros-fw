@@ -672,7 +672,8 @@ mod commissioning_board_contract_tests {
         // STM32 GPIO enable line (confirmed against the schematic). Unlike
         // RESERVE_PINS_LED (see board_declares_the_status_led_reserve_pin
         // below), there is nothing to declare here.
-        for empty_const in ["RESERVE_PINS_DRV"] {
+        {
+            let empty_const = "RESERVE_PINS_DRV";
             assert!(
                 !CONSTANTS.contains(&std::format!("pub const {empty_const}: &str = \"\";")),
                 "{empty_const} is declared with an empty pin list; Klipper's \
@@ -1053,11 +1054,11 @@ mod commissioning_board_contract_tests {
             let before_ok = from_match_onward[..pos]
                 .chars()
                 .next_back()
-                .map_or(true, |c| !c.is_alphanumeric() && c != '_');
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_');
             let after_ok = from_match_onward["return".len() + pos..]
                 .chars()
                 .next()
-                .map_or(true, |c| !c.is_alphanumeric() && c != '_');
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_');
             before_ok && after_ok
         });
         assert!(
