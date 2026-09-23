@@ -185,9 +185,9 @@ mod app {
         app_state: State,
     }
 
-    /// Persistent Stage-C candidate slots carried across `tmc_control` task calls.
+    /// Persistent Integral candidate slots carried across `tmc_control` task calls.
     ///
-    /// Retains the Stage-C authority a `breakaway_seeded` campaign hands off to
+    /// Retains the Integral authority a `breakaway_seeded` campaign hands off to
     /// `integral_resume`, so the production build runs the full autotune
     /// hand-off exactly as the trace build does.
     type IntegralCandidatesTaskLocal = IntegralRetentionSlots<{ TMC_CHANNEL_COUNT as usize }>;

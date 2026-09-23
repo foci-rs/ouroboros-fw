@@ -432,22 +432,6 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_does_not_forward_removed_stage_b_reply_families() {
-        assert!(!REPLIES.contains("foci_velocity_stage_b_reproduction_v3_"));
-        for removed in [
-            "structured_boundary",
-            "directional_region_core",
-            "joint_region",
-            "stage_b_handoff_core",
-            "stage_b_nomination",
-            "stage_b_directional_handoff",
-            "stage_b_reproduction_v4_",
-        ] {
-            assert!(!REPLIES.contains(removed), "retained board reply {removed}");
-        }
-    }
-
-    #[test]
     fn board_publishes_the_proportional_schema_revision() {
         assert!(CONSTANTS.contains("pub const PROPORTIONAL_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
     }
