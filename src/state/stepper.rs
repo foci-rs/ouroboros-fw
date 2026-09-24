@@ -20,8 +20,7 @@ pub(crate) const STEP_DIR_SETUP_TICKS: u32 = 22;
 /// DIR setup plus two complete high/low pulse periods.
 pub(crate) const STEP_WAVEFORM_WORST_CASE_TICKS: u32 = 66;
 
-/// Depth of each hardware step/dir move queue.
-pub(crate) const STEP_QUEUE_DEPTH: usize = 1024;
+pub(crate) use foci_klipper::step_queue::STEP_QUEUE_DEPTH;
 
 /// Number of hardware stepper runtime channels on Ouroboros.
 pub(crate) const STEPPER_CHANNEL_COUNT: usize = crate::board_config::TMC_CHANNEL_COUNT as usize;
