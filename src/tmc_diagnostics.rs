@@ -120,11 +120,29 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
+    fn foci_current_torque_sample_pid_result(&mut self, report: &CurrentTorqueSampleReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCurrentTorqueSamplePidResult,
+            oid: u8 = report.oid,
+            pidin_target_torque: i32 = report.pidin_target_torque,
+            pidin_target_flux: i32 = report.pidin_target_flux,
+            pidout_target_torque: i32 = report.pidout_target_torque,
+            pidout_target_flux: i32 = report.pidout_target_flux,
+            pid_torque_target_monitor: i16 = report.pid_torque_target_monitor,
+            torque_error: i32 = report.torque_error,
+            flux_error: i32 = report.flux_error,
+            torque_error_sum: i32 = report.torque_error_sum,
+            flux_error_sum: i32 = report.flux_error_sum,
+        );
+    }
+
     fn foci_current_torque_sample_result(&mut self, report: CurrentTorqueSampleReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentTorqueSampleResult,
             oid: u8 = report.oid,
+            kind: u8 = report.kind.as_u8(),
             status: u8 = report.status,
             target: i16 = report.target,
             flux_target: i16 = report.flux_target,
@@ -138,17 +156,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             id_sample: i16 = report.id_sample,
             uq_limited: i16 = report.uq_limited,
             ud_limited: i16 = report.ud_limited,
-            encoder_before: u32 = report.encoder_before,
-            encoder_sample: u32 = report.encoder_sample,
-            encoder_after: u32 = report.encoder_after,
-            encoder_delta_sample: i32 = report.encoder_delta_sample,
-            encoder_delta_after: i32 = report.encoder_delta_after,
             adc_vm_raw: u16 = report.adc_vm_raw,
-            pidin_target_torque: i32 = report.pidin_target_torque,
-            pidin_target_flux: i32 = report.pidin_target_flux,
-            pidout_target_torque: i32 = report.pidout_target_torque,
-            pidout_target_flux: i32 = report.pidout_target_flux,
-            pid_torque_target_monitor: i16 = report.pid_torque_target_monitor,
             status_flags: u32 = report.status_flags,
         );
     }
@@ -158,14 +166,11 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentTorqueSampleDetailResult,
             oid: u8 = report.oid,
-            target: i16 = report.target,
-            flux_target: i16 = report.flux_target,
-            sample_delay_ms: u16 = report.sample_delay_ms,
-            voltage_limit: u16 = report.voltage_limit,
-            torque_error: i32 = report.torque_error,
-            flux_error: i32 = report.flux_error,
-            torque_error_sum: i32 = report.torque_error_sum,
-            flux_error_sum: i32 = report.flux_error_sum,
+            encoder_before: u32 = report.encoder_before,
+            encoder_sample: u32 = report.encoder_sample,
+            encoder_after: u32 = report.encoder_after,
+            encoder_delta_sample: i32 = report.encoder_delta_sample,
+            encoder_delta_after: i32 = report.encoder_delta_after,
             uq_prelimit: i16 = report.uq_prelimit,
             ud_prelimit: i16 = report.ud_prelimit,
             ff_velocity: i32 = report.ff_velocity,
