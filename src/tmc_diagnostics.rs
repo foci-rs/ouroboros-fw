@@ -7,7 +7,7 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use embassy_stm32::gpio::Output;
 use foci_firmware::state::trsync::HOMING_STATE;
-use foci_firmware::tmc::TmcRequest;
+use foci_firmware::tmc::{CurrentStepAxis, TmcRequest};
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
@@ -70,12 +70,13 @@ pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
 }
 
 impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticReplySink {
-    fn foci_current_step_result(&mut self, report: CurrentStepReport) {
+    fn foci_current_step_result(&mut self, axis: CurrentStepAxis, report: CurrentStepReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentStepResult,
             oid: u8 = report.oid,
             status: u8 = report.status,
+            axis: u8 = axis.as_u8(),
             target: i16 = report.torque_target,
             duration_ms: u16 = report.duration_ms,
             voltage_limit: u16 = report.voltage_limit,
@@ -265,7 +266,6 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             pwm_sv_chop_readback: u32 = report.pwm_sv_chop_readback,
         );
     }
-
 }
 
 pub(crate) async fn run_diagnostic_request<'spi>(
