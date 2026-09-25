@@ -9,8 +9,6 @@ use embassy_stm32::gpio::Output;
 use foci_firmware::state::trsync::HOMING_STATE;
 use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::TmcControlRuntime;
-#[cfg(feature = "trace-velocity-limit-latch-test")]
-use foci_firmware::tmc_diagnostics::VelocityLimitLatchReport;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
     DiagnosticPowerStage, DiagnosticReadiness, ResistanceAxisReport, ResistanceProfileReport,
@@ -268,80 +266,6 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    #[cfg(feature = "trace-velocity-limit-latch-test")]
-    fn foci_velocity_limit_latch_flags(&mut self, report: VelocityLimitLatchReport) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociVelocityLimitLatchFlags,
-            oid: u8 = report.oid,
-            active_status_flags: u32 = report.active_status_flags,
-            post_pulse_status_flags: u32 = report.post_pulse_status_flags,
-            delayed_status_flags: u32 = report.delayed_status_flags,
-            post_clear_status_flags: u32 = report.post_clear_status_flags,
-        );
-    }
-
-    #[cfg(feature = "trace-velocity-limit-latch-test")]
-    fn foci_velocity_limit_latch_motion(&mut self, report: VelocityLimitLatchReport) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociVelocityLimitLatchMotion,
-            oid: u8 = report.oid,
-            pulse_elapsed_us: u32 = report.pulse_elapsed_us,
-            delayed_read_elapsed_us: u32 = report.delayed_read_elapsed_us,
-            encoder_before: u32 = report.encoder_before,
-            encoder_after: u32 = report.encoder_after,
-            encoder_delta: i32 = report.encoder_delta,
-        );
-    }
-
-    #[cfg(feature = "trace-velocity-limit-latch-test")]
-    fn foci_velocity_limit_latch_restore(&mut self, report: VelocityLimitLatchReport) {
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociVelocityLimitLatchRestore,
-            oid: u8 = report.oid,
-            saved_limit: u32 = report.saved_limit,
-            saved_gains: u32 = report.saved_gains,
-            saved_target: i32 = report.saved_target,
-            saved_mode: u32 = report.saved_mode,
-            restored_limit_readback: u32 = report.restored_limit_readback,
-            restored_gains_readback: u32 = report.restored_gains_readback,
-            restored_target_readback: i32 = report.restored_target_readback,
-            restored_mode_readback: u32 = report.restored_mode_readback,
-            restore_verified_mask: u8 = report.restore_verified_mask,
-        );
-    }
-
-    #[cfg(feature = "trace-velocity-limit-latch-test")]
-    fn foci_velocity_limit_latch_result(&mut self, report: VelocityLimitLatchReport) {
-        crate::usb_trace::request_event(
-            foci_firmware::trace::events::EVENT_LEVEL_INFO,
-            foci_firmware::trace::events::SUBSYSTEM_COMMISSIONING,
-            foci_firmware::trace::events::EVENT_COMMISSION_VELOCITY_LIMIT_LATCH_TEST,
-            [
-                i32::from(report.oid),
-                i32::from(report.status),
-                report.active_status_flags as i32,
-                report.delayed_status_flags as i32,
-            ],
-            4,
-        );
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociVelocityLimitLatchCore,
-            oid: u8 = report.oid,
-            status: u8 = report.status,
-            test_limit: u16 = report.test_limit,
-            p_raw: u16 = report.p_raw,
-            i_raw: u16 = report.i_raw,
-            target_velocity_rpm: i32 = report.target_velocity_rpm,
-            limit_readback: u32 = report.limit_readback,
-            gains_readback: u32 = report.gains_readback,
-            target_readback: i32 = report.target_readback,
-            power_stage_tripped: u8 = u8::from(report.power_stage_tripped),
-        );
-    }
 }
 
 pub(crate) async fn run_diagnostic_request<'spi>(

@@ -634,22 +634,6 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
-    fn board_wires_the_velocity_limit_latch_test_command_behind_its_feature() {
-        assert!(
-            PROVIDER.contains(r#"#[cfg(feature = "trace-velocity-limit-latch-test")]"#),
-            "provider has no trace-velocity-limit-latch-test-gated block"
-        );
-        assert!(
-            PROVIDER.contains(r#"#[cfg(not(feature = "trace-velocity-limit-latch-test"))]"#),
-            "provider has no fallback block for when the feature is disabled"
-        );
-        assert!(
-            PROVIDER.contains("crate::ankyra::handlers::foci::tmc_velocity_limit_latch_test"),
-            "provider never lists the tmc_velocity_limit_latch_test command"
-        );
-    }
-
-    #[test]
     fn board_never_declares_an_empty_reserve_pins_category() {
         // RESERVE_PINS_DRV has no genuine pin to reserve: the gate drivers
         // are driven entirely by TMC4671 PWM outputs, with no discrete
@@ -688,9 +672,8 @@ mod commissioning_board_contract_tests {
             PROVIDER
                 .matches("crate::ankyra::constants::RESERVE_PINS_LED,")
                 .count(),
-            2,
-            "provider must wire RESERVE_PINS_LED into both the default and \
-             trace-velocity-limit-latch-test constant lists"
+            1,
+            "provider must wire RESERVE_PINS_LED into the constants list"
         );
     }
 

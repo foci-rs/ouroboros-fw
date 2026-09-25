@@ -56,7 +56,3 @@ dev-flash = []
 usb-p1-probe = []
 trace = ["foci-firmware/trace", "foci-usb-stm32/trace"]
 trace-current-path = ["trace"]
-trace-velocity-limit-latch-test = [
-    "trace",
-    "foci-firmware/trace-velocity-limit-latch-test",
-]
