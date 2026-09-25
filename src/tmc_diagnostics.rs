@@ -7,7 +7,8 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use embassy_stm32::gpio::Output;
 use foci_firmware::state::trsync::HOMING_STATE;
-use foci_firmware::tmc::{CurrentStepAxis, TmcRequest};
+use foci_firmware::tmc::CurrentStepAxis;
+use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::TmcControlRuntime;
 use foci_firmware::tmc_diagnostics::{
     CurrentStepReport, CurrentTorqueSampleReport, DiagnosticDelay, DiagnosticOutcome,
