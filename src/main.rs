@@ -61,9 +61,7 @@ mod app {
         commissioning_request_blocked, enable_pin, ouroboros_backend, refresh_velocity_scale,
         stepper_state, tmc_driver, tmc_state,
     };
-    use crate::trigger_domain::{
-        TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain, with_trigger_domain_site,
-    };
+    use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
     use foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlots;
     use foci_firmware::context::stepper::{
         StepperArmCheckBoard, StepperStopCheckBoard, StepperTimerStateBoard,
@@ -1491,21 +1489,6 @@ mod app {
     }
 
     #[inline(always)]
-    fn add_scheduler_cycles(accumulator: &core::cell::Cell<u32>, start: u32) {
-        accumulator.set(
-            accumulator
-                .get()
-                .wrapping_add(cortex_m::peripheral::DWT::cycle_count().wrapping_sub(start)),
-        );
-    }
-
-    fn record_schedule_result(result: foci_klipper::scheduler::ScheduleResult) {
-        if matches!(result, foci_klipper::scheduler::ScheduleResult::Full) {
-            crate::state::stepper_diag::record_scheduler_full();
-        }
-    }
-
-    #[inline(always)]
     fn spin_tim5_ticks(start: u32, ticks: u32) {
         while read_tim5().wrapping_sub(start) < ticks {
             core::hint::spin_loop();
@@ -1877,52 +1860,7 @@ mod app {
         ],
     )]
     fn step_timer_irq(ctx: step_timer_irq::Context) {
-        use core::{cell::Cell, sync::atomic::Ordering::Relaxed};
-
-        struct Tim5PerfSample<'a> {
-            irq_start: u32,
-            dispatch_start: u32,
-            dispatch_cycles: &'a Cell<u32>,
-            event_count: &'a Cell<u32>,
-            scheduler_cycles: &'a Cell<u32>,
-            scheduler_event_count: &'a Cell<u32>,
-            armed: bool,
-        }
-
-        impl Tim5PerfSample<'_> {
-            fn finish_dispatch(&self) {
-                if self.dispatch_cycles.get() == 0 {
-                    // A real dispatch cannot complete in zero cycles; zero means unfinished.
-                    self.dispatch_cycles.set(
-                        cortex_m::peripheral::DWT::cycle_count().wrapping_sub(self.dispatch_start),
-                    );
-                }
-            }
-        }
-
-        impl Drop for Tim5PerfSample<'_> {
-            fn drop(&mut self) {
-                if !self.armed {
-                    return;
-                }
-                self.finish_dispatch();
-                let irq_cycles =
-                    cortex_m::peripheral::DWT::cycle_count().wrapping_sub(self.irq_start);
-                let tim5_event_count = self
-                    .event_count
-                    .get()
-                    .saturating_add(self.scheduler_event_count.get());
-                crate::state::stepper_diag::record_tim5_irq(
-                    irq_cycles,
-                    self.dispatch_cycles.get(),
-                    tim5_event_count,
-                );
-                crate::state::stepper_diag::record_scheduler_cycles(
-                    self.scheduler_cycles.get(),
-                    self.scheduler_event_count.get(),
-                );
-            }
-        }
+        use core::sync::atomic::Ordering::Relaxed;
 
         let tim5 = embassy_stm32::pac::TIM5;
         let sr = tim5.sr().read();
@@ -1933,65 +1871,18 @@ mod app {
             return;
         }
 
-        let irq_start = cortex_m::peripheral::DWT::cycle_count();
-        let entry_now = tim5.cnt().read();
-        let mut entry_lateness = 0i32;
-        if cc1_pending {
-            let ccr = tim5.ccr(0).read();
-            let delta = entry_now.wrapping_sub(ccr) as i32;
-            if delta > entry_lateness {
-                entry_lateness = delta;
-            }
-        }
-        if cc2_pending {
-            let ccr = tim5.ccr(1).read();
-            let delta = entry_now.wrapping_sub(ccr) as i32;
-            if delta > entry_lateness {
-                entry_lateness = delta;
-            }
-        }
-        if entry_lateness > 0 {
-            crate::state::stepper_diag::record_tim5_entry_latency(entry_lateness as u32);
-        }
-
-        let dispatch_cycles = Cell::new(0);
-        let event_count = Cell::new(0);
-        let scheduler_cycles = Cell::new(0);
-        let scheduler_event_count = Cell::new(0);
-        let dispatch_start = cortex_m::peripheral::DWT::cycle_count();
-        let perf_sample = Tim5PerfSample {
-            irq_start,
-            dispatch_start,
-            dispatch_cycles: &dispatch_cycles,
-            event_count: &event_count,
-            scheduler_cycles: &scheduler_cycles,
-            scheduler_event_count: &scheduler_event_count,
-            armed: true,
-        };
-
         // --- CC2: trigger scheduler (process before CC1) ---
         if cc2_pending {
             clear_tim5_compare_flag(1);
             let mut need_report = false;
-            with_trigger_domain_site(crate::state::stepper_diag::PERF_SITE_TIM5, |td| {
+            with_trigger_domain(|td| {
                 use foci_klipper::scheduler::SchedulerEventKind;
                 let now = read_tim5();
                 // Collect (kind, wake_clock) pairs before mutating scheduler
                 let mut due_events: heapless::Vec<(SchedulerEventKind, u32), 13> =
                     heapless::Vec::new();
-                loop {
-                    let start = cortex_m::peripheral::DWT::cycle_count();
-                    let slot = td.scheduler.pop_due_slot(now);
-                    add_scheduler_cycles(&scheduler_cycles, start);
-                    let Some(slot) = slot else {
-                        break;
-                    };
+                while let Some(slot) = td.scheduler.pop_due_slot(now) {
                     let event = slot.event();
-                    let lateness = now.wrapping_sub(event.wake_clock) as i32;
-                    if lateness > 0 {
-                        crate::state::stepper_diag::record_scheduler_pop_lateness(lateness as u32);
-                    }
-                    scheduler_event_count.set(scheduler_event_count.get().saturating_add(1));
                     let _ = due_events.push((event.kind, event.wake_clock));
                 }
 
@@ -2032,23 +1923,11 @@ mod app {
                                         .oversample(read_pin(), wake_clock)
                                     {
                                         EndstopSampleResult::Triggered { trsync_oid, reason } => {
-                                            {
-                                                let trigger_start =
-                                                    cortex_m::peripheral::DWT::cycle_count();
-                                                td.trigger(trsync_oid, reason, now);
-                                                let trigger_cycles =
-                                                    cortex_m::peripheral::DWT::cycle_count()
-                                                        .wrapping_sub(trigger_start);
-                                                crate::state::stepper_diag::record_critical_section(
-                                                    crate::state::stepper_diag::PERF_SITE_TRIGGER_STOP,
-                                                    trigger_cycles,
-                                                );
-                                            }
+                                            td.trigger(trsync_oid, reason, now);
                                             need_report = true;
                                         }
                                         EndstopSampleResult::Reschedule { next_clock } => {
-                                            let start = cortex_m::peripheral::DWT::cycle_count();
-                                            let result = td.scheduler.try_schedule(
+                                            td.scheduler.try_schedule(
                                                 foci_klipper::scheduler::SchedulerEvent {
                                                     wake_clock: next_clock,
                                                     kind: SchedulerEventKind::EndstopSample(
@@ -2056,37 +1935,21 @@ mod app {
                                                     ),
                                                 },
                                             );
-                                            add_scheduler_cycles(&scheduler_cycles, start);
-                                            record_schedule_result(result);
                                         }
                                         _ => {}
                                     }
                                 }
                                 EndstopSampleResult::Triggered { trsync_oid, reason } => {
-                                    {
-                                        let trigger_start =
-                                            cortex_m::peripheral::DWT::cycle_count();
-                                        td.trigger(trsync_oid, reason, now);
-                                        let trigger_cycles =
-                                            cortex_m::peripheral::DWT::cycle_count()
-                                                .wrapping_sub(trigger_start);
-                                        crate::state::stepper_diag::record_critical_section(
-                                            crate::state::stepper_diag::PERF_SITE_TRIGGER_STOP,
-                                            trigger_cycles,
-                                        );
-                                    }
+                                    td.trigger(trsync_oid, reason, now);
                                     need_report = true;
                                 }
                                 EndstopSampleResult::Reschedule { next_clock } => {
-                                    let start = cortex_m::peripheral::DWT::cycle_count();
-                                    let result = td.scheduler.try_schedule(
+                                    td.scheduler.try_schedule(
                                         foci_klipper::scheduler::SchedulerEvent {
                                             wake_clock: next_clock,
                                             kind: SchedulerEventKind::EndstopSample(endstop_idx),
                                         },
                                     );
-                                    add_scheduler_cycles(&scheduler_cycles, start);
-                                    record_schedule_result(result);
                                 }
                                 EndstopSampleResult::Inactive => {}
                             }
@@ -2104,16 +1967,7 @@ mod app {
                                 .map(|(&oid, _)| oid);
                             if let Some(oid) = oid {
                                 let expire_reason = td.trsync[trsync_idx].expire_reason();
-                                {
-                                    let trigger_start = cortex_m::peripheral::DWT::cycle_count();
-                                    td.trigger(oid, expire_reason, now);
-                                    let trigger_cycles = cortex_m::peripheral::DWT::cycle_count()
-                                        .wrapping_sub(trigger_start);
-                                    crate::state::stepper_diag::record_critical_section(
-                                        crate::state::stepper_diag::PERF_SITE_TRIGGER_STOP,
-                                        trigger_cycles,
-                                    );
-                                }
+                                td.trigger(oid, expire_reason, now);
                                 need_report = true;
                             }
                         }
@@ -2135,22 +1989,19 @@ mod app {
                                         .report_clock()
                                         .wrapping_add(report_ticks);
                                     td.trsync[trsync_idx].set_report_clock(next_report);
-                                    let start = cortex_m::peripheral::DWT::cycle_count();
-                                    let result = td.scheduler.try_schedule(
+                                    td.scheduler.try_schedule(
                                         foci_klipper::scheduler::SchedulerEvent {
                                             wake_clock: next_report,
                                             kind: SchedulerEventKind::TrSyncReport(trsync_idx),
                                         },
                                     );
-                                    add_scheduler_cycles(&scheduler_cycles, start);
-                                    record_schedule_result(result);
                                 }
                                 // After trigger, no more liveness reports — don't reschedule
                             }
                         }
                     }
                 }
-                crate::trigger_domain::reprogram_cc2_measured(td.state_mut(), &scheduler_cycles);
+                crate::trigger_domain::reprogram_cc2(td.state_mut());
             });
             if need_report {
                 REPORT_PENDING.store(true, Relaxed);
@@ -2162,14 +2013,12 @@ mod app {
         // Skip CC1 if the flag is not set, or if CC2 trigger processing
         // disabled CC1 because no channel remains active.
         if !tim5.sr().read().ccif(0) || !tim5.dier().read().ccie(0) {
-            perf_sample.finish_dispatch();
             return;
         }
         clear_tim5_compare_flag(0);
 
         let next_event_clocks = ctx.local.next_event_clocks;
         if FAULT_ACTIVE.load(Relaxed) {
-            perf_sample.finish_dispatch();
             *next_event_clocks = [None; crate::state::stepper::STEPPER_CHANNEL_COUNT];
             tim5.dier().modify(|w| w.set_ccie(0, false));
             return;
@@ -2190,15 +2039,12 @@ mod app {
             if !budget.take() {
                 #[cfg(feature = "trace")]
                 crate::usb_trace::note_missed_or_deferred_step();
-                crate::state::stepper_diag::record_tim5_defer();
                 return StepDispatchOutcome::Complete;
             }
             #[cfg(feature = "trace")]
             crate::usb_trace::record_step_timing(due.clock, now);
-            event_count.set(event_count.get().saturating_add(1));
             process_due_step_event(due.channel, next_event_clocks)
         });
-        perf_sample.finish_dispatch();
         if outcome == StepDispatchOutcome::Fatal {
             abort_step_dispatch(next_event_clocks);
             return;

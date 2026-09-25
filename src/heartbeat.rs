@@ -6,9 +6,7 @@
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use embassy_stm32::peripherals;
 use embassy_stm32::wdg::IndependentWatchdog;
-use foci_firmware::ankyra::replies::{
-    AnalogInState, FociStepperEvent, FociStepperPerfEvent, Stats, TrsyncState,
-};
+use foci_firmware::ankyra::replies::{AnalogInState, FociStepperEvent, Stats, TrsyncState};
 
 /// Period between independent-watchdog service ticks.
 pub const WATCHDOG_INTERVAL_MS: u64 = 5_000;
@@ -208,63 +206,6 @@ fn emit_stepper_diagnostics_pass() {
             direction: u8 = event.direction as u8,
             data0: u32 = event.data0,
             data1: u32 = event.data1,
-        );
-    }
-    while let Some(event) = crate::state::stepper_diag::pop_perf_event() {
-        let snapshot = event.snapshot;
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            FociStepperPerfEvent,
-            reason: u8 = event.reason as u8,
-            channel: u8 = snapshot.channel,
-            clock: u32 = event.clock,
-            sample_count: u32 = snapshot.sample_count,
-            crit_count: u32 = snapshot.crit_count,
-            crit_max_cycles: u32 = snapshot.crit_max_cycles,
-            crit_max_site: u8 = snapshot.crit_max_site,
-            crit_over_10us: u32 = snapshot.crit_over_10us,
-            crit_over_50us: u32 = snapshot.crit_over_50us,
-            crit_over_100us: u32 = snapshot.crit_over_100us,
-            crit_over_1000us: u32 = snapshot.crit_over_1000us,
-            queue_step_count: u32 = snapshot.queue_step_count,
-            queue_step_max_cycles: u32 = snapshot.queue_step_max_cycles,
-            tim5_activation_count: u32 = snapshot.tim5_activation_count,
-            tim5_irq_max_cycles: u32 = snapshot.tim5_irq_max_cycles,
-            tim5_dispatch_max_cycles: u32 = snapshot.tim5_dispatch_max_cycles,
-            tim5_dispatch_max_cycles_events: u32 = snapshot.tim5_dispatch_max_cycles_events,
-            tim5_events_max_per_irq: u32 = snapshot.tim5_events_max_per_irq,
-            tim5_event_count_total: u32 = snapshot.tim5_event_count_total,
-            tim5_defer_count: u32 = snapshot.tim5_defer_count,
-            tim5_empty_count: u32 = snapshot.tim5_empty_count,
-            tim5_events_last_activation: u32 = snapshot.tim5_events_last_activation,
-            tim5_burst_cycles_per_event_max: u32 = snapshot.tim5_burst_cycles_per_event_max,
-            tim5_burst_cycles_per_event_max_cycles: u32 =
-                snapshot.tim5_burst_cycles_per_event_max_cycles,
-            tim5_burst_cycles_per_event_max_events: u32 =
-                snapshot.tim5_burst_cycles_per_event_max_events,
-            tim5_burst_cycles_per_event_floor3_max: u32 =
-                snapshot.tim5_burst_cycles_per_event_floor3_max,
-            tim5_entry_latency_max_ticks: u32 = snapshot.tim5_entry_latency_max_ticks,
-            tim5_pop_lateness_max_ticks: u32 = snapshot.tim5_pop_lateness_max_ticks,
-            scheduler_cycles_max: u32 = snapshot.scheduler_cycles_max,
-            scheduler_cycles_events_at_max: u32 = snapshot.scheduler_cycles_events_at_max,
-            scheduler_cycles_per_event_max: u32 = snapshot.scheduler_cycles_per_event_max,
-            scheduler_cycles_per_event_max_cycles: u32 =
-                snapshot.scheduler_cycles_per_event_max_cycles,
-            scheduler_cycles_per_event_max_events: u32 =
-                snapshot.scheduler_cycles_per_event_max_events,
-            scheduler_cycles_per_event_floor3_max: u32 =
-                snapshot.scheduler_cycles_per_event_floor3_max,
-            scheduler_full_count: u32 = snapshot.scheduler_full_count,
-            stepper_load_lateness_max_ticks: u32 = snapshot.stepper_load_lateness_max_ticks,
-            stepper_load_lateness_last_ticks: i32 = snapshot.stepper_load_lateness_last_ticks,
-            build_trace_enabled: u8 = snapshot.build_trace_enabled as u8,
-            shutdown_site_count: u32 = snapshot.shutdown_site_count,
-            shutdown_site_max_cycles: u32 = snapshot.shutdown_site_max_cycles,
-            reset_site_count: u32 = snapshot.reset_site_count,
-            reset_site_max_cycles: u32 = snapshot.reset_site_max_cycles,
-            trigger_stop_site_count: u32 = snapshot.trigger_stop_site_count,
-            trigger_stop_site_max_cycles: u32 = snapshot.trigger_stop_site_max_cycles,
         );
     }
 }

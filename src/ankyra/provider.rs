@@ -17,7 +17,6 @@ ankyra::ankyra_provider! {
     name: BOARD_PROVIDER,
     commands: [
         crate::ankyra::handlers::foci::foci_stepper_exec_stats,
-        crate::ankyra::handlers::foci::foci_stepper_perf_stats,
         crate::ankyra::handlers::foci::foci_stepper_stats,
         crate::ankyra::handlers::foci::foci_stepper_stop_stats,
         crate::ankyra::handlers::foci::foci_stepper_timing_stats,

@@ -1,4 +1,4 @@
-//! Stepper execution counters, performance counters, and async diagnostic queues.
+//! Stepper execution counters and async diagnostic queues.
 //!
 //! Events are produced from P1/P2/P3 contexts and drained from a P2 task.
 //! Queue access is protected by short interrupt-free critical sections so
@@ -6,40 +6,20 @@
 
 use foci_firmware::diagnostic::{
     StepperDiagnosticEvent, StepperDiagnosticQueue, StepperEventReason, StepperExecutionSnapshot,
-    StepperExecutionStats, StepperPerfCounters, StepperPerfDiagnosticEvent,
+    StepperExecutionStats,
 };
 
 use crate::state::stepper::STEPPER_CHANNEL_COUNT;
 
 static STEPPER_EXECUTION_STATS: StepperExecutionStats<STEPPER_CHANNEL_COUNT> =
     StepperExecutionStats::new();
-static STEPPER_PERF_COUNTERS: StepperPerfCounters<520, 260> = StepperPerfCounters::new();
 
 pub(crate) const STEPPER_DIAG_QUEUE_DEPTH: usize = 16;
-pub(crate) const STEPPER_PERF_EVENT_QUEUE_DEPTH: usize = 4;
 
 static mut STEPPER_DIAG_EVENTS: StepperDiagnosticQueue<
     StepperDiagnosticEvent,
     STEPPER_DIAG_QUEUE_DEPTH,
 > = StepperDiagnosticQueue::new();
-static mut STEPPER_PERF_EVENTS: StepperDiagnosticQueue<
-    StepperPerfDiagnosticEvent,
-    STEPPER_PERF_EVENT_QUEUE_DEPTH,
-> = StepperDiagnosticQueue::new();
-
-pub(crate) const PERF_SITE_TRIGGER_DOMAIN: u8 = 0;
-pub(crate) const PERF_SITE_QUEUE_STEP: u8 = 1;
-pub(crate) const PERF_SITE_TIM5: u8 = 2;
-/// Shutdown trigger-domain critical section site.
-pub(crate) const PERF_SITE_SHUTDOWN: u8 = 3;
-/// Reset trigger-domain critical section site.
-pub(crate) const PERF_SITE_RESET: u8 = 4;
-/// Trigger-dispatch stop measurement site (recorded as a direct DWT
-/// sample within the TIM5 dispatch loop's own critical section -- never
-/// its own `with_trigger_domain_site` acquisition, which would recreate
-/// a nested `&mut TriggerDomain` from inside a closure that already
-/// holds one).
-pub(crate) const PERF_SITE_TRIGGER_STOP: u8 = 5;
 
 pub(crate) fn push_event(event: StepperDiagnosticEvent) {
     cortex_m::interrupt::free(|_| {
@@ -55,30 +35,6 @@ pub(crate) fn pop_event() -> Option<StepperDiagnosticEvent> {
         // critical section.
         unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_DIAG_EVENTS) }.pop()
     })
-}
-
-pub(crate) fn push_perf_event(event: StepperPerfDiagnosticEvent) {
-    cortex_m::interrupt::free(|_| {
-        // SAFETY: all accesses to this static go through this interrupt-free
-        // critical section.
-        unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_PERF_EVENTS) }.push_drop_oldest(event);
-    });
-}
-
-pub(crate) fn pop_perf_event() -> Option<StepperPerfDiagnosticEvent> {
-    cortex_m::interrupt::free(|_| {
-        // SAFETY: all accesses to this static go through this interrupt-free
-        // critical section.
-        unsafe { &mut *core::ptr::addr_of_mut!(STEPPER_PERF_EVENTS) }.pop()
-    })
-}
-
-pub(crate) fn record_perf_event(reason: StepperEventReason, channel: u8, clock: u32) {
-    push_perf_event(StepperPerfDiagnosticEvent {
-        reason,
-        clock,
-        snapshot: perf_snapshot(channel, false),
-    });
 }
 
 pub(crate) fn record_timer_activation(channel: u8, clock: u32) {
@@ -101,8 +57,6 @@ pub(crate) fn record_loaded_segment_timing(
     compare: u32,
 ) {
     STEPPER_EXECUTION_STATS.record_loaded_segment_timing(channel, steps, now, scheduled, compare);
-    let lateness = now.wrapping_sub(scheduled) as i32;
-    STEPPER_PERF_COUNTERS.record_stepper_load_lateness(lateness);
 }
 
 /// Record one executed logical motor step and its emitted physical pulses.
@@ -151,69 +105,4 @@ pub(crate) fn snapshot(
     queue_len: u16,
 ) -> Option<StepperExecutionSnapshot> {
     STEPPER_EXECUTION_STATS.snapshot(channel, position, timer_active, queue_len)
-}
-
-pub(crate) fn perf_snapshot(
-    channel: u8,
-    clear: bool,
-) -> foci_firmware::diagnostic::StepperPerfSnapshot {
-    STEPPER_PERF_COUNTERS.snapshot(channel, clear, cfg!(feature = "trace"))
-}
-
-/// Return a step-dispatch performance snapshot and, if `clear`, start a
-/// fresh measurement window at `now_ticks`. The elapsed-window value always
-/// describes the window that is ending, measured before any clear.
-///
-/// When `clear` is set, the snapshot's coherent read/clear of the cumulative
-/// totals (inside `StepperPerfCounters::snapshot`) and the window-start
-/// re-stamp (inside `record_window_reset`) run under one critical section,
-/// so no P2/P3 write can land between the totals being cleared and the new
-/// window starting.
-pub(crate) fn perf_snapshot_and_reset_window(
-    channel: u8,
-    clear: bool,
-    now_ticks: u64,
-) -> (foci_firmware::diagnostic::StepperPerfSnapshot, (u32, u32)) {
-    let elapsed = STEPPER_PERF_COUNTERS.elapsed_cycles(now_ticks);
-    if clear {
-        let snapshot = critical_section::with(|_| {
-            let snapshot = STEPPER_PERF_COUNTERS.snapshot(channel, true, cfg!(feature = "trace"));
-            STEPPER_PERF_COUNTERS.record_window_reset(now_ticks);
-            snapshot
-        });
-        (snapshot, elapsed)
-    } else {
-        (
-            STEPPER_PERF_COUNTERS.snapshot(channel, false, cfg!(feature = "trace")),
-            elapsed,
-        )
-    }
-}
-
-pub(crate) fn record_critical_section(site: u8, cycles: u32) {
-    STEPPER_PERF_COUNTERS.record_critical_section(site, cycles);
-}
-
-pub(crate) fn record_tim5_entry_latency(lateness_ticks: u32) {
-    STEPPER_PERF_COUNTERS.record_tim5_entry_latency(lateness_ticks);
-}
-
-pub(crate) fn record_tim5_defer() {
-    STEPPER_PERF_COUNTERS.record_tim5_defer();
-}
-
-pub(crate) fn record_scheduler_pop_lateness(lateness_ticks: u32) {
-    STEPPER_PERF_COUNTERS.record_scheduler_pop_lateness(lateness_ticks);
-}
-
-pub(crate) fn record_scheduler_full() {
-    STEPPER_PERF_COUNTERS.record_scheduler_full();
-}
-
-pub(crate) fn record_scheduler_cycles(scheduler_cycles: u32, event_count: u32) {
-    STEPPER_PERF_COUNTERS.record_scheduler_cycles(scheduler_cycles, event_count);
-}
-
-pub(crate) fn record_tim5_irq(irq_cycles: u32, dispatch_cycles: u32, event_count: u32) {
-    STEPPER_PERF_COUNTERS.record_tim5_irq(irq_cycles, dispatch_cycles, event_count);
 }

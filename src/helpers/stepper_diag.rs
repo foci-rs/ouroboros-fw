@@ -2,9 +2,7 @@
 
 use core::sync::atomic::Ordering::Relaxed;
 
-use foci_firmware::diagnostic::{
-    StepperDiagnosticEvent, StepperEventReason, stepper_event_pairs_perf_snapshot,
-};
+use foci_firmware::diagnostic::{StepperDiagnosticEvent, StepperEventReason};
 
 /// Queue length value used when a call site cannot safely inspect the queue.
 pub(crate) const UNKNOWN_QUEUE_LEN: u16 = u16::MAX;
@@ -32,9 +30,6 @@ pub(crate) fn record_stepper_event(
         data0,
         data1,
     });
-    if stepper_event_pairs_perf_snapshot(reason) {
-        crate::state::stepper_diag::record_perf_event(reason, channel, clock);
-    }
     foci_firmware::state::lifecycle::STEPPER_DIAG_PENDING.store(true, Relaxed);
     crate::app::stepper_diag_task::spawn().ok();
 }
