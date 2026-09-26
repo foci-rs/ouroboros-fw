@@ -16,7 +16,7 @@ use crate::helpers::tmc::{FociTuneParams, foci_tune_inner};
 use crate::tmc_control::board::{stepper_state, tmc_state};
 use crate::trigger_domain::with_trigger_domain;
 
-/// Start Stage 2 installed tuning (mechanical ID + velocity/position/filters).
+/// Start installed tuning (mechanical ID + velocity/position/filters).
 ///
 /// The parameter list is dictated by the Klipper wire protocol — collapsing
 /// it into a struct would break the host command format, so the clippy lint
