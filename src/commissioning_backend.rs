@@ -208,7 +208,7 @@ impl CommissionBackendHooks for OuroborosHooks {
                 .scheduler
                 .cancel(|kind| matches!(kind, SchedulerEventKind::Stepper(i) if *i == idx));
             crate::trigger_domain::stop_physical_stepper_masked(idx, StepperEventReason::P1Stop);
-            td.set_timer_active(idx, false);
+            crate::trigger_domain::set_timer_active(td.state_mut(), idx, false);
             td.state_mut().stepper_stop[idx].need_reset = true;
             tmc_state.stimulus_restore_motor_armed();
         });

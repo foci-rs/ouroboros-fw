@@ -6,8 +6,6 @@
 //! the coordination surface is inspectable independently of RTIC's macro
 //! expansion.
 
-use core::ops::{Deref, DerefMut};
-
 use foci_firmware::context::trsync::{self, TriggerDispatchBoard, TriggerDomainState};
 use foci_firmware::diagnostic::StepperEventReason;
 use foci_klipper::step_queue::Consumer;
@@ -217,21 +215,6 @@ impl TriggerDomain {
         &self.state
     }
 
-    /// Set `timer_active` for a stepper, updating the P1 mirror
-    /// for physical steppers.
-    pub(crate) fn set_timer_active(&mut self, stepper_idx: usize, active: bool) {
-        set_timer_active(&mut self.state, stepper_idx, active);
-    }
-
-    /// Return whether the step timer is active for a stepper.
-    pub(crate) fn timer_active(&self, stepper_idx: usize) -> bool {
-        self.state
-            .stepper_stop
-            .get(stepper_idx)
-            .map(|runtime| runtime.timer_active)
-            .unwrap_or(false)
-    }
-
     /// Attempt to trigger a trsync, dispatching stop signals to all
     /// linked steppers. Returns the trigger result.
     ///
@@ -244,20 +227,6 @@ impl TriggerDomain {
     ) -> foci_klipper::trigger::TriggerResult {
         let mut board = OuroborosDispatchBoard;
         trsync::dispatch_trigger(&mut self.state, &mut board, trsync_oid, reason, clock)
-    }
-}
-
-impl Deref for TriggerDomain {
-    type Target = TriggerDomainState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl DerefMut for TriggerDomain {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
     }
 }
 
@@ -294,6 +263,8 @@ impl TriggerDispatchBoard for OuroborosDispatchBoard {
     }
 }
 
+/// Set `timer_active` for a stepper, updating the P1 mirror
+/// for physical steppers.
 pub(crate) fn set_timer_active(state: &mut TriggerDomainState, stepper_idx: usize, active: bool) {
     state.stepper_stop[stepper_idx].timer_active = active;
     // Mirror to P1-readable atomic for physical steppers
@@ -302,6 +273,15 @@ pub(crate) fn set_timer_active(state: &mut TriggerDomainState, stepper_idx: usiz
             .timer_active_mirror
             .store(active, core::sync::atomic::Ordering::Relaxed);
     }
+}
+
+/// Return whether the step timer is active for a stepper.
+pub(crate) fn timer_active(state: &TriggerDomainState, stepper_idx: usize) -> bool {
+    state
+        .stepper_stop
+        .get(stepper_idx)
+        .map(|runtime| runtime.timer_active)
+        .unwrap_or(false)
 }
 
 pub(crate) fn disarm_trigger_scheduler(state: &mut TriggerDomainState) {

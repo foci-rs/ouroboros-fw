@@ -1425,7 +1425,7 @@ mod app {
             tmc_state.pid_error_sums_clear.store(true, Relaxed);
         }
         with_trigger_domain(|td| {
-            td.set_timer_active(idx, false);
+            crate::trigger_domain::set_timer_active(td.state_mut(), idx, false);
         });
     }
 
@@ -1865,7 +1865,7 @@ mod app {
                 // Collect (kind, wake_clock) pairs before mutating scheduler
                 let mut due_events: heapless::Vec<(SchedulerEventKind, u32), 13> =
                     heapless::Vec::new();
-                while let Some(slot) = td.scheduler.pop_due_slot(now) {
+                while let Some(slot) = td.state_mut().scheduler.pop_due_slot(now) {
                     let event = slot.event();
                     let _ = due_events.push((event.kind, event.wake_clock));
                 }
@@ -1890,20 +1890,18 @@ mod app {
                                 }
                             };
 
-                            let phase = td.endstops[endstop_idx].phase();
+                            let phase = td.state().endstops[endstop_idx].phase();
                             let result = match phase {
-                                EndstopPhase::Scanning => {
-                                    td.endstops[endstop_idx].scan(read_pin(), wake_clock)
-                                }
-                                EndstopPhase::Oversampling => {
-                                    td.endstops[endstop_idx].oversample(read_pin(), wake_clock)
-                                }
+                                EndstopPhase::Scanning => td.state_mut().endstops[endstop_idx]
+                                    .scan(read_pin(), wake_clock),
+                                EndstopPhase::Oversampling => td.state_mut().endstops[endstop_idx]
+                                    .oversample(read_pin(), wake_clock),
                             };
 
                             match result {
                                 EndstopSampleResult::EnterOversamplingNow => {
                                     // Second GPIO read (C double-read)
-                                    match td.endstops[endstop_idx]
+                                    match td.state_mut().endstops[endstop_idx]
                                         .oversample(read_pin(), wake_clock)
                                     {
                                         EndstopSampleResult::Triggered { trsync_oid, reason } => {
@@ -1911,7 +1909,7 @@ mod app {
                                             need_report = true;
                                         }
                                         EndstopSampleResult::Reschedule { next_clock } => {
-                                            td.scheduler.try_schedule(
+                                            td.state_mut().scheduler.try_schedule(
                                                 foci_klipper::scheduler::SchedulerEvent {
                                                     wake_clock: next_clock,
                                                     kind: SchedulerEventKind::EndstopSample(
@@ -1928,7 +1926,7 @@ mod app {
                                     need_report = true;
                                 }
                                 EndstopSampleResult::Reschedule { next_clock } => {
-                                    td.scheduler.try_schedule(
+                                    td.state_mut().scheduler.try_schedule(
                                         foci_klipper::scheduler::SchedulerEvent {
                                             wake_clock: next_clock,
                                             kind: SchedulerEventKind::EndstopSample(endstop_idx),
@@ -1942,35 +1940,37 @@ mod app {
                             // The scheduler event already confirms the deadline
                             // has passed, so trigger the domain directly.
                             let oid = td
+                                .state()
                                 .trsync_by_oid
                                 .iter()
                                 .find(|&(_, &idx)| idx == trsync_idx)
                                 .map(|(&oid, _)| oid);
                             if let Some(oid) = oid {
-                                let expire_reason = td.trsync[trsync_idx].expire_reason();
+                                let expire_reason = td.state().trsync[trsync_idx].expire_reason();
                                 td.trigger(oid, expire_reason, now);
                                 need_report = true;
                             }
                         }
                         SchedulerEventKind::TrSyncReport(trsync_idx) => {
                             let oid = td
+                                .state()
                                 .trsync_by_oid
                                 .iter()
                                 .find(|&(_, &idx)| idx == trsync_idx)
                                 .map(|(&oid, _)| oid);
                             if let Some(oid) = oid
-                                && td.trsync[trsync_idx].can_trigger()
+                                && td.state().trsync[trsync_idx].can_trigger()
                             {
-                                td.trsync[trsync_idx].set_liveness_report(oid, now);
+                                td.state_mut().trsync[trsync_idx].set_liveness_report(oid, now);
                                 need_report = true;
                                 // Advance report_clock by report_ticks (stable cadence)
-                                let report_ticks = td.trsync[trsync_idx].report_ticks();
+                                let report_ticks = td.state().trsync[trsync_idx].report_ticks();
                                 if report_ticks > 0 {
-                                    let next_report = td.trsync[trsync_idx]
+                                    let next_report = td.state().trsync[trsync_idx]
                                         .report_clock()
                                         .wrapping_add(report_ticks);
-                                    td.trsync[trsync_idx].set_report_clock(next_report);
-                                    td.scheduler.try_schedule(
+                                    td.state_mut().trsync[trsync_idx].set_report_clock(next_report);
+                                    td.state_mut().scheduler.try_schedule(
                                         foci_klipper::scheduler::SchedulerEvent {
                                             wake_clock: next_report,
                                             kind: SchedulerEventKind::TrSyncReport(trsync_idx),
@@ -2090,7 +2090,7 @@ mod app {
         crate::heartbeat::emit_trigger_reports(
             |snaps| {
                 with_trigger_domain(|td| {
-                    for ts in td.trsync.iter_mut() {
+                    for ts in td.state_mut().trsync.iter_mut() {
                         if let Some(snap) = ts.take_report() {
                             let _ = snaps.push(snap);
                         }

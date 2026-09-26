@@ -96,7 +96,10 @@ fn stepper_execution_snapshot(
         let queue_len = crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize]
             .len()
             .min(u16::MAX as usize) as u16;
-        (td.timer_active(channel as usize), queue_len)
+        (
+            crate::trigger_domain::timer_active(td.state(), channel as usize),
+            queue_len,
+        )
     });
     let position = foci_firmware::state::stepper::stepper_channel(channel)
         .map(|state| state.position.load(Relaxed))
