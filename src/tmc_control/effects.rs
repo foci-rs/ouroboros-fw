@@ -72,10 +72,6 @@ pub(crate) fn handle_commission_wait_reject(req: TmcRequest) -> TmcControlReques
 }
 
 /// Apply runtime actions emitted before SPI-heavy request handling.
-///
-/// Returns [`TmcPreRequestDisposition::RequestHandled`] if a terminal action was
-/// observed. Stepper-only action lists apply their non-terminal effects and
-/// return [`TmcPreRequestDisposition::ContinueRequest`].
 pub(crate) fn apply_pre_request_actions<F>(
     channel: u8,
     actions: BoardActions,
