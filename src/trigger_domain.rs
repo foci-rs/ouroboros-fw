@@ -101,9 +101,7 @@ struct PendingStopDrain {
 
 /// One slot per physical stepper channel, written by `stop_physical_stepper`
 /// (masked, O(1)) and taken by `trigger_drain_task` (its own short masked
-/// window per channel, never across the drain loop). See
-/// `docs/specs/2026-09-17-foci-16-trigger-drain-outside-critical-section.md`,
-/// "Slot access and lossless wake-up".
+/// window per channel, never across the drain loop).
 ///
 /// `UnsafeCell` is `!Sync` by default, so the array is wrapped in this
 /// newtype to give it an explicit `unsafe impl Sync` -- wrapping an array
@@ -126,7 +124,7 @@ static TRIGGER_DRAIN_SLOTS: TriggerDrainSlots = TriggerDrainSlots(
 );
 
 /// Wakes `trigger_drain_task`. `signal(())` is lossless regardless of the
-/// task's current execution state -- see the spec's "Lossless wake-up".
+/// task's current execution state.
 pub(crate) static TRIGGER_DRAIN_WAKE: embassy_sync::signal::Signal<
     embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
     (),
