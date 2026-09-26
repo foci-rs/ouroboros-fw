@@ -4,7 +4,6 @@
 
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
-use foci_firmware::step_pulse::StepPulseTiming;
 use foci_klipper::pulse_mapper::PulseMapperConfig;
 use foci_klipper::stepper::{HardwareStepper, LogicalStepEvent, MotionScaleConfigError};
 
@@ -16,9 +15,6 @@ pub(crate) const STEP_HALF_PERIOD_TICKS: u32 = 11;
 
 /// Two half-periods provide the project-owned DIR setup interval.
 pub(crate) const STEP_DIR_SETUP_TICKS: u32 = 22;
-
-/// DIR setup plus two complete high/low pulse periods.
-pub(crate) const STEP_WAVEFORM_WORST_CASE_TICKS: u32 = 66;
 
 pub(crate) use foci_klipper::step_queue::STEP_QUEUE_DEPTH;
 
@@ -147,17 +143,6 @@ pub(crate) unsafe fn isr_stepper(
     Some(unsafe { &mut *ptr.add(idx) })
 }
 
-/// Return Ouroboros' immutable physical waveform timing.
-pub(crate) fn step_pulse_timing() -> StepPulseTiming {
-    let timing =
-        StepPulseTiming::new(STEP_TIMER_HZ).expect("Ouroboros step timing constants are valid");
-    debug_assert_eq!(
-        timing.waveform_worst_case_ticks(),
-        STEP_WAVEFORM_WORST_CASE_TICKS
-    );
-    timing
-}
-
 /// Clear any old mapper, then install a freshly centered replacement.
 ///
 /// Failure is fail-closed: the prior mapper is cleared before configuration.
@@ -227,15 +212,6 @@ mod tests {
     use super::*;
     use foci_klipper::pulse_mapper::PulseMapperConfig;
     use foci_klipper::stepper::StepMove;
-
-    #[test]
-    fn ouroboros_timing_contains_waveform_and_runtime_threshold_only() {
-        let timing = step_pulse_timing();
-        assert_eq!(timing.half_period_ticks(), 11);
-        assert_eq!(timing.dir_setup_ticks(), 22);
-        assert_eq!(timing.waveform_worst_case_ticks(), 66);
-        assert_eq!(timing.fatal_lateness_ticks(), 260_000);
-    }
 
     #[test]
     fn failed_mapper_replacement_clears_prior_mapper() {

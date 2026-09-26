@@ -19,12 +19,11 @@ use core::sync::atomic::Ordering::Relaxed;
 
 use ankyra::prelude::klipper_command;
 use foci_firmware::context::{ClockSource, ShutdownRecovery, StateAccess};
-use foci_firmware::diagnostic::{MotionScaleDiagnosticSnapshot, StepperExecutionSnapshot};
+use foci_firmware::diagnostic::StepperExecutionSnapshot;
 use foci_firmware::shutdown::ShutdownReason;
 
 use crate::firmware_ctx::FirmwareCtx;
 use crate::helpers::tmc::{FociTuneParams, foci_tune_inner};
-use crate::state::stepper::step_pulse_timing;
 use crate::tmc_control::board::{stepper_state, tmc_state};
 use crate::trigger_domain::with_trigger_domain;
 
@@ -144,6 +143,7 @@ pub fn foci_stepper_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
         discarded_steps: u32 = snapshot.discarded_steps,
         timer_active: u8 = u8::from(snapshot.timer_active),
         queue_len: u16 = snapshot.queue_len,
+        oversize_frame_drops: u32 = ::ankyra::oversize_frame_drops(),
     );
 }
 
@@ -153,31 +153,22 @@ pub fn foci_stepper_exec_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
     let Some(snapshot) = stepper_execution_snapshot(ctx, oid) else {
         return;
     };
-    let motion = MotionScaleDiagnosticSnapshot::from_state(
-        tmc_state(snapshot.channel),
-        stepper_state(snapshot.channel),
-        step_pulse_timing(),
-    );
+    let tmc = tmc_state(snapshot.channel);
+    let planner_steps_per_rev = stepper_state(snapshot.channel)
+        .planner_steps_per_rev(tmc)
+        .unwrap_or(0);
+    let encoder_ppr = tmc.encoder_ppr().unwrap_or(0);
 
     ::ankyra::klipper_reply_from!(
         &mut crate::_ankyra_config::Sender,
         foci_firmware::ankyra::replies::FociStepperExecStatsResult,
         oid: u8 = oid,
-        channel: u8 = snapshot.channel,
         executed_pos_steps: u32 = snapshot.executed_pos_steps,
         executed_neg_steps: u32 = snapshot.executed_neg_steps,
         physical_pos_pulses: u32 = snapshot.physical_pos_pulses,
         physical_neg_pulses: u32 = snapshot.physical_neg_pulses,
-        planner_steps_per_rev: u32 = motion.planner_steps_per_rev,
-        encoder_ppr: u32 = motion.encoder_ppr,
-        encoder_counts_per_rev: u32 = motion.encoder_counts_per_rev,
-        tmc_grid: u32 = motion.tmc_grid,
-        physical_step_width: u32 = motion.physical_step_width,
-        motion_scale_configured: u8 = u8::from(motion.configured),
-        step_half_period_ticks: u32 = motion.step_half_period_ticks,
-        dir_setup_ticks: u32 = motion.dir_setup_ticks,
-        waveform_worst_case_ticks: u32 = motion.waveform_worst_case_ticks,
-        fatal_lateness_ticks: u32 = motion.fatal_lateness_ticks,
+        planner_steps_per_rev: u32 = planner_steps_per_rev,
+        encoder_ppr: u32 = encoder_ppr,
         queue_empty_count: u32 = snapshot.queue_empty_count,
         missed_deadline_count: u32 = snapshot.missed_deadline_count,
     );
