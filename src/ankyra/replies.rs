@@ -295,6 +295,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
     fn foci_tune_result(
         &mut self,
         oid: u8,
+        report_seq: u8,
         status: u8,
         result: &foci_firmware::commissioning::types::OuterResult,
     ) {
@@ -302,17 +303,11 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociTuneResult,
             oid: u8 = oid,
+            report_seq: u8 = report_seq,
             status: u8 = status,
             velocity_p: u16 = result.velocity_p,
             velocity_i: u16 = result.velocity_i,
-            velocity_limit: u32 = result.velocity_limit,
             position_p: u16 = result.position_p,
-            position_i: u16 = result.position_i,
-            velocity_filter_hz: u16 = result.velocity_filter_hz,
-            position_filter_hz: u16 = result.position_filter_hz,
-            flux_filter_hz: u16 = result.flux_filter_hz,
-            torque_filter_hz: u16 = result.torque_filter_hz,
-            warning_code: u8 = result.warning_code,
             probed_velocity_mrev_s: u32 = result.provenance.probed_velocity_mrev_s,
             d_eq_q: i32 = result.provenance.d_eq_q,
             confidence_q: u16 = result.provenance.confidence_q,
@@ -320,21 +315,34 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             band_upper_percent: u8 = result.provenance.band_upper_percent,
             band_position_q: u16 = result.provenance.band_position_q,
             predicted_start_p: u16 = result.position_tune.predicted_start_p,
-            last_rung_p: u16 = result.position_tune.last_rung_p,
-            min_overshoot_p: u16 = result.position_tune.min_overshoot_p,
-            min_overshoot_units: u32 = result.position_tune.min_overshoot_units,
-            bound_units: u32 = result.position_tune.bound_units,
-            homing_speed_mrev_s: u32 = result.position_tune.homing_speed_mrev_s,
-            motion_speed_mrev_s: u32 = result.position_tune.motion_speed_mrev_s,
-            homing_peak_abs_units: u32 = result.position_tune.homing_peak_abs_units,
-            motion_cruise_mean_abs_units: u32 = result.position_tune.motion_cruise_mean_abs_units,
-            motion_overshoot_units: u32 = result.position_tune.motion_overshoot_units,
-            motion_cruise_rms_units: u32 = result.position_tune.motion_cruise_rms_units,
-            nominal_bandwidth_hz: u32 = result.position_tune.nominal_bandwidth_hz,
-            dither_margin_milli: i32 = result.position_tune.dither_margin_milli,
             rungs_measured: u8 = result.position_tune.rungs_measured,
             stimulus_feedforward_paths: u8 = result.position_tune.stimulus_feedforward_paths,
             position_tune_outcome_code: u8 = result.position_tune_outcome_code,
+        );
+    }
+
+    fn foci_tune_position_evidence(
+        &mut self,
+        oid: u8,
+        report_seq: u8,
+        position_tune: &foci_firmware::commissioning::types::PositionTuneProvenance,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociTunePositionEvidence,
+            oid: u8 = oid,
+            report_seq: u8 = report_seq,
+            last_rung_p: u16 = position_tune.last_rung_p,
+            min_overshoot_p: u16 = position_tune.min_overshoot_p,
+            min_overshoot_units: u32 = position_tune.min_overshoot_units,
+            bound_units: u32 = position_tune.bound_units,
+            homing_speed_mrev_s: u32 = position_tune.homing_speed_mrev_s,
+            motion_speed_mrev_s: u32 = position_tune.motion_speed_mrev_s,
+            homing_peak_abs_units: u32 = position_tune.homing_peak_abs_units,
+            motion_cruise_mean_abs_units: u32 = position_tune.motion_cruise_mean_abs_units,
+            motion_overshoot_units: u32 = position_tune.motion_overshoot_units,
+            motion_cruise_rms_units: u32 = position_tune.motion_cruise_rms_units,
+            dither_margin_milli: i32 = position_tune.dither_margin_milli,
         );
     }
 
@@ -407,9 +415,12 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
 }
 
 /// Emit terminal commissioning-family replies.
-pub(crate) fn emit_terminal_reply(payload: foci_firmware::commission_dispatch::ReplyPayload) {
+pub(crate) fn emit_terminal_reply(
+    channel: u8,
+    payload: foci_firmware::commission_dispatch::ReplyPayload,
+) {
     let mut sink = BoardCommissionReplySink;
-    foci_firmware::commission_dispatch::emit_terminal_reply(&mut sink, payload);
+    foci_firmware::commission_dispatch::emit_terminal_reply(&mut sink, channel, payload);
 }
 
 /// Emit one nonterminal velocity-integral evidence group.

@@ -832,17 +832,11 @@ mod commissioning_board_contract_tests {
             "FociTuneResult",
             &[
                 "oid: u8",
+                "report_seq: u8",
                 "status: u8",
                 "velocity_p: u16",
                 "velocity_i: u16",
-                "velocity_limit: u32",
                 "position_p: u16",
-                "position_i: u16",
-                "velocity_filter_hz: u16",
-                "position_filter_hz: u16",
-                "flux_filter_hz: u16",
-                "torque_filter_hz: u16",
-                "warning_code: u8",
                 "probed_velocity_mrev_s: u32",
                 "d_eq_q: i32",
                 "confidence_q: u16",
@@ -850,6 +844,21 @@ mod commissioning_board_contract_tests {
                 "band_upper_percent: u8",
                 "band_position_q: u16",
                 "predicted_start_p: u16",
+                "rungs_measured: u8",
+                "stimulus_feedforward_paths: u8",
+                "position_tune_outcome_code: u8",
+            ],
+        );
+    }
+
+    #[test]
+    fn board_forwards_the_tune_position_evidence_fields() {
+        assert_reply_contract(
+            "foci_tune_position_evidence",
+            "FociTunePositionEvidence",
+            &[
+                "oid: u8",
+                "report_seq: u8",
                 "last_rung_p: u16",
                 "min_overshoot_p: u16",
                 "min_overshoot_units: u32",
@@ -860,11 +869,7 @@ mod commissioning_board_contract_tests {
                 "motion_cruise_mean_abs_units: u32",
                 "motion_overshoot_units: u32",
                 "motion_cruise_rms_units: u32",
-                "nominal_bandwidth_hz: u32",
                 "dither_margin_milli: i32",
-                "rungs_measured: u8",
-                "stimulus_feedforward_paths: u8",
-                "position_tune_outcome_code: u8",
             ],
         );
     }

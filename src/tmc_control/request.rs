@@ -138,8 +138,8 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         );
     }
 
-    fn emit_reply(&mut self, payload: ReplyPayload) {
-        crate::ankyra::replies::emit_terminal_reply(payload);
+    fn emit_reply(&mut self, channel: u8, payload: ReplyPayload) {
+        crate::ankyra::replies::emit_terminal_reply(channel, payload);
     }
 
     #[cfg(feature = "trace")]
