@@ -155,20 +155,16 @@ fn take_pending_drain(idx: usize) -> Option<PendingStopDrain> {
     })
 }
 
-/// Drain and reattach every channel with a pending stop, once. Returns
-/// `true` if anything was found (so the caller can retry-until-stable --
-/// see the spec's "Slot access and lossless wake-up").
+/// Drain and reattach every channel with a pending stop, once.
 ///
 /// Called only from `trigger_drain_task` (P2), never from an ISR: this
 /// runs the actual dequeue loop with interrupts enabled, which is the
 /// entire point of this mechanism.
-pub(crate) fn drain_all_populated_slots() -> bool {
-    let mut found_any = false;
+pub(crate) fn drain_all_populated_slots() {
     for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
         let Some(pending) = take_pending_drain(idx) else {
             continue;
         };
-        found_any = true;
         let mut consumer = pending.consumer;
         let mut drained_segments = 0u32;
         let mut drained_steps = 0u32;
@@ -186,7 +182,6 @@ pub(crate) fn drain_all_populated_slots() -> bool {
         );
         attach_consumer(idx as u8, consumer);
     }
-    found_any
 }
 
 fn tmc_state(channel: u8) -> Option<&'static foci_firmware::state::tmc::TmcChannelState> {
