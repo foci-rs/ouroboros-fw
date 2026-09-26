@@ -115,8 +115,9 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
                 crate::trigger_domain::timer_active(td.state(), self.channel as usize);
             let admitted = motion_scale_install_admitted(motor_armed, queue_empty, timer_active);
 
-            // SAFETY: The trigger-domain lock excludes P2/P3, and the checked
-            // disarmed/empty/inactive state keeps this channel quiesced afterward.
+            // SAFETY: The trigger-domain lock excludes P2/P3. The step timer is
+            // inactive: only this P1 task arms the motor, and it was disarmed at
+            // the runner precheck, so P3 cannot be using the ISR stepper.
             let stepper =
                 unsafe { isr_stepper(self.channel).ok_or(MotionScaleMapperInstallError)? };
             reset_mapper_observables(self.channel);
