@@ -1,19 +1,8 @@
-//! Board-local FOCI handler: `foci_tune`.
-//!
-//! The other shared FOCI handlers (`foci_selftest`, `foci_calibrate`,
-//! `foci_dump_registers`, `foci_commission`) were lifted to
-//! `foci_firmware::ankyra::handlers::foci` in Task 17 of the foci-firmware
-//! handler-lift plan. The glob re-export
-//! below brings in the lifted handlers (and their macro-generated ankyra
-//! bookkeeping items) so that `crate::ankyra::handlers::foci::*` in
-//! `provider.rs` resolves all seven handlers correctly.
+//! Board-local FOCI handlers: `foci_tune` and the stepper execution counters.
 //!
 //! `foci_tune` stays board-local because its implementation calls
 //! `foci_tune_inner`, which emits replies via the board-local ankyra
 //! transport sender.
-
-#[allow(unused_imports)]
-pub use foci_firmware::ankyra::handlers::foci::*;
 
 use core::sync::atomic::Ordering::Relaxed;
 
