@@ -100,13 +100,10 @@ impl CommissionBackendHooks for OuroborosHooks {
     }
 
     fn commission_stimulus_queue_free(channel: u8) -> usize {
-        // `StepQueueChannel::len` is a lock-free atomic load, sound from
-        // any priority whether or not the consumer is attached. The wrapped
-        // `heapless::spsc::Queue<_, N>` holds at most `N - 1` items.
         crate::state::stepper::STEP_QUEUE_CHANNELS
             .get(channel as usize)
             .map_or(0, |queue| {
-                (crate::state::stepper::STEP_QUEUE_DEPTH - 1).saturating_sub(queue.len())
+                foci_klipper::step_queue::STEP_QUEUE_CAPACITY.saturating_sub(queue.len())
             })
     }
 
