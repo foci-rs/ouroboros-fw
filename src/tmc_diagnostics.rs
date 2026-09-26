@@ -54,6 +54,7 @@ impl DiagnosticPowerStage for OuroborosDiagnosticPowerStage<'_> {
 
 /// Emit a deterministic not-ready reply without touching diagnostic hardware.
 pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
+    let channel = request.channel;
     match foci_firmware::tmc_diagnostics::busy_diagnostic_report(
         request,
         &crate::board_config::TMC_CONFIG,
@@ -61,6 +62,7 @@ pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
         DiagnosticOutcome::Handled(report) => {
             foci_firmware::tmc_diagnostics::emit_diagnostic_report(
                 &mut BoardDiagnosticReplySink,
+                channel,
                 report,
             );
         }
@@ -71,7 +73,12 @@ pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
 }
 
 impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticReplySink {
-    fn foci_current_step_result(&mut self, axis: CurrentStepAxis, report: CurrentStepReport) {
+    fn foci_current_step_result(
+        &mut self,
+        _report_seq: u8,
+        axis: CurrentStepAxis,
+        report: CurrentStepReport,
+    ) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentStepResult,
@@ -93,7 +100,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_current_vector_step_result(&mut self, report: CurrentStepReport) {
+    fn foci_current_vector_step_result(&mut self, _report_seq: u8, report: CurrentStepReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentVectorStepResult,
@@ -115,11 +122,16 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_current_torque_sample_pid_result(&mut self, report: &CurrentTorqueSampleReport) {
+    fn foci_current_torque_sample_pid_result(
+        &mut self,
+        report_seq: u8,
+        report: &CurrentTorqueSampleReport,
+    ) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentTorqueSamplePidResult,
             oid: u8 = report.oid,
+            report_seq: u8 = report_seq,
             pidin_target_torque: i32 = report.pidin_target_torque,
             pidin_target_flux: i32 = report.pidin_target_flux,
             pidout_target_torque: i32 = report.pidout_target_torque,
@@ -132,11 +144,16 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_current_torque_sample_result(&mut self, report: CurrentTorqueSampleReport) {
+    fn foci_current_torque_sample_result(
+        &mut self,
+        report_seq: u8,
+        report: CurrentTorqueSampleReport,
+    ) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentTorqueSampleResult,
             oid: u8 = report.oid,
+            report_seq: u8 = report_seq,
             kind: u8 = report.kind.as_u8(),
             status: u8 = report.status,
             target: i16 = report.target,
@@ -156,11 +173,16 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_current_torque_sample_detail_result(&mut self, report: &CurrentTorqueSampleReport) {
+    fn foci_current_torque_sample_detail_result(
+        &mut self,
+        report_seq: u8,
+        report: &CurrentTorqueSampleReport,
+    ) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociCurrentTorqueSampleDetailResult,
             oid: u8 = report.oid,
+            report_seq: u8 = report_seq,
             encoder_before: u32 = report.encoder_before,
             encoder_sample: u32 = report.encoder_sample,
             encoder_after: u32 = report.encoder_after,
@@ -173,11 +195,12 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_voltage_step_result(&mut self, report: VoltageStepReport) {
+    fn foci_voltage_step_result(&mut self, report_seq: u8, report: VoltageStepReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociVoltageStepResult,
             oid: u8 = report.oid,
+            report_seq: u8 = report_seq,
             status: u8 = report.status,
             uq_ext: i16 = report.uq_ext,
             ud_ext: i16 = report.ud_ext,
@@ -190,26 +213,24 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
             id_sample: i16 = report.id_sample,
             uq_limited: i16 = report.uq_limited,
             ud_limited: i16 = report.ud_limited,
-            uux_sample: i16 = report.uux_sample,
-            uwy_sample: i16 = report.uwy_sample,
-            pwm_ux_sample: i16 = report.pwm_ux_sample,
-            pwm_wy_sample: i16 = report.pwm_wy_sample,
-            pwm_sv_chop: u32 = report.pwm_sv_chop,
-            pwm_bbm: u32 = report.pwm_bbm,
-            pwm_maxcnt: u32 = report.pwm_maxcnt,
-            phi_e_sample: i16 = report.phi_e_sample,
-            phi_m_sample: i16 = report.phi_m_sample,
-            encoder_before: u32 = report.encoder_before,
-            encoder_sample: u32 = report.encoder_sample,
-            encoder_after: u32 = report.encoder_after,
-            encoder_delta_sample: i32 = report.encoder_delta_sample,
-            encoder_delta_after: i32 = report.encoder_delta_after,
             adc_vm_raw: u16 = report.adc_vm_raw,
             status_flags: u32 = report.status_flags,
         );
     }
 
-    fn foci_resistance_profile(&mut self, report: ResistanceProfileReport) {
+    fn foci_voltage_step_detail_result(&mut self, report_seq: u8, report: &VoltageStepReport) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociVoltageStepDetailResult,
+            oid: u8 = report.oid,
+            report_seq: u8 = report_seq,
+            encoder_before: u32 = report.encoder_before,
+            encoder_sample: u32 = report.encoder_sample,
+            encoder_after: u32 = report.encoder_after,
+        );
+    }
+
+    fn foci_resistance_profile(&mut self, _report_seq: u8, report: ResistanceProfileReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociResistanceProfile,
@@ -226,7 +247,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_resistance_axis(&mut self, report: ResistanceAxisReport) {
+    fn foci_resistance_axis(&mut self, _report_seq: u8, report: ResistanceAxisReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociResistanceAxis,
@@ -246,7 +267,7 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
         );
     }
 
-    fn foci_resistance_run(&mut self, report: ResistanceRunReport) {
+    fn foci_resistance_run(&mut self, _report_seq: u8, report: ResistanceRunReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
             foci_firmware::ankyra::replies::FociResistanceRun,
@@ -308,7 +329,7 @@ pub(crate) async fn run_diagnostic_request<'spi>(
     match outcome {
         DiagnosticOutcome::Handled(report) => {
             let mut sink = BoardDiagnosticReplySink;
-            foci_firmware::tmc_diagnostics::emit_diagnostic_report(&mut sink, report);
+            foci_firmware::tmc_diagnostics::emit_diagnostic_report(&mut sink, channel, report);
         }
         DiagnosticOutcome::NotDiagnostic(_req) => {
             defmt::error!("diagnostic dispatcher returned non-diagnostic request");
