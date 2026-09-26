@@ -5,8 +5,7 @@
 //! All constant identifiers are SCREAMING_SNAKE_CASE; ankyra preserves
 //! them verbatim as wire names (per `pascal_to_snake` passthrough rule).
 //!
-//! Several constants below (MCU, STEPPER_STEP_BOTH_EDGE, RECEIVE_WINDOW,
-//! STATS_SUMSQ_BASE, RESERVE_PINS_*) are only consumed over the wire and
+//! `MCU` and the `RESERVE_PINS_*` constants are only consumed over the wire and
 //! are never referenced from Rust — the `#[allow(dead_code)]` suppresses
 //! the unused-const lint without masking genuinely dead code elsewhere.
 
@@ -97,7 +96,6 @@ pub const MCU: &str = "stm32h723xx";
 /// this via `get_constant_float`, which parses the wire string regardless
 /// of the declared type here, so a plain `u32` literal is sufficient --
 /// `#[klipper_constant]` does not support a float-typed constant.
-#[allow(dead_code)]
 #[klipper_constant]
 pub const ADC_MAX: u32 = 4095;
 

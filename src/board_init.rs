@@ -230,7 +230,6 @@ pub fn init_tmc_status_pins(
 }
 
 /// Current level of the channel-1 STATUS line (PA2) via the input data register.
-#[allow(dead_code)]
 pub fn status1_level() -> bool {
     embassy_stm32::pac::GPIOA.idr().read().idr(2) == embassy_stm32::pac::gpio::vals::Idr::HIGH
 }
