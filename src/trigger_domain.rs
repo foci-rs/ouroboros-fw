@@ -511,7 +511,7 @@ pub(crate) fn stop_physical_stepper_unmasked(stepper_idx: usize, reason: Stepper
 }
 
 /// Stop a physical stepper from inside an active `with_trigger_domain`
-/// closure (trigger-dispatch, shutdown). Detaches the consumer under the
+/// closure (trigger dispatch, shutdown, commissioning stimulus stop). Detaches the consumer under the
 /// mask the caller already holds and hands it off to `trigger_drain_task`
 /// via `store_pending_drain`; the queue drain itself runs later, outside
 /// this mask, with interrupts enabled. `stop_physical_stepper_unmasked`'s

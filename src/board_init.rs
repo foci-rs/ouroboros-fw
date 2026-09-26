@@ -139,13 +139,7 @@ pub fn rcc_config() -> embassy_stm32::Config {
     // with the P2 tasks either way -- P14 sits at the exact same priority as
     // usb_task and the other P2 tasks (so it cannot preempt them), and P15
     // sits strictly below P2 (so it cannot preempt them either); neither
-    // choice bounds usb_task's unyielding per-wake loop. Live homing testing
-    // on the sibling OpenFFBoard firmware correlated P14 with an intermittent
-    // TMC4671 current-loop/encoder-read disruption that did not reproduce at
-    // P15 across repeated trials; the full causal mechanism is not yet
-    // instrumented and this should be revisited with per-source
-    // DMA/USB/TIM5 activation-and-duration counters if further tuning is
-    // needed.
+    // choice bounds usb_task's unyielding per-wake loop.
     // `board_init::verify_dma_interrupt_priority` checks the programmed
     // priority stays below P3 at boot.
     config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P15;

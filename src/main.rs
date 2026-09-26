@@ -1775,7 +1775,8 @@ mod app {
     }
 
     /// P2 software task: drain step queues detached by masked trigger
-    /// stops (trigger dispatch, shutdown, reset), with interrupts enabled.
+    /// stops (trigger dispatch, shutdown, commissioning stimulus stop), with
+    /// interrupts enabled.
     #[task(priority = 2)]
     async fn trigger_drain_task(_ctx: trigger_drain_task::Context) {
         loop {

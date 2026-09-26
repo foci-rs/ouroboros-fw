@@ -165,8 +165,8 @@ pub(crate) fn stepper_stop_from_p1(channel: u8) {
 /// Apply a board-owned stepper runtime transition after commissioning dispatch.
 ///
 /// This is the single owner of channel motor arming and arm reconciliation
-/// requests; the firmware step epoch is preserved across every transition. Dispatch only decides which transition is
-/// needed.
+/// requests; the firmware step epoch is preserved across every transition.
+/// Dispatch only decides which transition is needed.
 pub(crate) fn apply_stepper_post_action(
     action: StepperPostAction,
     state: &mut DispatchState<'_>,
