@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 fn main() {
     // Copy the appropriate memory layout to OUT_DIR.
-    // Default: Katapult bootloader offset (0x08008000).
+    // Default: Katapult 128 KiB bootloader offset (0x08020000).
     // With --features dev-flash: direct flash at 0x08000000 for probe-rs.
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let memory_x = if env::var("CARGO_FEATURE_DEV_FLASH").is_ok() {
