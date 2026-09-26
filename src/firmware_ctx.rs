@@ -184,20 +184,17 @@ impl StepperResetBoard for OuroborosStepperBoard {
             return Err(CommandError::InvalidChannel(channel));
         }
         let mut stats = StepperDrainStats::ZERO;
-        let drained = crate::trigger_domain::with_consumer_locked(channel, |consumer| {
+        // `None`: a P1 drain or a pending trigger-stop hand-off owns the
+        // consumer and drains this queue later, including any `queue_step`
+        // accepted first. Klipper never sends one in that window: after a
+        // trigger it waits on the `stepper_get_position` reply, and awaiting
+        // its next USB read lets `trigger_drain_task` run first.
+        let _ = crate::trigger_domain::with_consumer_locked(channel, |consumer| {
             while let Some(m) = consumer.dequeue() {
                 stats.segments = stats.segments.saturating_add(1);
                 stats.steps = stats.steps.saturating_add(u32::from(m.count));
             }
         });
-        if drained.is_none() {
-            // The consumer is detached elsewhere: either a concurrent P1
-            // unmasked drain, or a pending trigger-stop hand-off for this
-            // channel awaiting trigger_drain_task (both P2, so this can
-            // race a not-yet-serviced hand-off). Whichever it is already
-            // owns draining this queue -- report zero additional drained
-            // work for this reset -- see the spec's recovery rule.
-        }
         Ok(stats)
     }
 
