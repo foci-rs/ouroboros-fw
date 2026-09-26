@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(dead_code)]
 
 #[cfg(test)]
 extern crate std;
@@ -39,9 +38,6 @@ mod commissioning_board_contract_tests {
     const SHARED_INTEGRAL_REPORTING: &str = include_str!(
         "../../../../shared/foci-firmware/src/commissioning/outer/velocity/integral_reporting.rs"
     );
-    const SHARED_INTEGRAL_PLAN: &str = include_str!(
-        "../../../../shared/foci-firmware/src/commissioning/outer/velocity/integral_plan.rs"
-    );
     const SHARED_COMMISSION_REPLY_MANIFEST: &str =
         include_str!("../../../../shared/foci-firmware/src/commission_dispatch/replies.rs");
     const BOARD_CARGO_TOML: &str = include_str!("../../Cargo.toml");
@@ -65,9 +61,6 @@ mod commissioning_board_contract_tests {
     const FIRMWARE_CTX: &str = include_str!("../../src/firmware_ctx.rs");
     const HOMING_WAKE: &str = include_str!("../../src/tmc_control/wake.rs");
     const MAINTENANCE: &str = include_str!("../../src/tmc_control/maintenance.rs");
-
-    const REPLY_ID_WORST_CASE_BYTES: usize = 3;
-    const KLIPPER_PAYLOAD_WITH_ID_MAX: usize = 59;
 
     fn extract_fn<'a>(text: &'a str, name: &str) -> &'a str {
         let marker = std::format!("fn {name}");
@@ -143,14 +136,6 @@ mod commissioning_board_contract_tests {
                 .unwrap_or_else(|| panic!("{method} manifest entry missing field {field}"));
             cursor += offset + field.len();
         }
-    }
-
-    fn assert_wire_budget(name: &str, field_widths: &[usize]) {
-        let encoded = field_widths.iter().sum::<usize>() + REPLY_ID_WORST_CASE_BYTES;
-        assert!(
-            encoded <= KLIPPER_PAYLOAD_WITH_ID_MAX,
-            "{name} worst-case payload with id is {encoded} bytes"
-        );
     }
 
     #[test]
@@ -1585,15 +1570,19 @@ mod commissioning_board_contract_tests {
     }
 }
 
+#[allow(dead_code)]
 #[path = "../../src/state/stepper.rs"]
 mod stepper;
 
+#[allow(dead_code)]
 #[path = "../../src/pulse_train.rs"]
 mod pulse_train;
 
+#[allow(dead_code)]
 #[path = "../../src/step_dispatch.rs"]
 mod step_dispatch;
 
+#[allow(dead_code)]
 #[path = "../../src/tmc_control/containment.rs"]
 mod containment;
 
