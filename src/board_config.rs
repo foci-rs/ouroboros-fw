@@ -79,8 +79,7 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     current_scale_ma_per_lsb: 1.272,
 };
 
-/// Per-channel feedback wiring. Every board channel is ABN-only today; see
-/// the spec for the analog-encoder-enablement follow-up.
+/// Per-channel feedback wiring. Every board channel is ABN-only today.
 pub(crate) const FEEDBACK_CONFIGS: [foci_firmware::config::FeedbackConfig;
     TMC_CHANNEL_COUNT as usize] = [foci_firmware::config::FeedbackConfig {
     phi_e_source: foci_firmware::config::FeedbackSource::Abn,
@@ -130,9 +129,8 @@ pub(crate) fn analog_pin_channel(pin: u8) -> Option<u8> {
 /// STM32H723 internal temperature sensor factory calibration, read from
 /// ST's documented system-memory addresses (RM0468 device electronic
 /// signature section). `TS_CAL1` is captured at 30C, `TS_CAL2` at 130C,
-/// both at 3.3V VDDA per the datasheet -- confirm this against the
-/// STM32H723 datasheet's "temperature sensor characteristics" table before
-/// relying on it.
+/// both at 3.3V VDDA (DS13313 Table 90), as 12-bit counts, matching
+/// Klipper's `config_stm32h723`.
 const TS_CAL1_ADDR: *const u16 = 0x1FF1_E820 as *const u16;
 const TS_CAL2_ADDR: *const u16 = 0x1FF1_E840 as *const u16;
 const TS_CAL1_TEMP_C: f32 = 30.0;
