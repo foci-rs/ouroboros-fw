@@ -139,6 +139,38 @@ mod commissioning_board_contract_tests {
     }
 
     #[test]
+    fn operator_cancel_waits_for_emergency_containment() {
+        let cancel = MAIN
+            .find(".drive_operator_cancel(")
+            .expect("loop top drives the operator cancel");
+        let gate_at = MAIN[..cancel]
+            .rfind("cancel_requested.load(Relaxed)")
+            .expect("operator cancel is gated on cancel_requested");
+        let gate_line_start = MAIN[..gate_at].rfind('\n').unwrap_or(0);
+        let gate = &MAIN[gate_line_start..gate_at];
+        assert!(
+            gate.contains("!emergency_pending"),
+            "the operator cancel's restore must not run ahead of emergency containment"
+        );
+
+        let def = MAIN[..gate_line_start]
+            .rfind("let emergency_pending =")
+            .expect("emergency_pending is computed before the cancel gate");
+        let def_stmt = &MAIN[def..def + MAIN[def..].find(';').expect("statement ends")];
+        for source in [
+            "TMC_DISABLE_SIGNAL.signaled()",
+            "FAULT_ACTIVE.load(Relaxed)",
+            "levels[0]",
+            "levels[1]",
+        ] {
+            assert!(
+                def_stmt.contains(source),
+                "emergency_pending must include {source}"
+            );
+        }
+    }
+
+    #[test]
     fn internal_usb_phy_remains_usable_during_cpu_sleep() {
         let usb_clock = extract_fn(BOARD_INIT, "enable_usb_clock");
         assert!(

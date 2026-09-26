@@ -616,8 +616,12 @@ mod app {
                 }
             });
 
+            let emergency_pending = TMC_DISABLE_SIGNAL.signaled()
+                || FAULT_ACTIVE.load(Relaxed)
+                || levels[0]
+                || levels[1];
             per_channel!(|ch, idx| {
-                if tmc_state(ch).cancel_requested.load(Relaxed) {
+                if !emergency_pending && tmc_state(ch).cancel_requested.load(Relaxed) {
                     match device_or_invalid(mux, ch) {
                         ChannelDevice::Device(device) => {
                             let mut tmc = tmc_driver(device);
