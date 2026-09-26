@@ -2,8 +2,8 @@
 //!
 //! Items that are naturally `mod app`-scoped but do not need to live
 //! next to the RTIC task graph are collected here so `main.rs` stays
-//! focused on the RTIC wiring. The `Pins` wire enumeration moved to
-//! `crate::ankyra::enumerations` during the ankyra migration (Task 8a).
+//! focused on the RTIC wiring. The `Pins` wire enumeration lives in
+//! `crate::ankyra::enumerations`.
 
 use embassy_stm32::mode::Async as AsyncMode;
 use embassy_stm32::spi::Spi;

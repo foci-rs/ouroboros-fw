@@ -1,9 +1,7 @@
 //! Lifecycle helpers: Klipper clock reads and Katapult bootloader
-//! reset. Promoted from `mod app` in `main.rs` by Task 8c so handlers
-//! and the RTIC task graph can share a single implementation.
+//! reset, shared by handlers and the RTIC task graph.
 //!
-//! The shutdown-entry function (`enter_shutdown`) was split in Task 18:
-//! the board-agnostic Klipper-level transition lives in
+//! Shutdown entry is split in two: the board-agnostic Klipper-level transition lives in
 //! `foci_firmware::helpers::lifecycle::enter_shutdown`; the
 //! trigger-domain quiesce and post-quiesce atomics live in
 //! `FirmwareCtx`'s `ShutdownRecovery::enter_shutdown` impl in

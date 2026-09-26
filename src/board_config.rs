@@ -107,7 +107,7 @@ pub(crate) type ExternalAdcInstance = embassy_stm32::peripherals::ADC1;
 /// (internal temperature sensor), `VREFINT`, and `VBAT/4` are wired only to
 /// `ADC3 VINP[17]`, `VINP[18]`, and `VINP[16]` respectively -- these internal
 /// channels are not present on ADC1/ADC2 at all. This differs from
-/// `ExternalAdcInstance` above, so Task 8 must construct and hold both ADC1
+/// `ExternalAdcInstance` above, so init must construct and hold both ADC1
 /// and ADC3 peripheral instances rather than sharing one.
 pub(crate) type InternalTempAdcInstance = embassy_stm32::peripherals::ADC3;
 

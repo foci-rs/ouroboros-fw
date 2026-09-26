@@ -1,7 +1,7 @@
 //! Protocol-shape items and dispatch surfaces for the ankyra Klipper
 //! protocol framework.
 //!
-//! After Task 24, owns only:
+//! Owns only:
 //! - `constants` — board-specific items: `CLOCK_FREQ`, `MCU`, `RESERVE_PINS_*`.
 //!   Firmware-wide constants are accessed directly from `foci_firmware::ankyra::constants`.
 //! - `enumerations::Pins` — the physical pin set depends on the MCU / PCB.

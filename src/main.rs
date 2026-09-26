@@ -170,11 +170,6 @@ mod app {
     // Declared in `crate::ankyra::constants` and registered into the data
     // dictionary via the `constants: [...]` list in `crate::ankyra::provider`.
 
-    // ---- TMC4671 register access commands ----
-    // Ported to `crate::ankyra::handlers::tmc` by Task 8k.
-    // FOCI commissioning/tune/trace commands ported to
-    // `crate::ankyra::handlers::foci` by Task 8l.
-
     // ---- RTIC resources ----
 
     #[shared]

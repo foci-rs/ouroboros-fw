@@ -1,9 +1,7 @@
 //! Trsync / endstop helpers: raw-PAC GPIO configuration and sampling
-//! for the Klipper pin enumeration. Promoted from `mod app` in
-//! `main.rs` by Task 8c so both the trsync/endstop handlers and the
-//! TIM5 CC1 ISR can share a single implementation. This file
-//! consolidates the callsite paths so board GPIO access happens in
-//! one place.
+//! for the Klipper pin enumeration, shared by the trsync/endstop
+//! handlers and the TIM5 CC1 ISR so board GPIO access happens in one
+//! place.
 
 /// Total number of GPIO ports exposed in the pin enumeration
 /// (`PA`..`PE`).

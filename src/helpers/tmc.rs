@@ -1,7 +1,6 @@
 //! TMC4671 helpers: request enqueue to the `tmc_control` task and the
-//! inner half of the `foci_tune` handler. Promoted from `mod app` in
-//! `main.rs` by Task 8c so handlers and background reply emitters
-//! share a single implementation.
+//! inner half of the `foci_tune` handler, shared by handlers and
+//! background reply emitters.
 
 use foci_firmware::context::tmc::{self as tmc_context, TmcRequestQueueBoard};
 use foci_firmware::tmc::TmcRequest;

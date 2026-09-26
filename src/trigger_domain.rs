@@ -2,10 +2,9 @@
 //! between the step-queue producer (P2 context), the step-timer ISR
 //! (P3 context), and the trsync/endstop subsystem.
 //!
-//! Promoted from `mod app` in Task 8b2 — previously declared inline
-//! alongside the RTIC state it coordinates. Moving it here alongside
-//! the subsystem `state/*` modules makes the coordination surface
-//! inspectable independently of RTIC's macro expansion.
+//! Lives outside `mod app`, alongside the subsystem `state/*` modules, so
+//! the coordination surface is inspectable independently of RTIC's macro
+//! expansion.
 
 use core::ops::{Deref, DerefMut};
 

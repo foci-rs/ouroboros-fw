@@ -2,8 +2,7 @@
 //! RTIC task graph.
 //!
 //! Each submodule collects small free functions operating on the
-//! corresponding `state::*` statics. Task 8c–8d populate these from
-//! `mod app` in main.rs.
+//! corresponding `state::*` statics.
 
 #[cfg(feature = "dev")]
 pub mod dev;

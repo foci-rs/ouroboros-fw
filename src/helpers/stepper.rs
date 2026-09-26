@@ -1,6 +1,5 @@
-//! Stepper helpers: TIM5 CC1 arming and P1-safe physical stepper halt.
-//! Promoted from `mod app` in `main.rs` by Task 8c so handlers and the
-//! step-timer ISR share a single implementation.
+//! Stepper helpers: TIM5 CC1 arming and P1-safe physical stepper halt,
+//! shared by handlers and the step-timer ISR.
 
 use crate::trigger_domain::stop_physical_stepper_unmasked;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
