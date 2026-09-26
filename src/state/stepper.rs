@@ -8,7 +8,7 @@ use foci_klipper::pulse_mapper::PulseMapperConfig;
 use foci_klipper::stepper::{HardwareStepper, LogicalStepEvent, MotionScaleConfigError};
 
 /// Ouroboros TIM5 input clock in hertz.
-pub(crate) const STEP_TIMER_HZ: u32 = 260_000_000;
+pub(crate) const STEP_TIMER_HZ: u32 = crate::ankyra::constants::CLOCK_FREQ;
 
 /// Eleven TIM5 ticks provide the 40 ns minimum high/low pulse phase.
 pub(crate) const STEP_HALF_PERIOD_TICKS: u32 = 11;
