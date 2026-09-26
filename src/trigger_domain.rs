@@ -65,7 +65,7 @@ fn attach_consumer(channel: u8, consumer: Consumer<'static, StepMove>) {
 /// zero *additional* drained work in that case: whichever in-flight
 /// drain currently owns the consumer already owns draining this queue.
 ///
-/// Used by [`crate::firmware_ctx::OuroborosStepperBoard::drain_step_queue`]
+/// Used by `OuroborosStepperBoard::drain_step_queue`
 /// (the stepper-reset command path) -- unrelated to
 /// `stop_physical_stepper_inner`'s trigger-dispatch stop path, which now
 /// hands off via `store_pending_drain` instead of calling this.
