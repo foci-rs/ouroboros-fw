@@ -74,9 +74,8 @@ pub(crate) fn handle_commission_wait_reject(req: TmcRequest) -> TmcControlReques
 /// Apply runtime actions emitted before SPI-heavy request handling.
 ///
 /// Returns [`TmcPreRequestDisposition::RequestHandled`] if a terminal action was
-/// observed, or [`TmcPreRequestDisposition::RunDiagnostic`] if an active diagnostic
-/// should run in the board main loop. Stepper-only action lists apply their
-/// non-terminal effects and return [`TmcPreRequestDisposition::ContinueRequest`].
+/// observed. Stepper-only action lists apply their non-terminal effects and
+/// return [`TmcPreRequestDisposition::ContinueRequest`].
 pub(crate) fn apply_pre_request_actions<F>(
     channel: u8,
     actions: BoardActions,
@@ -124,9 +123,6 @@ where
         BoardAction::Stepper(StepperAction::ApplyPostAction(_)) => {
             defmt::warn!("TMC runtime post-action requires dispatch state; handled inline");
             None
-        }
-        BoardAction::DelegatedDiagnostic(delegated) => {
-            Some(TmcPreRequestDisposition::RunDiagnostic(delegated.request))
         }
     }
 }

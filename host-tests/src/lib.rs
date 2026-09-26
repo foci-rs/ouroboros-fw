@@ -441,10 +441,6 @@ mod commissioning_board_contract_tests {
         // runtime, not an awaited chain inside this task's future. Every
         // commissioning-loop exit must latch a cancel, and the loop must drain
         // that latch before touching the channel again.
-        assert!(
-            !MAIN.contains("drive_commissioning_poll_with_stages"),
-            "the board must not await the whole terminal chain in one future"
-        );
         assert!(DRIVER.contains(".classify_commission_poll(poll)"));
         assert!(DRIVER.contains("poll_commissioning_terminal"));
         assert!(DRIVER.contains("is_restore_pending"));

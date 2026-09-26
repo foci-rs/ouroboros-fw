@@ -126,8 +126,7 @@ mod app {
                 | BoardAction::Stepper(StepperAction::ArmCheck { .. })
                 | BoardAction::Stepper(StepperAction::ApplyPostAction(_))
                 | BoardAction::Shutdown(_)
-                | BoardAction::SignalEmergencyDisable
-                | BoardAction::DelegatedDiagnostic(_) => {}
+                | BoardAction::SignalEmergencyDisable => {}
             }
         }
     }
