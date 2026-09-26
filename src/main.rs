@@ -1956,10 +1956,7 @@ mod app {
                         }
                         SchedulerEventKind::TrSyncExpire(trsync_idx) => {
                             // The scheduler event already confirms the deadline
-                            // has passed. Call td.trigger() directly — do NOT call
-                            // check_timeout() which internally triggers the
-                            // TrSyncRuntime, causing td.trigger() to see
-                            // AlreadyTriggered and skip stop signal dispatch.
+                            // has passed, so trigger the domain directly.
                             let oid = td
                                 .trsync_by_oid
                                 .iter()
