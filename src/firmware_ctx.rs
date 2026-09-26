@@ -112,7 +112,9 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         channel: u8,
         move_: foci_klipper::stepper::StepMove,
     ) -> Result<usize, usize> {
-        // SAFETY: P2 owns both the direction state and the queue producer.
+        // SAFETY: callers run at P2 or inside `with_trigger_domain`, either of
+        // which excludes every other user of the direction state and the
+        // queue producer.
         let Some((stepper, producer)) = (unsafe { p2_stepper(channel) })
             .zip(unsafe { crate::state::stepper::step_queue_producer(channel) })
         else {
@@ -125,7 +127,7 @@ impl StepperQueueBoard for OuroborosStepperBoard {
             return Err(producer.len());
         }
         let prepared = stepper.prepare_move(move_);
-        // P2 is the only producer, so a consumer can only create more space
+        // No other producer can run here, so a consumer can only create more space
         // after the full check above -- enqueue therefore cannot fail here.
         producer.enqueue(prepared).map_err(|_| producer.len())?;
         Ok(producer.len())

@@ -70,7 +70,8 @@ pub(crate) unsafe fn init_step_queues() {
 /// out-of-range channel or if `init_step_queues` has not yet run.
 ///
 /// # Safety
-/// Callable only from P2 (the sole owner of `STEP_QUEUE_PRODUCERS`).
+/// Callable only from P2, or from P1 inside `with_trigger_domain` (the
+/// commissioning stimulus): either context excludes every other producer.
 pub(crate) unsafe fn step_queue_producer(
     channel: u8,
 ) -> Option<&'static mut foci_klipper::step_queue::Producer<'static, foci_klipper::stepper::StepMove>>
@@ -79,8 +80,8 @@ pub(crate) unsafe fn step_queue_producer(
     if idx >= STEPPER_CHANNEL_COUNT {
         return None;
     }
-    // SAFETY: idx was bounds-checked above; caller guarantees P2-only
-    // access; `init_step_queues` has run by the time any P2 command
+    // SAFETY: idx was bounds-checked above; caller guarantees exclusive
+    // producer access; `init_step_queues` has run by the time any P2 command
     // handler executes. `addr_of_mut!` avoids the edition-2024
     // `static_mut_refs` lint the same way as `init_step_queues` above.
     let base = core::ptr::addr_of_mut!(STEP_QUEUE_PRODUCERS).cast::<Option<
@@ -89,8 +90,9 @@ pub(crate) unsafe fn step_queue_producer(
     (unsafe { &mut *base.add(idx) }).as_mut()
 }
 
-/// P2-local HardwareStepper state (direction tracking, prepare_move).
-/// Only accessed from usb_task (P2) command handlers.
+/// Producer-side HardwareStepper state (direction tracking, prepare_move).
+/// Accessed from usb_task (P2) command handlers, and from the P1
+/// commissioning stimulus inside `with_trigger_domain`.
 pub(crate) static mut P2_STEPPERS: [foci_klipper::stepper::HardwareStepper; STEPPER_CHANNEL_COUNT] =
     [const { foci_klipper::stepper::HardwareStepper::new() }; STEPPER_CHANNEL_COUNT];
 
