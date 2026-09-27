@@ -92,13 +92,6 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         }
     }
 
-    fn queue_was_empty(&self, channel: u8) -> Result<bool, CommandError> {
-        if channel as usize >= crate::state::stepper::STEPPER_CHANNEL_COUNT {
-            return Err(CommandError::InvalidChannel(channel));
-        }
-        Ok(crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].is_empty())
-    }
-
     fn motion_scale_configured(&self, channel: u8) -> Result<bool, CommandError> {
         self.queue_stepper_index(channel)?;
         Ok(self
