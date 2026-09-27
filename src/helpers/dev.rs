@@ -5,6 +5,10 @@
 #![cfg(feature = "dev")]
 
 use embassy_stm32::gpio::Output;
+use foci_firmware::tmc_register_values::{
+    MOTION_STOPPED, MOTION_TORQUE_ADVANCED_PI, PWM_CHOP_CENTERED_FOC, PWM_CHOP_OFF,
+    STEPPER_MOTOR_TYPE_N_POLE_PAIRS, adc_i0_scale_offset, adc_i1_scale_offset,
+};
 use foci_tmc4671::current_limit::PidTorqueFluxLimit;
 use foci_tmc4671::registers::*;
 use foci_tmc4671::spi::Tmc4671Spi;
@@ -55,7 +59,9 @@ pub(crate) async fn tmc_enter_openloop(
 
     // 1. SAFETY FIRST: stop motor, disable outputs, set voltage limit
     enable_pin.set_low();
-    let _ = tmc.write_register(MODE_RAMP_MODE_MOTION, 0).await;
+    let _ = tmc
+        .write_register(MODE_RAMP_MODE_MOTION, MOTION_STOPPED)
+        .await;
     let _ = tmc.write_register(PIDOUT_UQ_UD_LIMITS, 1024).await;
     let _ = tmc.write_register(PID_TORQUE_FLUX_TARGET, 0).await;
     let _ = tmc.write_register(UQ_UD_EXT, 0).await;
@@ -68,7 +74,7 @@ pub(crate) async fn tmc_enter_openloop(
     let _ = tmc
         .write_register(PWM_BBM_H_BBM_L, TMC_CONFIG.bbm_register())
         .await;
-    if tmc.write_register(PWM_SV_CHOP, 0).await.is_err() {
+    if tmc.write_register(PWM_SV_CHOP, PWM_CHOP_OFF).await.is_err() {
         defmt::error!("open-loop init: PWM_SV_CHOP write failed");
         return;
     }
@@ -83,15 +89,22 @@ pub(crate) async fn tmc_enter_openloop(
 
     // 4. Motor type: 2-phase stepper (type 2), 50 pole pairs
     let _ = tmc
-        .write_register(MOTOR_TYPE_N_POLE_PAIRS, (2 << 16) | 50)
+        .write_register(MOTOR_TYPE_N_POLE_PAIRS, STEPPER_MOTOR_TYPE_N_POLE_PAIRS)
         .await;
 
     // 4b. Velocity meter: PWM-synchronized for advanced PI stability
-    let _ = tmc.write_register(VELOCITY_SELECTION, (1 << 8) | 0).await;
+    let velocity_selection = VelocitySelection::new().with_velocity_meter_selection(1);
+    let _ = tmc
+        .write_register(VELOCITY_SELECTION, velocity_selection.into_bits())
+        .await;
 
     // 5. ADC offset calibration (PWM_CHOP=0, no current flows)
-    let _ = tmc.write_register(ADC_I0_SCALE_OFFSET, 256 << 16).await;
-    let _ = tmc.write_register(ADC_I1_SCALE_OFFSET, 256 << 16).await;
+    let _ = tmc
+        .write_register(ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(0))
+        .await;
+    let _ = tmc
+        .write_register(ADC_I1_SCALE_OFFSET, adc_i1_scale_offset(0))
+        .await;
     enable_pin.set_high();
     Mono::delay(250_u64.millis()).await;
 
@@ -118,15 +131,15 @@ pub(crate) async fn tmc_enter_openloop(
     }
 
     let _ = tmc
-        .write_register(ADC_I0_SCALE_OFFSET, (256 << 16) | offset_i0 as u32)
+        .write_register(ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(offset_i0))
         .await;
     let _ = tmc
-        .write_register(ADC_I1_SCALE_OFFSET, (256 << 16) | offset_i1 as u32)
+        .write_register(ADC_I1_SCALE_OFFSET, adc_i1_scale_offset(offset_i1))
         .await;
     defmt::info!("ADC calibrated: I0={}, I1={}", offset_i0, offset_i1);
 
     // 6. Re-enable PWM chopping
-    let _ = tmc.write_register(PWM_SV_CHOP, 7).await;
+    let _ = tmc.write_register(PWM_SV_CHOP, PWM_CHOP_CENTERED_FOC).await;
 
     // --- Open-loop configuration ---
 
@@ -162,8 +175,9 @@ pub(crate) async fn tmc_enter_openloop(
     let _ = tmc.write_register(PID_TORQUE_FLUX_TARGET, target_reg).await;
 
     // 12. Motion mode: TORQUE mode with current regulation
-    // MODE_PID_TYPE=1 (bit 31), MODE_MOTION=1 (torque)
-    let _ = tmc.write_register(MODE_RAMP_MODE_MOTION, 0x8000_0001).await;
+    let _ = tmc
+        .write_register(MODE_RAMP_MODE_MOTION, MOTION_TORQUE_ADVANCED_PI)
+        .await;
 
     // Verify critical registers after enabling torque mode
     let v_limit_final = tmc.read_register(PIDOUT_UQ_UD_LIMITS).await.unwrap_or(0);
