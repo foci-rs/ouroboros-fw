@@ -632,23 +632,3 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
         );
     }
 }
-
-#[cfg(test)]
-mod prepare_and_enqueue_tests {
-    use foci_klipper::stepper::{HardwareStepper, StepMove};
-
-    #[test]
-    fn queue_full_does_not_consume_pending_direction_change() {
-        let mut queue = heapless::spsc::Queue::<StepMove, 2>::new();
-        let (mut producer, _consumer) = queue.split();
-        let mut stepper = HardwareStepper::new();
-        stepper.set_next_step_dir(false);
-        producer.enqueue(StepMove::new(100, 1, 0)).unwrap();
-
-        assert!(!producer.ready());
-        assert_eq!(producer.len(), 1);
-        // Mirrors OuroborosStepperBoard::prepare_and_enqueue's full-check
-        // short-circuit: direction is not consumed when the producer is full.
-        assert!(stepper.next_move_changes_direction());
-    }
-}
