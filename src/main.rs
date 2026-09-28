@@ -678,7 +678,7 @@ mod app {
                                 let mut tmc = tmc_driver(device);
                                 let mut backend =
                                     ouroboros_backend(ch, &mut tmc, enable_pin(enable_pins, ch));
-                                complete &= foci_firmware::tmc_control::lifecycle::apply_shutdown_safe_state(
+                                foci_firmware::tmc_control::lifecycle::apply_shutdown_safe_state(
                                     &mut drivers[idx].runtime,
                                     &mut backend,
                                     tmc_state(ch),
@@ -1218,16 +1218,6 @@ mod app {
                                 )
                                 .await,
                             );
-                            if trace_tick.phase_advance_due {
-                                crate::usb_trace::emit_phase_advance(
-                                    ch,
-                                    trace_tick.phase_advance_counts,
-                                    trace_tick.phase_advance_flags,
-                                    refs.tmc.phase_advance_gain_ppm.load(Relaxed),
-                                    refs.tmc.phase_advance_max_counts.load(Relaxed),
-                                    refs.tmc.phase_advance_deadband.load(Relaxed),
-                                );
-                            }
                             crate::usb_trace::emit_status_frames(
                                 ch,
                                 &mut tmc,

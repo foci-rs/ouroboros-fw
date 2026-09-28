@@ -649,44 +649,6 @@ where
     }
 }
 
-pub(crate) fn emit_phase_advance(
-    channel: u8,
-    phase_advance_counts: i16,
-    phase_advance_flags: u8,
-    gain_ppm: i32,
-    max_counts: u16,
-    deadband: u16,
-) {
-    use foci_firmware::trace::stream::*;
-
-    if !is_configured() {
-        return;
-    }
-
-    let sample = PhaseAdvanceSample {
-        phase_advance_counts,
-        phase_advance_flags,
-        reserved: 0,
-        gain_ppm,
-        max_counts,
-        deadband,
-    };
-    let mut payload = [0u8; PHASE_ADVANCE_PAYLOAD_LEN];
-    encode_phase_advance_payload(&sample, &mut payload);
-    let mut frame = FrameBuf::new();
-    frame.write_header(header(
-        FRAME_TYPE_PHASE_ADVANCE,
-        PHASE_ADVANCE_PAYLOAD_LEN,
-        SOURCE_KIND_FOCI,
-        channel,
-        motion_flags(),
-    ));
-    frame
-        .payload_mut(PHASE_ADVANCE_PAYLOAD_LEN)
-        .copy_from_slice(&payload);
-    enqueue_frame(frame);
-}
-
 /// Enqueue one characterization-only raw velocity observation.
 pub(crate) fn request_velocity_observation(
     channel: u8,
