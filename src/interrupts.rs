@@ -31,7 +31,6 @@ pub fn tmc_status_irq_body(
         (),
     >,
 ) {
-    // Immediately quiesce step generation (same P3, atomic).
     fault_active.store(true, core::sync::atomic::Ordering::Relaxed);
     #[cfg(feature = "trace")]
     crate::usb_trace::record_status_interrupt();

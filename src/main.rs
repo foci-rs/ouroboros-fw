@@ -3,11 +3,8 @@
 
 use defmt_rtt as _;
 
-// Probe-free panic/HardFault capture replaces panic-probe: it persists the
-// fault into no-init CCMRAM and reports it to the host on the next connect.
 mod panic_capture;
 
-// PAC shim for RTIC + embassy-stm32
 pub mod pac {
     pub use embassy_stm32::Peripherals;
     pub use embassy_stm32::pac::Interrupt as interrupt;
@@ -80,16 +77,6 @@ mod app {
         DMA1_STREAM1 => embassy_stm32::dma::InterruptHandler<peripherals::DMA1_CH1>;
     });
 
-    // TIM2-backed monotonic at 1 MHz (1 us resolution).
-    //
-    // Previously used SysTick at 1 kHz, but the commissioning engine's
-    // tight sample loops in Phase 5 (R/L measurement) rely on sub-ms
-    // deadlines. Using a TIM2-backed monotonic gives true u64 us
-    // precision without the 51-second wraparound bug that affected
-    // the old read_tim5()/84 path.
-    //
-    // The rtic-monotonics crate handles the hardware timer overflow
-    // automatically via an extended u64 counter in a TimerQueueBackend.
     stm32_tim2_monotonic!(Mono, 1_000_000);
 
     static USB_PUMP_COUNTERS: foci_firmware::usb_pump::UsbPumpCounters =
@@ -161,17 +148,6 @@ mod app {
         );
     }
 
-    // TriggerDomain, PHYSICAL_STEPPER_INDICES, TRIGGER_TIMER_MIN_LEAD_TICKS,
-    // TRIGGER_DOMAIN, with_trigger_domain(), stop_physical_stepper_unmasked(),
-    // and stop_physical_stepper_masked() live in crate::trigger_domain and
-    // are re-imported below.
-
-    // ---- Klipper constants ----
-    // Declared in `crate::ankyra::constants` and registered into the data
-    // dictionary via the `constants: [...]` list in `crate::ankyra::provider`.
-
-    // ---- RTIC resources ----
-
     #[shared]
     struct Shared {
         app_state: State,
@@ -211,9 +187,6 @@ mod app {
         foci_firmware::diagnostic::recover_last_boot_breakaway_breadcrumb();
         defmt::info!("FOCI Ouroboros starting");
 
-        // Recover any panic/HardFault the previous boot persisted to no-init
-        // CCMRAM, before anything else can overwrite it, and hand it to the
-        // diagnostic layer so the connect-time dump reports it to the host.
         if let Some(record) = crate::panic_capture::recover() {
             defmt::error!(
                 "recovered last-boot fault: kind={} line={} pc={:#010x}",
@@ -236,14 +209,6 @@ mod app {
         crate::board_init::verify_dma_interrupt_priority();
         crate::board_init::disable_debug_clock_during_sleep();
 
-        // One-time reset-cause diagnostic. RCC_RSR latches why the MCU last
-        // reset and holds the flags until RMVF clears them. Log the cause by
-        // name, then clear so the next reset's cause is unambiguous. A brown-out
-        // (BORRSTF) or power-on (PORRSTF) flag after a silent communication loss
-        // is the decisive undervoltage evidence; IWDG1RSTF, SFTRSTF, and PINRSTF
-        // distinguish the watchdog, a software reset, and the reset pin. The H7
-        // metapac names the independent-watchdog flag `iwdg1rstf` and the pin
-        // flag `pinrstf` (vs. F4's `wdgrstf`/`padrstf`).
         {
             let rsr = embassy_stm32::pac::RCC.rsr().read();
             defmt::info!(
@@ -265,14 +230,8 @@ mod app {
         crate::board_init::init_stepdir_gpio();
         defmt::info!("TIM5 enabled for Klipper clock @ 260 MHz, STEP/DIR GPIO configured");
 
-        // TIM2 clock: 260 MHz (APB1 timer clock, same bus as TIM5). At the
-        // 1 MHz target monotonic rate, the prescaler is 260 (integer divisor).
-        // rtic-monotonics enables and configures TIM2 internally; no PAC
-        // setup is required beyond passing the timer clock frequency.
         Mono::start(260_000_000);
 
-        // TMC4671 ENABLE pins are active high and start disabled:
-        // channel 0 = PD6, channel 1 = PD1.
         let tmc_enable = [
             Output::new(p.PD6, Level::Low, Speed::Low),
             Output::new(p.PD1, Level::Low, Speed::Low),
@@ -281,12 +240,10 @@ mod app {
         let tmc_status0 = crate::board_init::init_tmc_status_pins(p.PE2, p.PA2);
         crate::board_init::init_tim15_status_capture();
 
-        // IWDG: 10-second timeout, kicked by the stats task every 5 seconds.
         let mut wdg = IndependentWatchdog::new(p.IWDG1, 10_000_000);
         wdg.unleash();
         defmt::info!("IWDG started: 10s timeout");
 
-        // SPI2: TMC4671 communication at 8 MHz, Mode 3 (CPOL=1, CPHA=1)
         let mut spi_config = embassy_stm32::spi::Config::default();
         spi_config.mode = embassy_stm32::spi::Mode {
             polarity: embassy_stm32::spi::Polarity::IdleHigh,
@@ -295,19 +252,13 @@ mod app {
         spi_config.frequency = embassy_stm32::time::Hertz(8_000_000);
 
         let spi2 = Spi::new(
-            p.SPI2, p.PB13,     // SCK
-            p.PB15,     // MOSI
-            p.PB14,     // MISO
-            p.DMA1_CH0, // TX DMA
-            p.DMA1_CH1, // RX DMA
-            Irqs, spi_config,
+            p.SPI2, p.PB13, p.PB15, p.PB14, p.DMA1_CH0, p.DMA1_CH1, Irqs, spi_config,
         );
 
         let spi_cs0 = Output::new(p.PD0, Level::High, Speed::VeryHigh);
         let spi_cs1 = Output::new(p.PD2, Level::High, Speed::VeryHigh);
         let tmc_mux = crate::tmc_mux::TmcSpiMux::new(spi2, spi_cs0, spi_cs1);
 
-        // TMC register request channel
         let (tmc_tx, tmc_rx) = ctx.local.tmc_channel.split();
         critical_section::with(|cs| {
             TMC_CONTROL_SENDER.borrow(cs).replace(Some(tmc_tx));
@@ -350,7 +301,6 @@ mod app {
 
         crate::board_init::enable_dwt_cyccnt();
 
-        // Initialize TriggerDomain
         // SAFETY: init runs once before any task starts. No concurrent access.
         unsafe {
             core::ptr::addr_of_mut!(TRIGGER_DOMAIN)
@@ -391,7 +341,6 @@ mod app {
         let th1_pin = p.PC5;
         let mcu_temp_calibration = crate::board_config::read_mcu_temp_calibration();
 
-        // Spawn tasks
         stepper_reconcile::spawn().expect("stepper reconciliation worker must spawn exactly once");
         trigger_drain_task::spawn().expect("trigger drain worker must spawn exactly once");
         tmc_control::spawn().expect("tmc_control task must spawn exactly once");
@@ -538,12 +487,6 @@ mod app {
             };
         }
 
-        // Expand `$body` twice as two separate block scopes, channel 0 then
-        // channel 1. Each expansion binds `$ch: u8` and `$idx: usize`; every
-        // borrow taken inside ends with its block, so the second expansion
-        // starts with `drivers`, `mux`, and `enable_pins` free again. Labels
-        // and `continue` inside `$body` refer to the caller's loop because the
-        // tokens come from the call site.
         macro_rules! per_channel {
             (|$ch:ident, $idx:ident| $body:block) => {{
                 {
@@ -818,9 +761,6 @@ mod app {
                     }
                 });
 
-                // No await between this re-poll and the store below: a fault
-                // signalled since entry must still be visible here, with
-                // FAULT_ACTIVE itself as the latch being cleared.
                 let levels = status_levels(status_pin0);
                 tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
                 tmc_state(1).status_pin_asserted.store(levels[1], Relaxed);
@@ -869,7 +809,7 @@ mod app {
                             exit,
                             crate::tmc_control::containment::CommissionWaitExit::Cancelled
                         ) {
-                            drivers[idx].runtime.request_restore_cancel(); // wait-exit site (expands twice)
+                            drivers[idx].runtime.request_restore_cancel();
                         }
                         if matches!(
                             exit,
@@ -969,7 +909,7 @@ mod app {
                             ) {
                                 emit_invalid_channel_diagnostic(req.channel);
                                 shutdown!("Invalid TMC channel");
-                                drivers[idx].runtime.request_restore_cancel(); // invalid-route site
+                                drivers[idx].runtime.request_restore_cancel();
                                 continue 'control_loop;
                             }
                             enable_pin(enable_pins, channel).set_low();
@@ -1028,7 +968,7 @@ mod app {
                             scheduler.set_commission_due(channel, Some(now_us()));
                         }
                         if commissioning {
-                            drivers[idx].runtime.request_restore_cancel(); // in-commissioning cancel site
+                            drivers[idx].runtime.request_restore_cancel();
                             continue 'control_loop;
                         }
                         if matches!(outcome.tail, TmcControlRequestTail::SkipTickTail) {
@@ -1680,8 +1620,6 @@ mod app {
             return StepDispatchOutcome::Fatal;
         }
 
-        // STEP is low before mapper state, pulse counts, or the logical
-        // execution become observable outside this P3 train.
         let now = embassy_stm32::pac::TIM5.cnt().read();
         crate::state::stepper::publish_logical_event(channel, stepper, event);
         let logical_delta = if event.direction { 1 } else { -1 };
@@ -1846,14 +1784,12 @@ mod app {
             return;
         }
 
-        // --- CC2: trigger scheduler (process before CC1) ---
         if cc2_pending {
             clear_tim5_compare_flag(1);
             let mut need_report = false;
             with_trigger_domain(|td| {
                 use foci_klipper::scheduler::SchedulerEventKind;
                 let now = read_tim5();
-                // Collect (kind, wake_clock) pairs before mutating scheduler
                 let mut due_events: heapless::Vec<(SchedulerEventKind, u32), 13> =
                     heapless::Vec::new();
                 while let Some(slot) = td.state_mut().scheduler.pop_due_slot(now) {
@@ -1891,7 +1827,6 @@ mod app {
 
                             match result {
                                 EndstopSampleResult::EnterOversamplingNow => {
-                                    // Second GPIO read (C double-read)
                                     match td.state_mut().endstops[endstop_idx]
                                         .oversample(read_pin(), wake_clock)
                                     {
@@ -1928,8 +1863,6 @@ mod app {
                             }
                         }
                         SchedulerEventKind::TrSyncExpire(trsync_idx) => {
-                            // The scheduler event already confirms the deadline
-                            // has passed, so trigger the domain directly.
                             let oid = td
                                 .state()
                                 .trsync_by_oid
@@ -1954,7 +1887,6 @@ mod app {
                             {
                                 td.state_mut().trsync[trsync_idx].set_liveness_report(oid, now);
                                 need_report = true;
-                                // Advance report_clock by report_ticks (stable cadence)
                                 let report_ticks = td.state().trsync[trsync_idx].report_ticks();
                                 if report_ticks > 0 {
                                     let next_report = td.state().trsync[trsync_idx]
@@ -1968,7 +1900,6 @@ mod app {
                                         },
                                     );
                                 }
-                                // After trigger, no more liveness reports — don't reschedule
                             }
                         }
                     }
@@ -1981,9 +1912,6 @@ mod app {
             }
         }
 
-        // --- CC1: step timer ---
-        // Skip CC1 if the flag is not set, or if CC2 trigger processing
-        // disabled CC1 because no channel remains active.
         if !tim5.sr().read().ccif(0) || !tim5.dier().read().ccie(0) {
             return;
         }

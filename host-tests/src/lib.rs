@@ -115,14 +115,6 @@ mod commissioning_board_contract_tests {
             .find(&std::format!("name: {method}"))
             .unwrap_or_else(|| panic!("missing manifest entry {method}"));
         let after = &SHARED_COMMISSION_REPLY_MANIFEST[start..];
-        // Bound the search to this one entry: many entries share common
-        // field names (`oid: u8` alone appears in most of them), so without
-        // an upper bound a missing/misordered field in this entry could be
-        // silently satisfied by a *later* entry's matching text instead --
-        // the check would pass while proving nothing about this method.
-        // `after` starts at "name: <method>", i.e. strictly after this
-        // entry's own opening "entry {", so the next occurrence of
-        // "entry {" (if any) is the following entry's, never this one's.
         let entry_end = after.find("entry {").unwrap_or(after.len());
         let body = &after[..entry_end];
         assert!(
@@ -470,10 +462,6 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn board_polls_the_terminal_restore_and_cancels_it_on_every_exit() {
-        // The per-channel terminal restore is a poll-driven machine on each
-        // runtime, not an awaited chain inside this task's future. Every
-        // commissioning-loop exit must latch a cancel, and the loop must drain
-        // that latch before touching the channel again.
         assert!(DRIVER.contains(".classify_commission_poll(poll)"));
         assert!(DRIVER.contains("poll_commissioning_terminal"));
         assert!(DRIVER.contains("is_restore_pending"));
@@ -1030,18 +1018,6 @@ mod commissioning_board_contract_tests {
 
     #[test]
     fn locked_stop_still_resets_gpio_state_unconditionally() {
-        // Regression guard for a defect caught in this plan's own cross-agent
-        // review: an early `return` *inside* the LockedInPlace arm would skip
-        // direction/STEP GPIO reset, corrupting the next segment's pulse
-        // parity. This must check from the start of the match (so it covers
-        // the match arms themselves, where the original defect actually
-        // lived) through the end of the function -- an earlier draft of this
-        // guard checked only after the match's closing brace, which does not
-        // cover a `return` inside an arm and would not have caught the
-        // defect it was written to guard against. A legitimate early
-        // `return` exists before the match (the
-        // `!PHYSICAL_STEPPER_INDICES.contains(...)` bounds check at the top
-        // of the function) and must stay outside this checked region.
         let fn_open_marker = TRIGGER_DOMAIN
             .find("fn stop_physical_stepper_inner(")
             .expect("trigger_domain.rs must define stop_physical_stepper_inner");
@@ -1057,10 +1033,6 @@ mod commissioning_board_contract_tests {
             .expect("stop_physical_stepper_inner must branch on QueueAccess");
         let from_match_onward = &fn_body[match_pos..];
 
-        // Word-boundary match, not a plain substring search: the region
-        // legitimately contains the comment word "returned" (describing
-        // detach_consumer's Option), which a bare `contains("return")`
-        // would misfire on even though it is not the `return` keyword.
         let has_return_keyword = from_match_onward.match_indices("return").any(|(pos, _)| {
             let before_ok = from_match_onward[..pos]
                 .chars()
@@ -1113,14 +1085,6 @@ mod commissioning_board_contract_tests {
             "drain_all_populated_slots must scan every physical stepper channel, not a \
              hardcoded single index -- Ouroboros has two independently detachable channels"
         );
-        // A loop that iterates `STEPPER_CHANNEL_COUNT` times but calls
-        // take_pending_drain/attach_consumer with a hardcoded index (e.g.
-        // always 0) would still pass the assertion above. Requiring the
-        // loop's own index variable to appear in both calls closes that
-        // gap -- this pins the exact identifier the reference
-        // implementation uses (`idx`); if a future implementation
-        // legitimately renames it, update this string alongside the code,
-        // not the other way around.
         assert!(
             fn_body.contains("take_pending_drain(idx)"),
             "each channel's take must use the loop's own index, not a hardcoded channel -- \
@@ -1459,9 +1423,6 @@ mod commissioning_board_contract_tests {
             USB_TRACE.contains("record_spi_sample_cycles(sample_tick(tmc, context, inputs).await)")
         );
 
-        // Exactly one recording site: the driven unit's own Maintenance
-        // outcome, one channel at a time -- no channel loop accumulates
-        // cycles across both channels any more.
         assert_eq!(MAIN.matches("record_spi_sample_cycles(").count(), 1);
         assert!(!MAIN.contains("trace_spi_cycles.saturating_add("));
         assert!(!MAIN.contains("for channel in 0..crate::board_config::TMC_CHANNEL_COUNT"));
@@ -1515,8 +1476,6 @@ mod commissioning_board_contract_tests {
         let clear = body
             .find("FAULT_ACTIVE.store(false")
             .expect("the emergency-disable clear");
-        // Wide enough to span the whole containment block from lowering
-        // every enable pin down to the clear, with margin.
         let window = &body[clear.saturating_sub(3_200)..clear];
         assert!(
             window.contains("status_levels("),

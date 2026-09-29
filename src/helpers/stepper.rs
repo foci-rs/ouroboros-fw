@@ -94,7 +94,7 @@ pub(crate) fn arm_step_timer(clock: u32) {
     let clock = clamp_step_timer_clock(clock);
     tim5.ccr(0).write_value(clock);
     clear_tim5_compare_flag(0);
-    tim5.dier().modify(|w| w.set_ccie(0, true)); // Enable CC1 interrupt
+    tim5.dier().modify(|w| w.set_ccie(0, true));
 }
 
 /// Arm TIM5 CC1 only if `clock` is earlier than the active compare.

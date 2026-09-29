@@ -113,15 +113,10 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         else {
             return Err(0);
         };
-        // heapless::spsc::Producer has no `is_full()` -- only the un-split
-        // `Queue` does. `!producer.ready()` is the producer-side equivalent
-        // (`ready()` is true iff there is room to enqueue).
         if !producer.ready() {
             return Err(producer.len());
         }
         let prepared = stepper.prepare_move(move_);
-        // No other producer can run here, so a consumer can only create more space
-        // after the full check above -- enqueue therefore cannot fail here.
         producer.enqueue(prepared).map_err(|_| producer.len())?;
         Ok(producer.len())
     }
@@ -179,11 +174,6 @@ impl StepperResetBoard for OuroborosStepperBoard {
             return Err(CommandError::InvalidChannel(channel));
         }
         let mut stats = StepperDrainStats::ZERO;
-        // `None`: a P1 drain or a pending trigger-stop hand-off owns the
-        // consumer and drains this queue later, including any `queue_step`
-        // accepted first. Klipper never sends one in that window: after a
-        // trigger it waits on the `stepper_get_position` reply, and awaiting
-        // its next USB read lets `trigger_drain_task` run first.
         let _ = crate::trigger_domain::with_consumer_locked(channel, |consumer| {
             while let Some(m) = consumer.dequeue() {
                 stats.segments = stats.segments.saturating_add(1);
@@ -302,7 +292,6 @@ pub(crate) fn enter_shutdown(state: &mut State) -> bool {
             let mut board = OuroborosTrsyncBoard { state: &*state };
             trsync::shutdown_quiesce(td.state_mut(), &mut board);
         });
-        // Post-quiesce atomics — order preserved from pre-lift body
         REPORT_PENDING.store(false, Relaxed);
         HOMING_TRIGGERED.store(0xFF, Relaxed);
         HOMING_STATE.store(0, Relaxed);
@@ -351,8 +340,6 @@ impl<'a> ShutdownRecovery for FirmwareCtx<'a> {
 
     fn reset_to_bootloader(&mut self) -> ! {
         katapult_reset(KATAPULT_BYPASS);
-        // `katapult_reset` always triggers `SCB::sys_reset`.
-        // SAFETY: reachable only if the reset faulted; treat as unrecoverable.
         #[allow(clippy::empty_loop)]
         loop {}
     }

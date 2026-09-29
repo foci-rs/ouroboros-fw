@@ -3,9 +3,6 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    // Copy the appropriate memory layout to OUT_DIR.
-    // Default: Katapult 128 KiB bootloader offset (0x08020000).
-    // With --features dev-flash: direct flash at 0x08000000 for probe-rs.
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let memory_x = if env::var("CARGO_FEATURE_DEV_FLASH").is_ok() {
         "memory-dev.x"
@@ -14,10 +11,6 @@ fn main() {
     };
     fs::copy(memory_x, out_dir.join("memory.x")).unwrap();
 
-    // The allowlist admits only the two named no-init diagnostic records; any
-    // other `.ccmram*` input section becomes an orphan and is rejected by
-    // --orphan-handling=error below rather than silently absorbed into this
-    // section.
     let ccmram_x = out_dir.join("ccmram.x");
     fs::write(
         &ccmram_x,
@@ -51,7 +44,6 @@ fn main() {
 
     println!("cargo:rustc-link-search={}", out_dir.display());
 
-    // Linker configuration
     println!("cargo:rustc-link-arg-bins=--nmagic");
     println!("cargo:rustc-link-arg-bins=--orphan-handling=error");
     println!("cargo:rustc-link-arg-bins=-Tlink.x");

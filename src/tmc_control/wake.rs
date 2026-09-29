@@ -1,5 +1,3 @@
-// Pure wait policy for urgent homing preparation.
-
 /// Source selected by the control task for its next wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HomingWait {

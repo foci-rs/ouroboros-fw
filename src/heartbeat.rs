@@ -48,7 +48,6 @@ pub fn stats_tick(
 
     let sample = foci_firmware::cpu_load::take(wall);
 
-    // Track 32-bit clock wraps for `get_uptime`'s high word.
     let prev = stats_send_time.swap(now, Relaxed);
     if now < prev {
         stats_send_time_high.fetch_add(1, Relaxed);
@@ -140,7 +139,7 @@ pub fn analog_sampling_tick(
             mcu_temp_calibration,
             raw_internal,
             crate::ankyra::constants::ADC_MAX as f32,
-            1, // AnalogChannelState::record_sample's own accumulation enforces the host's sample_count
+            1,
         );
         shutdown_requested |= emit_analog_sample(channel, synthesized, now);
     }

@@ -108,7 +108,6 @@ pub(crate) async fn handle_tmc_request(
         }
         TmcRequestKind::DumpRegisters { oid } => {
             for &addr in foci_firmware::dump::DUMP_REGISTERS {
-                // Yield between SPI reads to let USB task drain TX buffer.
                 Mono::delay(1.millis()).await;
 
                 let reg = foci_tmc4671::registers::Register::new(addr);
@@ -127,7 +126,6 @@ pub(crate) async fn handle_tmc_request(
                     value: u32 = value,
                 );
             }
-            // Sub-registers use synthetic addrs 0x80+.
             for &(synthetic_addr, sub_reg) in foci_firmware::dump::DUMP_SUB_REGISTERS {
                 Mono::delay(1.millis()).await;
 

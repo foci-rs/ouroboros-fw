@@ -4,10 +4,6 @@
 //!
 //! All constant identifiers are SCREAMING_SNAKE_CASE; ankyra preserves
 //! them verbatim as wire names (per `pascal_to_snake` passthrough rule).
-//!
-//! `MCU` and the `RESERVE_PINS_*` constants are only consumed over the wire and
-//! are never referenced from Rust — the `#[allow(dead_code)]` suppresses
-//! the unused-const lint without masking genuinely dead code elsewhere.
 
 use ankyra::klipper_constant;
 
@@ -98,10 +94,6 @@ pub const MCU: &str = "stm32h723xx";
 /// float-typed constant.
 #[klipper_constant]
 pub const ADC_MAX: u32 = 4095;
-
-// ---- Reserved pin constants ----
-// Tells the Klipper host which pins are firmware-owned and must not be
-// assigned to user-facing config sections (steppers, heaters, fans, etc.).
 
 #[allow(dead_code)]
 #[klipper_constant]

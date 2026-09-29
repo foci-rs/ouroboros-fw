@@ -59,8 +59,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             lambda_us: u32 = inner.lambda_us,
             theta_e_us: u32 = inner.theta_e_us,
             theta_source: u8 = inner.theta_source,
-            // `bandwidth_hz` is capped at `MAX_PHYSICAL_CURRENT_BANDWIDTH_HZ`
-            // (2000) before it reaches `InnerResult`, so this narrowing is exact.
             bandwidth_hz: u16 = inner.bandwidth_hz as u16,
             fallback_velocity_p: u16 = result.fallback_velocity_p,
             fallback_velocity_i: u16 = result.fallback_velocity_i,

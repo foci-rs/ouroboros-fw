@@ -1,5 +1,3 @@
-// Pure Ouroboros maintenance-arm decision.
-
 use foci_firmware::tmc_control::ChannelMode;
 
 /// Maintenance-relevant state copied from one TMC channel.

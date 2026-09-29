@@ -17,10 +17,6 @@ use crate::tmc_control::board::{stepper_state, tmc_state};
 use crate::trigger_domain::with_trigger_domain;
 
 /// Start installed tuning (mechanical ID + velocity/position/filters).
-///
-/// The parameter list is dictated by the Klipper wire protocol — collapsing
-/// it into a struct would break the host command format, so the clippy lint
-/// is suppressed at the handler level.
 #[allow(clippy::too_many_arguments)]
 #[klipper_command]
 pub fn foci_tune(

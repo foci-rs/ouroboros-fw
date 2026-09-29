@@ -37,7 +37,6 @@ pub(crate) fn gpio_configure_input(pin_value: u8, pull_up: bool) {
     let port_idx = pin_value / 16;
     let pin_idx = (pin_value % 16) as usize;
 
-    // Enable GPIO port clock on AHB4.
     let rcc = embassy_stm32::pac::RCC;
     rcc.ahb4enr().modify(|w| match port_idx {
         0 => w.set_gpioaen(true),
@@ -47,15 +46,12 @@ pub(crate) fn gpio_configure_input(pin_value: u8, pull_up: bool) {
         4 => w.set_gpioeen(true),
         _ => {}
     });
-    // Brief delay for clock to stabilize
     cortex_m::asm::delay(2);
 
     if let Some(gpio) = gpio_port(port_idx) {
         use embassy_stm32::pac::gpio::vals;
-        // Set pin as input
         gpio.moder()
             .modify(|w| w.set_moder(pin_idx, vals::Moder::INPUT));
-        // Configure pull-up or floating
         let pull = if pull_up {
             vals::Pupdr::PULL_UP
         } else {

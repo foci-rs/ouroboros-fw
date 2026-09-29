@@ -40,11 +40,6 @@ impl CommissionBackendHooks for OuroborosHooks {
     }
 
     fn commission_elapsed_us() -> u64 {
-        // Microseconds since Mono start. Returned as u64 so deadline
-        // comparisons in commission.rs never wrap across the 51-second
-        // TIM5 boundary that previously broke the engine.
-        //
-        // Source: TIM2 monotonic at 1 MHz (1 us resolution).
         Mono::now().duration_since_epoch().to_micros()
     }
 

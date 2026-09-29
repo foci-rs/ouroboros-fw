@@ -122,26 +122,6 @@ pub fn rcc_config() -> embassy_stm32::Config {
     config.rcc.mux.spi123sel = mux::Saisel::PLL2_P;
     config.rcc.mux.usbsel = mux::Usbsel::HSI48;
 
-    // SPI2 RX/TX DMA completion (DMA1_STREAM0/DMA1_STREAM1) defaults to
-    // Embassy's Priority::P0, the highest hardware priority on this part --
-    // above every RTIC task, including the P3 TIM5/USB/STATUS handlers RTIC
-    // treats as the hard-real-time ceiling. H723 implements 4 NVIC priority
-    // bits, the same as F407; RTIC's cortex_logical2hw maps its logical
-    // priorities to raw NVIC bytes as P3 -> 0xD0, P2 -> 0xE0, P1 -> 0xF0.
-    // Embassy's `Priority` enum uses the same byte encoding (`Priority::P13`
-    // = 0xD0, `P14` = 0xE0, `P15` = 0xF0).
-    //
-    // Use P15 (RTIC-P1 level), not P14 (RTIC-P2 level): P14 can preempt P1
-    // tasks, including tmc_control itself, mid-execution; P15 cannot, since
-    // equal-priority interrupts never preempt each other on Cortex-M, so a
-    // P15 DMA completion can only run in a gap between tmc_control's own
-    // execution slices, never inside one. P14 does not eliminate contention
-    // with the P2 tasks either way -- P14 sits at the exact same priority as
-    // usb_task and the other P2 tasks (so it cannot preempt them), and P15
-    // sits strictly below P2 (so it cannot preempt them either); neither
-    // choice bounds usb_task's unyielding per-wake loop.
-    // `board_init::verify_dma_interrupt_priority` checks the programmed
-    // priority stays below P3 at boot.
     config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P15;
 
     config
@@ -156,15 +136,13 @@ pub fn rcc_config() -> embassy_stm32::Config {
 pub fn init_tim5_clock() {
     let rcc = embassy_stm32::pac::RCC;
     rcc.apb1lenr().modify(|w| w.set_tim5en(true));
-    // Two cycles for clock to stabilize.
     cortex_m::asm::delay(2);
     let tim5 = embassy_stm32::pac::TIM5;
-    tim5.psc().write_value(0); // No prescaler: 260 MHz timer clock
-    tim5.arr().write_value(0xFFFF_FFFF); // Full 32-bit range
-    tim5.egr().write(|w| w.set_ug(true)); // Force update to load PSC/ARR
-    tim5.cr1().modify(|w| w.set_cen(true)); // Start counting
+    tim5.psc().write_value(0);
+    tim5.arr().write_value(0xFFFF_FFFF);
+    tim5.egr().write(|w| w.set_ug(true));
+    tim5.cr1().modify(|w| w.set_cen(true));
 
-    // Disable all TIM5 interrupts and clear pending flags.
     tim5.dier().write_value(Default::default());
     tim5.sr().write_value(Default::default());
 }
@@ -190,12 +168,12 @@ pub fn init_stepdir_gpio() {
     });
 
     let gpio_d = embassy_stm32::pac::GPIOD;
-    configure_output(&gpio_d, 4); // STEP0
-    configure_output(&gpio_d, 3); // DIR0
+    configure_output(&gpio_d, 4);
+    configure_output(&gpio_d, 3);
 
     let gpio_c = embassy_stm32::pac::GPIOC;
-    configure_output(&gpio_c, 12); // STEP1
-    configure_output(&gpio_c, 11); // DIR1
+    configure_output(&gpio_c, 12);
+    configure_output(&gpio_c, 11);
 
     fn configure_output(gpio: &embassy_stm32::pac::gpio::Gpio, pin: usize) {
         gpio.moder()
@@ -292,10 +270,10 @@ pub fn enable_dwt_cyccnt() {
     // Cortex-M system registers that are always safe to read/write here.
     unsafe {
         let dcb = &*cortex_m::peripheral::DCB::PTR;
-        dcb.demcr.modify(|v| v | (1 << 24)); // TRCENA
+        dcb.demcr.modify(|v| v | (1 << 24));
         let dwt = &*cortex_m::peripheral::DWT::PTR;
         dwt.cyccnt.write(0);
-        dwt.ctrl.modify(|v| v | 1); // CYCCNTENA
+        dwt.ctrl.modify(|v| v | 1);
     }
 }
 

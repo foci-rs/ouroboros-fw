@@ -111,11 +111,6 @@ fn note_trace_usb_configured_time() {
     );
 }
 
-// OpenFFBoard uses 120_000 cycles at 168 MHz, about 714 us. Scale that
-// wall-time budget to the 520 MHz H723 DWT clock: 120_000 * 520 / 168 =
-// 371_429, rounded up. Do not derive this from CLOCK_FREQ; CLOCK_FREQ is TIM5.
-// Both channels are sampled per control iteration, so this threshold applies
-// to their summed SPI cycles, not to either channel's sample alone.
 const TRACE_DETAIL_SKIP_THRESHOLD_CYCLES: u32 = 372_000;
 
 static mut TRACE_CLOCK_EXT: TraceClockExt = TraceClockExt::new();
@@ -464,7 +459,6 @@ pub(crate) fn request_event(
         args,
         arg_count,
     };
-    // O(1) critical section: push one fixed-size event or count one drop.
     let queued = cortex_m::interrupt::free(|_| unsafe {
         let queue = &mut *core::ptr::addr_of_mut!(PENDING_EVENTS);
         if queue.push_back(event).is_err() {

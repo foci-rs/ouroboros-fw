@@ -75,7 +75,6 @@ unsafe fn persist_and_reset(kind: u8, line: u32, pc: u32, file_hash: u32) -> ! {
         (*slot).line = line;
         (*slot).pc = pc;
         (*slot).file_hash = file_hash;
-        // Publish the magic last so a reset mid-write never yields a torn record.
         core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
         (*slot).magic = PANIC_MAGIC;
         core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
