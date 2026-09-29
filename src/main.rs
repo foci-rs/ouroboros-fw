@@ -285,16 +285,7 @@ mod app {
                 vid: 0x1D50,
                 pid: 0x614E,
                 manufacturer: "foci",
-                product: {
-                    #[cfg(feature = "trace")]
-                    {
-                        crate::usb_trace::TRACE_PRODUCT
-                    }
-                    #[cfg(not(feature = "trace"))]
-                    {
-                        "FOCI Ouroboros"
-                    }
-                },
+                product: crate::board_config::USB_PRODUCT,
                 serial: uid,
             });
         }

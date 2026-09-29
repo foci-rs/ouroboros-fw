@@ -17,9 +17,6 @@ use crate::state::usb_trace::{
     event_queue, motion_consumer, motion_producer,
 };
 
-/// Product string used by trace builds.
-pub(crate) const TRACE_PRODUCT: &str = "FOCI Ouroboros (trace)";
-
 static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
 
 /// Enable the lower-rate raw current-path diagnostic frame.
@@ -587,7 +584,7 @@ pub(crate) fn emit_metadata() {
             .pre_config_skipped_status
             .load(Ordering::Relaxed),
         firmware_id: "ouroboros-fw",
-        product: TRACE_PRODUCT,
+        product: crate::board_config::USB_PRODUCT,
         serial: trace_serial(),
         sources: sources.as_slice(),
     }) else {

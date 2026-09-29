@@ -2,6 +2,9 @@
 
 use crate::ankyra::enumerations::Pins;
 
+/// USB product string; trace builds are told apart by their vendor-specific interface.
+pub(crate) const USB_PRODUCT: &str = "FOCI Ouroboros";
+
 /// Number of board-local TMC4671 motor channels.
 pub(crate) const TMC_CHANNEL_COUNT: u8 = 2;
 
