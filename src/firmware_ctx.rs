@@ -499,31 +499,13 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
     fn endstop_start_homing(
         &mut self,
         oid: u8,
-        clock: u32,
-        sample_ticks: u32,
-        sample_count: u8,
-        rest_ticks: u32,
-        pin_value_expected: bool,
-        trsync_oid: u8,
-        trigger_reason: u8,
+        request: foci_firmware::context::trsync::HomingRequest,
     ) -> Result<(), ()> {
         with_trigger_domain(|td| {
             let mut board = OuroborosTrsyncBoard {
                 state: &*self.state,
             };
-            trsync::endstop_start_homing(
-                td.state_mut(),
-                &mut board,
-                oid,
-                clock,
-                sample_ticks,
-                sample_count,
-                rest_ticks,
-                pin_value_expected,
-                trsync_oid,
-                trigger_reason,
-            )
-            .map_err(|_| ())
+            trsync::endstop_start_homing(td.state_mut(), &mut board, oid, request).map_err(|_| ())
         })
     }
 
