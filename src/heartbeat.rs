@@ -8,6 +8,8 @@ use embassy_stm32::peripherals;
 use embassy_stm32::wdg::IndependentWatchdog;
 use foci_firmware::ankyra::replies::{AnalogInState, FociStepperEvent, Stats, TrsyncState};
 
+const MCU_TEMP_SAMPLE_COUNT: u8 = 1;
+
 /// Period between independent-watchdog service ticks.
 pub const WATCHDOG_INTERVAL_MS: u64 = 5_000;
 
@@ -139,7 +141,7 @@ pub fn analog_sampling_tick(
             mcu_temp_calibration,
             raw_internal,
             crate::ankyra::constants::ADC_MAX as f32,
-            1,
+            MCU_TEMP_SAMPLE_COUNT,
         );
         shutdown_requested |= emit_analog_sample(channel, synthesized, now);
     }
