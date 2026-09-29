@@ -234,7 +234,11 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
 
     #[cfg(feature = "dev")]
     async fn run_dev_init(&mut self, tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>) {
-        tmc_enter_openloop(tmc, enable_pin(self.enable_pins, self.channel)).await;
+        let pin = enable_pin(self.enable_pins, self.channel);
+        if let Err(e) = tmc_enter_openloop(tmc, pin).await {
+            pin.set_low();
+            defmt::error!("dev init aborted, driver disabled: {}", e);
+        }
     }
 
     #[cfg(feature = "dev")]
@@ -243,7 +247,9 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
         revolutions: u8,
     ) {
-        do_test_spin(tmc, revolutions).await;
+        if let Err(e) = do_test_spin(tmc, revolutions).await {
+            defmt::error!("dev test spin aborted: {}", e);
+        }
     }
 }
 

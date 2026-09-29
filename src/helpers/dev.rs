@@ -29,12 +29,33 @@ const OPENLOOP_FLUX_TARGET: i16 = 200;
 const VELOCITY_METER_ADVANCED: u8 = 1;
 const PHI_E_SELECTION_EXTERNAL: u32 = 1;
 
+/// A TMC4671 register write that failed on the SPI bus.
+#[derive(Debug, Clone, Copy, defmt::Format)]
+pub(crate) struct DevWriteError {
+    /// Address of the register whose write failed.
+    pub(crate) addr: u8,
+}
+
+async fn write(
+    tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
+    reg: Register,
+    value: u32,
+) -> Result<(), DevWriteError> {
+    let addr = reg.addr();
+    tmc.write_register(reg, value)
+        .await
+        .map_err(|_| DevWriteError { addr })
+}
+
 /// Sweep PHI_E_EXT through N full mechanical revolutions.
 ///
 /// With 50 pole pairs, one mechanical revolution = 50 electrical
 /// cycles. Each electrical cycle sweeps PHI_E_EXT from 0 to 65535.
 /// Uses whatever voltage/mode settings were configured by tmc_init.
-pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolutions: u8) {
+pub(crate) async fn do_test_spin(
+    tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
+    revolutions: u8,
+) -> Result<(), DevWriteError> {
     let total_steps = revolutions as u32 * POLE_PAIRS * PHI_E_STEPS_PER_ELECTRICAL_CYCLE;
     defmt::info!(
         "Spinning {} revolutions ({} steps)",
@@ -44,65 +65,54 @@ pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolut
 
     for step in 0..total_steps {
         let angle = (step * PHI_E_STEP_SIZE) % 65536;
-        let _ = tmc.write_register(PHI_E_EXT, angle).await;
+        write(tmc, PHI_E_EXT, angle).await?;
         Mono::delay(1.millis()).await;
     }
 
-    let _ = tmc.write_register(PHI_E_EXT, 0).await;
+    write(tmc, PHI_E_EXT, 0).await?;
     defmt::info!("Spin complete");
+    Ok(())
 }
 
 /// Configure TMC4671 for open-loop stepper operation with current regulation.
 ///
 /// Performs hardware init, ADC offset calibration, and configures torque
 /// mode with PHI_E_EXT for open-loop angle control.
+///
+/// # Errors
+///
+/// Returns the first failed register write; later writes are not attempted.
 pub(crate) async fn tmc_enter_openloop(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     enable_pin: &mut Output<'static>,
-) {
+) -> Result<(), DevWriteError> {
     enable_pin.set_low();
-    let _ = tmc
-        .write_register(MODE_RAMP_MODE_MOTION, MOTION_STOPPED)
-        .await;
-    let _ = tmc.write_register(PIDOUT_UQ_UD_LIMITS, 1024).await;
-    let _ = tmc.write_register(PID_TORQUE_FLUX_TARGET, 0).await;
-    let _ = tmc.write_register(UQ_UD_EXT, 0).await;
+    write(tmc, MODE_RAMP_MODE_MOTION, MOTION_STOPPED).await?;
+    write(tmc, PIDOUT_UQ_UD_LIMITS, 1024).await?;
+    write(tmc, PID_TORQUE_FLUX_TARGET, 0).await?;
+    write(tmc, UQ_UD_EXT, 0).await?;
 
-    let _ = tmc.write_register(PWM_POLARITIES, 0).await;
-    let _ = tmc
-        .write_register(PWM_MAXCNT, TMC_CONFIG.pwm_maxcnt as u32)
-        .await;
-    let _ = tmc
-        .write_register(PWM_BBM_H_BBM_L, TMC_CONFIG.bbm_register())
-        .await;
-    if tmc.write_register(PWM_SV_CHOP, PWM_CHOP_OFF).await.is_err() {
-        defmt::error!("open-loop init: PWM_SV_CHOP write failed");
-        return;
-    }
+    write(tmc, PWM_POLARITIES, 0).await?;
+    write(tmc, PWM_MAXCNT, TMC_CONFIG.pwm_maxcnt as u32).await?;
+    write(tmc, PWM_BBM_H_BBM_L, TMC_CONFIG.bbm_register()).await?;
+    write(tmc, PWM_SV_CHOP, PWM_CHOP_OFF).await?;
 
-    let _ = tmc
-        .write_register(DSADC_MDEC_B_MDEC_A, TMC_CONFIG.dsadc_mdec_register())
-        .await;
-    let _ = tmc
-        .write_register(ADC_I_SELECT, TMC_CONFIG.adc_i_select)
-        .await;
+    write(tmc, DSADC_MDEC_B_MDEC_A, TMC_CONFIG.dsadc_mdec_register()).await?;
+    write(tmc, ADC_I_SELECT, TMC_CONFIG.adc_i_select).await?;
 
-    let _ = tmc
-        .write_register(MOTOR_TYPE_N_POLE_PAIRS, STEPPER_MOTOR_TYPE_N_POLE_PAIRS)
-        .await;
+    write(
+        tmc,
+        MOTOR_TYPE_N_POLE_PAIRS,
+        STEPPER_MOTOR_TYPE_N_POLE_PAIRS,
+    )
+    .await?;
 
     let velocity_selection =
         VelocitySelection::new().with_velocity_meter_selection(VELOCITY_METER_ADVANCED);
-    let _ = tmc
-        .write_register(VELOCITY_SELECTION, velocity_selection.into_bits())
-        .await;
+    write(tmc, VELOCITY_SELECTION, velocity_selection.into_bits()).await?;
 
-    let _ = tmc
-        .write_register(ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(0))
-        .await;
-    let _ = tmc
-        .write_register(ADC_I1_SCALE_OFFSET, adc_i1_scale_offset(0))
-        .await;
+    write(tmc, ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(0)).await?;
+    write(tmc, ADC_I1_SCALE_OFFSET, adc_i1_scale_offset(0)).await?;
     enable_pin.set_high();
     Mono::delay(250_u64.millis()).await;
 
@@ -125,43 +135,33 @@ pub(crate) async fn tmc_enter_openloop(
             offset_i0,
             offset_i1
         );
-        return;
+        return Ok(());
     }
 
-    let _ = tmc
-        .write_register(ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(offset_i0))
-        .await;
-    let _ = tmc
-        .write_register(ADC_I1_SCALE_OFFSET, adc_i1_scale_offset(offset_i1))
-        .await;
+    write(tmc, ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(offset_i0)).await?;
+    write(tmc, ADC_I1_SCALE_OFFSET, adc_i1_scale_offset(offset_i1)).await?;
     defmt::info!("ADC calibrated: I0={}, I1={}", offset_i0, offset_i1);
 
-    let _ = tmc.write_register(PWM_SV_CHOP, PWM_CHOP_CENTERED_FOC).await;
+    write(tmc, PWM_SV_CHOP, PWM_CHOP_CENTERED_FOC).await?;
 
     let pid_pi: u32 = (OPENLOOP_PID_P << 16) | OPENLOOP_PID_I;
-    let _ = tmc.write_register(PID_FLUX_P_FLUX_I, pid_pi).await;
-    let _ = tmc.write_register(PID_TORQUE_P_TORQUE_I, pid_pi).await;
+    write(tmc, PID_FLUX_P_FLUX_I, pid_pi).await?;
+    write(tmc, PID_TORQUE_P_TORQUE_I, pid_pi).await?;
 
     let current_limit = PidTorqueFluxLimit::new(OPENLOOP_CURRENT_LIMIT)
         .expect("dev current limit must fit the TMC4671 register domain");
-    let _ = tmc
-        .write_register(PID_TORQUE_FLUX_LIMITS, current_limit.register_value())
-        .await;
+    write(tmc, PID_TORQUE_FLUX_LIMITS, current_limit.register_value()).await?;
 
-    let _ = tmc
-        .write_register(PHI_E_SELECTION, PHI_E_SELECTION_EXTERNAL)
-        .await;
-    let _ = tmc.write_register(PHI_E_EXT, 0).await;
+    write(tmc, PHI_E_SELECTION, PHI_E_SELECTION_EXTERNAL).await?;
+    write(tmc, PHI_E_EXT, 0).await?;
 
     let target_reg: u32 = PidTorqueFluxTarget::new()
         .with_pid_flux_target(OPENLOOP_FLUX_TARGET)
         .with_pid_torque_target(0)
         .into();
-    let _ = tmc.write_register(PID_TORQUE_FLUX_TARGET, target_reg).await;
+    write(tmc, PID_TORQUE_FLUX_TARGET, target_reg).await?;
 
-    let _ = tmc
-        .write_register(MODE_RAMP_MODE_MOTION, MOTION_TORQUE_ADVANCED_PI)
-        .await;
+    write(tmc, MODE_RAMP_MODE_MOTION, MOTION_TORQUE_ADVANCED_PI).await?;
 
     let v_limit_final = tmc.read_register(PIDOUT_UQ_UD_LIMITS).await.unwrap_or(0);
     let mode_final = tmc.read_register(MODE_RAMP_MODE_MOTION).await.unwrap_or(0);
@@ -190,4 +190,5 @@ pub(crate) async fn tmc_enter_openloop(
             i_wy
         );
     }
+    Ok(())
 }
