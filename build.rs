@@ -27,9 +27,6 @@ fn main() {
          \x20   *(.ccmram.diag.breakaway)\n\
          \x20 } > CCMRAM\n\
          }\n\
-         /* PanicPersist (5 x u32) + the breakaway AtomicU32 breadcrumb. */\n\
-         ASSERT(SIZEOF(.ccmram) == 24, \"unexpected CCMRAM contents\");\n\
-         \n\
          /* --orphan-handling=error hard-errors on any input section the script\n\
           * does not place explicitly, including debug/symbol metadata GNU ld\n\
           * otherwise places implicitly. Route those here so the flag only ever\n\

@@ -19,13 +19,23 @@ use crate::app::Mono;
 use crate::app_types::TmcSpiDevice;
 use crate::board_config::TMC_CONFIG;
 
+const POLE_PAIRS: u32 = 50;
+const PHI_E_STEPS_PER_ELECTRICAL_CYCLE: u32 = 256;
+const PHI_E_STEP_SIZE: u32 = 65536 / PHI_E_STEPS_PER_ELECTRICAL_CYCLE;
+const OPENLOOP_PID_P: u32 = 404;
+const OPENLOOP_PID_I: u32 = 26;
+const OPENLOOP_CURRENT_LIMIT: u32 = 433;
+const OPENLOOP_FLUX_TARGET: i16 = 200;
+const VELOCITY_METER_ADVANCED: u8 = 1;
+const PHI_E_SELECTION_EXTERNAL: u32 = 1;
+
 /// Sweep PHI_E_EXT through N full mechanical revolutions.
 ///
 /// With 50 pole pairs, one mechanical revolution = 50 electrical
 /// cycles. Each electrical cycle sweeps PHI_E_EXT from 0 to 65535.
 /// Uses whatever voltage/mode settings were configured by tmc_init.
 pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolutions: u8) {
-    let total_steps = revolutions as u32 * 50 * 256; // 256 microsteps per e-cycle
+    let total_steps = revolutions as u32 * POLE_PAIRS * PHI_E_STEPS_PER_ELECTRICAL_CYCLE;
     defmt::info!(
         "Spinning {} revolutions ({} steps)",
         revolutions,
@@ -33,12 +43,11 @@ pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolut
     );
 
     for step in 0..total_steps {
-        let angle = (step * 256) % 65536;
+        let angle = (step * PHI_E_STEP_SIZE) % 65536;
         let _ = tmc.write_register(PHI_E_EXT, angle).await;
         Mono::delay(1.millis()).await;
     }
 
-    // Return to angle 0
     let _ = tmc.write_register(PHI_E_EXT, 0).await;
     defmt::info!("Spin complete");
 }
@@ -46,18 +55,11 @@ pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolut
 /// Configure TMC4671 for open-loop stepper operation with current regulation.
 ///
 /// Performs hardware init, ADC offset calibration, and configures torque
-/// mode with PHI_E_EXT for open-loop angle control. Self-contained dev
-/// helper; production ADC calibration uses the commissioning engine's
-/// cooperative AdcCalibrate phase.
-///
-/// Register values verified against TMC4671-LA datasheet rev 2.08.
+/// mode with PHI_E_EXT for open-loop angle control..
 pub(crate) async fn tmc_enter_openloop(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     enable_pin: &mut Output<'static>,
 ) {
-    // --- ADC calibration (inlined from former tmc_adc_calibrate) ---
-
-    // 1. SAFETY FIRST: stop motor, disable outputs, set voltage limit
     enable_pin.set_low();
     let _ = tmc
         .write_register(MODE_RAMP_MODE_MOTION, MOTION_STOPPED)
@@ -66,7 +68,6 @@ pub(crate) async fn tmc_enter_openloop(
     let _ = tmc.write_register(PID_TORQUE_FLUX_TARGET, 0).await;
     let _ = tmc.write_register(UQ_UD_EXT, 0).await;
 
-    // 2. PWM configuration (chopping disabled for ADC calibration)
     let _ = tmc.write_register(PWM_POLARITIES, 0).await;
     let _ = tmc
         .write_register(PWM_MAXCNT, TMC_CONFIG.pwm_maxcnt as u32)
@@ -79,7 +80,6 @@ pub(crate) async fn tmc_enter_openloop(
         return;
     }
 
-    // 3. ADC configuration
     let _ = tmc
         .write_register(DSADC_MDEC_B_MDEC_A, TMC_CONFIG.dsadc_mdec_register())
         .await;
@@ -87,18 +87,16 @@ pub(crate) async fn tmc_enter_openloop(
         .write_register(ADC_I_SELECT, TMC_CONFIG.adc_i_select)
         .await;
 
-    // 4. Motor type: 2-phase stepper (type 2), 50 pole pairs
     let _ = tmc
         .write_register(MOTOR_TYPE_N_POLE_PAIRS, STEPPER_MOTOR_TYPE_N_POLE_PAIRS)
         .await;
 
-    // 4b. Velocity meter: PWM-synchronized for advanced PI stability
-    let velocity_selection = VelocitySelection::new().with_velocity_meter_selection(1);
+    let velocity_selection =
+        VelocitySelection::new().with_velocity_meter_selection(VELOCITY_METER_ADVANCED);
     let _ = tmc
         .write_register(VELOCITY_SELECTION, velocity_selection.into_bits())
         .await;
 
-    // 5. ADC offset calibration (PWM_CHOP=0, no current flows)
     let _ = tmc
         .write_register(ADC_I0_SCALE_OFFSET, adc_i0_scale_offset(0))
         .await;
@@ -138,48 +136,33 @@ pub(crate) async fn tmc_enter_openloop(
         .await;
     defmt::info!("ADC calibrated: I0={}, I1={}", offset_i0, offset_i1);
 
-    // 6. Re-enable PWM chopping
     let _ = tmc.write_register(PWM_SV_CHOP, PWM_CHOP_CENTERED_FOC).await;
 
-    // --- Open-loop configuration ---
-
-    // 7. PID gains for torque (current) control
-    // Conservative Q8.8 PID gains: P = 1.577 * 256 = 404, I = 0.1 * 256 = 26.
-    let pid_pi: u32 = (404 << 16) | 26;
+    let pid_pi: u32 = (OPENLOOP_PID_P << 16) | OPENLOOP_PID_I;
     let _ = tmc.write_register(PID_FLUX_P_FLUX_I, pid_pi).await;
     let _ = tmc.write_register(PID_TORQUE_P_TORQUE_I, pid_pi).await;
 
-    // 9. Current limit via PID_TORQUE_FLUX_LIMITS
-    // The shared torque/flux limit is 433 counts (~0.5A with 1.155 mA/LSB).
-    // Flux limit must be nonzero so the flux PID can actively regulate
-    // the D-axis current to zero (reject disturbances).
-    let current_limit = PidTorqueFluxLimit::new(433)
+    let current_limit = PidTorqueFluxLimit::new(OPENLOOP_CURRENT_LIMIT)
         .expect("dev current limit must fit the TMC4671 register domain");
     let _ = tmc
         .write_register(PID_TORQUE_FLUX_LIMITS, current_limit.register_value())
         .await;
 
-    // 10. PHI_E source: external angle register (open-loop)
-    let _ = tmc.write_register(PHI_E_SELECTION, 1).await;
+    let _ = tmc
+        .write_register(PHI_E_SELECTION, PHI_E_SELECTION_EXTERNAL)
+        .await;
     let _ = tmc.write_register(PHI_E_EXT, 0).await;
 
-    // 11. Set flux (D-axis) target for alignment/holding at PHI_E=0
-    // CRITICAL: Flux target is bits[15:0], torque target is bits[31:16].
-    // Setting torque (Q-axis) instead of flux (D-axis) causes the rotor to
-    // align 90 electrical degrees off, producing reversed commutation.
-    let flux_target: i16 = 200; // ~0.23A, conservative
     let target_reg: u32 = PidTorqueFluxTarget::new()
-        .with_pid_flux_target(flux_target)
+        .with_pid_flux_target(OPENLOOP_FLUX_TARGET)
         .with_pid_torque_target(0)
         .into();
     let _ = tmc.write_register(PID_TORQUE_FLUX_TARGET, target_reg).await;
 
-    // 12. Motion mode: TORQUE mode with current regulation
     let _ = tmc
         .write_register(MODE_RAMP_MODE_MOTION, MOTION_TORQUE_ADVANCED_PI)
         .await;
 
-    // Verify critical registers after enabling torque mode
     let v_limit_final = tmc.read_register(PIDOUT_UQ_UD_LIMITS).await.unwrap_or(0);
     let mode_final = tmc.read_register(MODE_RAMP_MODE_MOTION).await.unwrap_or(0);
     let target_final = tmc.read_register(PID_TORQUE_FLUX_TARGET).await.unwrap_or(0);
@@ -190,7 +173,6 @@ pub(crate) async fn tmc_enter_openloop(
         target_final
     );
 
-    // Diagnostic: log PID state for 5 seconds after enabling
     for i in 0..10u32 {
         Mono::delay(500.millis()).await;
         let actual = tmc.read_register(PID_TORQUE_FLUX_ACTUAL).await.unwrap_or(0);
