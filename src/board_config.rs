@@ -66,7 +66,13 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     bbm_l: 10,
     dsadc_mdec_a: OUROBOROS_PROD_V1_DSADC_MDEC,
     dsadc_mdec_b: OUROBOROS_PROD_V1_DSADC_MDEC,
-    adc_i_select: 0x1000_0100,
+    adc_i_select: foci_tmc4671::registers::AdcISelect::new()
+        .with_i0_select(0)
+        .with_i1_select(1)
+        .with_ux_select(0)
+        .with_v_select(0)
+        .with_wy_select(1)
+        .into_bits(),
     excitation_voltage: 512,
     electrical_model_theta_e_us: 160,
     current_validation_flux_max_encoder_delta_counts: 4,
