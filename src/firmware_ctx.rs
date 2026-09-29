@@ -339,9 +339,7 @@ impl<'a> ShutdownRecovery for FirmwareCtx<'a> {
     }
 
     fn reset_to_bootloader(&mut self) -> ! {
-        katapult_reset(KATAPULT_BYPASS);
-        #[allow(clippy::empty_loop)]
-        loop {}
+        katapult_reset(KATAPULT_BYPASS)
     }
 
     fn send_shutdown(&mut self, reason: foci_firmware::shutdown::ShutdownReason, clock: u32) {

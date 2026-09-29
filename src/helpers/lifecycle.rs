@@ -28,7 +28,7 @@ pub(crate) fn read_tim5() -> u32 {
 ///
 /// Matches Klipper's `canboot_reset()` in armcm_reset.c. Verifies the
 /// bootloader signature before writing, no-ops if no bootloader is present.
-pub(crate) fn katapult_reset(req_signature: u64) {
+pub(crate) fn katapult_reset(req_signature: u64) -> ! {
     // SAFETY: The bootloader vector table at KATAPULT_BOOT_ADDRESS is
     // always readable. We verify the Katapult signature before writing.
     unsafe {
