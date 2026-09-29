@@ -31,6 +31,7 @@ mod commissioning_board_contract_tests {
     const REPLIES: &str = include_str!("../../src/ankyra/replies.rs");
     const CONSTANTS: &str = include_str!("../../src/ankyra/constants.rs");
     const PROVIDER: &str = include_str!("../../src/ankyra/provider.rs");
+    const BOARD_CONFIG: &str = include_str!("../../src/board_config.rs");
     const SHARED_EVENTS: &str =
         include_str!("../../../../shared/foci-firmware/src/trace/events.rs");
     const SHARED_TYPES: &str =
@@ -737,6 +738,15 @@ mod commissioning_board_contract_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn board_enforces_and_advertises_its_run_current_cap() {
+        assert!(CONSTANTS.contains("pub const FOCI_MAX_RUN_CURRENT_MA: u32 ="));
+        assert!(CONSTANTS.contains("TMC_CONFIG.max_run_current_ma"));
+        assert!(PROVIDER.contains("crate::ankyra::constants::FOCI_MAX_RUN_CURRENT_MA,"));
+        assert!(BOARD_CONFIG.contains("max_run_current_ma: 10_000"));
+        assert!(FIRMWARE_CTX.contains("fn max_run_current_ma(&self) -> u32"));
     }
 
     #[test]

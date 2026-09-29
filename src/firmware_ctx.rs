@@ -581,6 +581,10 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
 }
 
 impl<'a> TmcHost for FirmwareCtx<'a> {
+    fn max_run_current_ma(&self) -> u32 {
+        crate::board_config::TMC_CONFIG.max_run_current_ma
+    }
+
     fn enqueue_request(&self, req: TmcRequest) -> Result<(), QueueFull> {
         tmc_context::enqueue_tmc_request(&OuroborosTmcQueue, req)
     }

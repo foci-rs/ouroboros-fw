@@ -77,6 +77,7 @@ pub(crate) const TMC_CONFIG: foci_firmware::config::TmcConfig = foci_firmware::c
     // Milliamps per ADC least significant bit; maker-confirmed
     // production-v1 current scale.
     current_scale_ma_per_lsb: 1.272,
+    max_run_current_ma: 10_000,
 };
 
 /// Per-channel feedback wiring. Every board channel is ABN-only today.

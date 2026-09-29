@@ -146,3 +146,7 @@ const _: () =
 #[klipper_constant]
 pub const FOCI_VM_ADC_CENTER_COUNTS: u32 = 32_767;
 const _: () = assert!(FOCI_VM_ADC_CENTER_COUNTS == board_config::VM_ADC_CENTER_COUNTS);
+
+#[klipper_constant]
+pub const FOCI_MAX_RUN_CURRENT_MA: u32 = 10_000;
+const _: () = assert!(FOCI_MAX_RUN_CURRENT_MA == board_config::TMC_CONFIG.max_run_current_ma);
