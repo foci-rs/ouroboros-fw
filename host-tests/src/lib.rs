@@ -406,9 +406,8 @@ mod commissioning_board_contract_tests {
     #[test]
     fn spi_dma_interrupt_priority_is_explicit_and_below_hard_real_time() {
         assert!(
-            BOARD_INIT.contains(
-                "config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P15;"
-            ),
+            BOARD_INIT.contains("config.dma_interrupt_priority = DMA_IRQ_PRIORITY;")
+                && BOARD_INIT.contains("embassy_stm32::interrupt::Priority::P15;"),
             "rcc_config() must set dma_interrupt_priority explicitly to P15, not inherit Embassy's P0 default"
         );
         assert!(

@@ -75,6 +75,10 @@ pub fn read_stm32_uid(buf: &mut [u8; 24]) -> &str {
     unsafe { core::str::from_utf8_unchecked(buf) }
 }
 
+/// Equals the RTIC priority-1 NVIC level (`0xF0`), so DMA completion cannot preempt `tmc_control`.
+const DMA_IRQ_PRIORITY: embassy_stm32::interrupt::Priority =
+    embassy_stm32::interrupt::Priority::P15;
+
 /// Build the embassy-stm32 clock configuration for 520 MHz SYSCLK from the
 /// 25 MHz HSE crystal.
 pub fn rcc_config() -> embassy_stm32::Config {
@@ -122,7 +126,7 @@ pub fn rcc_config() -> embassy_stm32::Config {
     config.rcc.mux.spi123sel = mux::Saisel::PLL2_P;
     config.rcc.mux.usbsel = mux::Usbsel::HSI48;
 
-    config.dma_interrupt_priority = embassy_stm32::interrupt::Priority::P15;
+    config.dma_interrupt_priority = DMA_IRQ_PRIORITY;
 
     config
 }
@@ -278,17 +282,13 @@ pub fn enable_dwt_cyccnt() {
 }
 
 /// Confirm the SPI2 RX/TX DMA completion interrupts (DMA1_STREAM0,
-/// DMA1_STREAM1) are configured below the RTIC P3 hard-real-time ceiling
-/// (TIM5 CC1/CC2, OTG HS, EXTI2 STATUS -- raw NVIC priority `0xD0` on this
-/// 4-priority-bit part, `Priority::P13` in Embassy's encoding).
+/// DMA1_STREAM1) sit exactly at `DMA_IRQ_PRIORITY`.
 ///
-/// Panics if either DMA interrupt is at or above that level: that would let
-/// SPI DMA completion preempt STEP/DIR dispatch on either channel, the exact
-/// regression this check exists to catch (a future embassy-stm32 upgrade
-/// could reintroduce it by changing the default, or a later edit could
-/// remove the explicit override in `rcc_config`).
+/// Panics otherwise: a higher level would let SPI DMA completion preempt STEP/DIR
+/// dispatch and `tmc_control`, and a future embassy-stm32 default change or a removed
+/// override in `rcc_config` would silently reintroduce that.
 pub fn verify_dma_interrupt_priority() {
-    use embassy_stm32::interrupt::{Interrupt, InterruptExt, Priority};
+    use embassy_stm32::interrupt::{Interrupt, InterruptExt};
 
     let rx = Interrupt::DMA1_STREAM0.get_priority();
     let tx = Interrupt::DMA1_STREAM1.get_priority();
@@ -298,8 +298,8 @@ pub fn verify_dma_interrupt_priority() {
         tx
     );
     assert!(
-        rx > Priority::P13 && tx > Priority::P13,
-        "SPI DMA interrupt priority is at or above RTIC P3 (TIM5/USB/STATUS)"
+        rx == DMA_IRQ_PRIORITY && tx == DMA_IRQ_PRIORITY,
+        "SPI DMA interrupt priority differs from DMA_IRQ_PRIORITY"
     );
 }
 
