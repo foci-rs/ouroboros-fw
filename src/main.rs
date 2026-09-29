@@ -2099,7 +2099,7 @@ foci_firmware::foci_ankyra_config! {
         "TMC4671: STATUS_FLAGS read failed",
     ],
     app = "foci",
-    version = env!("CARGO_PKG_VERSION"),
-    build_versions = "",
+    version = env!("FOCI_VERSION"),
+    build_versions = env!("FOCI_BUILD_VERSIONS"),
     license = "MIT OR Apache-2.0",
 }
