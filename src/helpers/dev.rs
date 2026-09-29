@@ -55,7 +55,7 @@ pub(crate) async fn do_test_spin(tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>, revolut
 /// Configure TMC4671 for open-loop stepper operation with current regulation.
 ///
 /// Performs hardware init, ADC offset calibration, and configures torque
-/// mode with PHI_E_EXT for open-loop angle control..
+/// mode with PHI_E_EXT for open-loop angle control.
 pub(crate) async fn tmc_enter_openloop(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     enable_pin: &mut Output<'static>,
