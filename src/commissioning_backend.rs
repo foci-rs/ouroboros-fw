@@ -182,13 +182,7 @@ impl CommissionBackendHooks for OuroborosHooks {
             return Err(StimulusError::NotEnergized);
         }
         with_trigger_domain(|td| {
-            // Captures whatever `motor_armed` actually holds -- true or
-            // false -- once per stimulus session; a channel a prior
-            // commissioning run left armed (e.g. an ArmPreservePosition
-            // post-action) is not distinguishable here from a channel this
-            // hook itself just armed, so the session-scoped capture guard
-            // lives on `TmcChannelState`, not a bare `motor_armed` read.
-            tmc_state.stimulus_capture_motor_armed_once();
+            tmc_state.stimulus_save_motor_armed();
             tmc_state.motor_armed.store(true, Relaxed);
             let mut board = OuroborosStepperBoard {
                 tmc_state: Some(tmc_state),
