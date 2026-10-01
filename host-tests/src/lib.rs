@@ -1571,11 +1571,12 @@ mod commissioning_board_contract_tests {
         let decode = handler
             .find("AutotuneAction::from_u8(action) else")
             .expect("tune handler decodes the raw action with AutotuneAction::from_u8");
-        let rejected = &handler[decode..];
-        let reject_end = rejected
-            .find("return;")
-            .expect("rejection arm returns early");
-        let reject_arm = &rejected[..reject_end];
+        let reject_end = decode
+            + handler[decode..]
+                .find("return;")
+                .expect("rejection arm returns early");
+        let through_rejection = &handler[..reject_end];
+        let reject_arm = &handler[decode..reject_end];
         assert!(
             reject_arm.contains("FociCommissionPhase")
                 && reject_arm.contains("CommissionError::InvalidSchedule"),
@@ -1583,8 +1584,10 @@ mod commissioning_board_contract_tests {
              carrying CommissionError::InvalidSchedule"
         );
         assert!(
-            !reject_arm.contains("tmc_send") && !reject_arm.contains("try_send_tmc_request"),
-            "the rejection arm must not queue any TMC request"
+            !through_rejection.contains("tmc_send")
+                && !through_rejection.contains("try_send_tmc_request"),
+            "no TMC request may be queued anywhere between the handler entry and the \
+             rejection return"
         );
     }
 }
