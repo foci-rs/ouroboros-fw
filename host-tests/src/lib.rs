@@ -1564,6 +1564,29 @@ mod commissioning_board_contract_tests {
              two channels is protected"
         );
     }
+
+    #[test]
+    fn tune_handler_rejects_an_unknown_action_code_without_queueing() {
+        let handler = extract_fn(TMC_HELPERS, "foci_tune_inner");
+        let decode = handler
+            .find("AutotuneAction::from_u8(action) else")
+            .expect("tune handler decodes the raw action with AutotuneAction::from_u8");
+        let rejected = &handler[decode..];
+        let reject_end = rejected
+            .find("return;")
+            .expect("rejection arm returns early");
+        let reject_arm = &rejected[..reject_end];
+        assert!(
+            reject_arm.contains("FociCommissionPhase")
+                && reject_arm.contains("CommissionError::InvalidSchedule"),
+            "an undecodable action code must be answered with a FociCommissionPhase \
+             carrying CommissionError::InvalidSchedule"
+        );
+        assert!(
+            !reject_arm.contains("tmc_send") && !reject_arm.contains("try_send_tmc_request"),
+            "the rejection arm must not queue any TMC request"
+        );
+    }
 }
 
 #[allow(dead_code)]
