@@ -33,14 +33,6 @@ const _: () = assert!(
         == foci_firmware::commissioning::outer::velocity::sweep_plan::ENVELOPE_ABSOLUTE_MARGIN_MREV_S
 );
 
-#[klipper_constant]
-pub const PROPORTIONAL_EVIDENCE_SCHEMA_REVISION: u32 = 14;
-const _: () = assert!(
-    PROPORTIONAL_EVIDENCE_SCHEMA_REVISION
-        == foci_firmware::commissioning::outer::velocity::sweep_plan::PROPORTIONAL_PLAN_SCHEMA_REVISION
-            as u32
-);
-
 /// LATCHED: `PID_V_OUTPUT_LIMIT_STATUS` persists across a delay and clears
 /// only on explicit clear via this board's SPI-mux/dual-channel signal
 /// path.
@@ -49,29 +41,6 @@ pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 1;
 const _: () = assert!(
     VELOCITY_LIMIT_EVIDENCE_CAPABILITY
         == foci_firmware::commissioning::outer::velocity::VELOCITY_LIMIT_EVIDENCE_CAPABILITY_LATCHED_FLAG
-);
-
-#[klipper_constant]
-pub const INTEGRAL_MAX_POSITIVE_RUNGS: u32 = 30;
-const _: () = assert!(
-    INTEGRAL_MAX_POSITIVE_RUNGS
-        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_MAX_POSITIVE_RUNGS
-            as u32
-);
-
-#[klipper_constant]
-pub const INTEGRAL_OBSERVATIONS_PER_DIRECTION: u32 = 4;
-const _: () = assert!(
-    INTEGRAL_OBSERVATIONS_PER_DIRECTION
-        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_OBSERVATIONS_PER_DIRECTION
-            as u32
-);
-
-#[klipper_constant]
-pub const INTEGRAL_OBSERVATIONS_PER_RUNG: u32 = 8;
-const _: () = assert!(
-    INTEGRAL_OBSERVATIONS_PER_RUNG
-        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_OBSERVATIONS_PER_RUNG
 );
 
 #[allow(dead_code)]

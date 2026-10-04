@@ -45,10 +45,6 @@ ankyra::ankyra_provider! {
         crate::ankyra::constants::RESERVE_PINS_SWD,
         crate::ankyra::constants::RESERVE_PINS_TMC,
         crate::ankyra::constants::RESERVE_PINS_USB,
-        crate::ankyra::constants::PROPORTIONAL_EVIDENCE_SCHEMA_REVISION,
-        crate::ankyra::constants::INTEGRAL_MAX_POSITIVE_RUNGS,
-        crate::ankyra::constants::INTEGRAL_OBSERVATIONS_PER_DIRECTION,
-        crate::ankyra::constants::INTEGRAL_OBSERVATIONS_PER_RUNG,
         crate::ankyra::constants::VELOCITY_LIMIT_EVIDENCE_CAPABILITY,
     ],
 }
