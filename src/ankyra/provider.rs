@@ -45,6 +45,5 @@ ankyra::ankyra_provider! {
         crate::ankyra::constants::RESERVE_PINS_SWD,
         crate::ankyra::constants::RESERVE_PINS_TMC,
         crate::ankyra::constants::RESERVE_PINS_USB,
-        crate::ankyra::constants::VELOCITY_LIMIT_EVIDENCE_CAPABILITY,
     ],
 }
