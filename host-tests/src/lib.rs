@@ -857,6 +857,9 @@ mod commissioning_board_contract_tests {
                 "rungs_measured: u8",
                 "stimulus_feedforward_paths: u8",
                 "position_tune_outcome_code: u8",
+                "velocity_ceiling_reached: u8",
+                "peak_velocity_mrev_s: u16",
+                "tune_step: u8",
             ],
         );
     }

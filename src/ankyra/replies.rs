@@ -316,6 +316,9 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             rungs_measured: u8 = result.position_tune.rungs_measured,
             stimulus_feedforward_paths: u8 = result.position_tune.stimulus_feedforward_paths,
             position_tune_outcome_code: u8 = result.position_tune_outcome_code,
+            velocity_ceiling_reached: u8 = result.position_tune.velocity_ceiling_reached,
+            peak_velocity_mrev_s: u16 = result.position_tune.peak_velocity_mrev_s,
+            tune_step: u8 = result.position_tune.tune_step,
         );
     }
 
