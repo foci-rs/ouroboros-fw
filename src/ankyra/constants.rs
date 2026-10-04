@@ -41,14 +41,6 @@ const _: () = assert!(
             as u32
 );
 
-#[klipper_constant]
-pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;
-const _: () = assert!(
-    INTEGRAL_EVIDENCE_SCHEMA_REVISION
-        == foci_firmware::commissioning::outer::velocity::integral_plan::INTEGRAL_PLAN_SCHEMA_REVISION
-            as u32
-);
-
 /// LATCHED: `PID_V_OUTPUT_LIMIT_STATUS` persists across a delay and clears
 /// only on explicit clear via this board's SPI-mux/dual-channel signal
 /// path.

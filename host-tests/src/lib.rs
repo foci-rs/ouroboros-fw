@@ -739,7 +739,6 @@ mod commissioning_board_contract_tests {
     #[test]
     fn board_publishes_the_integral_schema_and_geometry_constants() {
         for declaration in [
-            "pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;",
             "pub const INTEGRAL_MAX_POSITIVE_RUNGS: u32 = 30;",
             "pub const INTEGRAL_OBSERVATIONS_PER_DIRECTION: u32 = 4;",
             "pub const INTEGRAL_OBSERVATIONS_PER_RUNG: u32 = 8;",
@@ -748,7 +747,6 @@ mod commissioning_board_contract_tests {
         }
         for constant in [
             "PROPORTIONAL_EVIDENCE_SCHEMA_REVISION",
-            "INTEGRAL_EVIDENCE_SCHEMA_REVISION",
             "INTEGRAL_MAX_POSITIVE_RUNGS",
             "INTEGRAL_OBSERVATIONS_PER_DIRECTION",
             "INTEGRAL_OBSERVATIONS_PER_RUNG",
@@ -788,7 +786,6 @@ mod commissioning_board_contract_tests {
             assert!(!REPLIES.contains(retired), "retained board reply {retired}");
         }
         assert!(CONSTANTS.contains("pub const PROPORTIONAL_EVIDENCE_SCHEMA_REVISION: u32 = 14;"));
-        assert!(CONSTANTS.contains("pub const INTEGRAL_EVIDENCE_SCHEMA_REVISION: u32 = 13;"));
         assert!(SHARED_EVENTS.contains("EVENT_COMMISSION_RUNG_ORIGIN_RECOVERY: u16 = 143"));
         assert!(!REPLIES.contains("rest_selection"));
     }
