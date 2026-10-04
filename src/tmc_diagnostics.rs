@@ -318,6 +318,7 @@ pub(crate) async fn run_diagnostic_request<'spi>(
                 homing_active,
                 stepper_active,
                 saved_voltage_limit,
+                adc_vm_offset: tmc_state(channel).adc_vm_offset_snapshot(),
             },
             tmc_config: &crate::board_config::TMC_CONFIG,
             feedback_config: crate::board_config::FEEDBACK_CONFIGS[channel as usize],
