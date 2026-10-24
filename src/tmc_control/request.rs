@@ -216,6 +216,7 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         handle_tmc_request(req, tmc).await
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn run_diagnostic_request(
         &mut self,
         req: TmcRequest,

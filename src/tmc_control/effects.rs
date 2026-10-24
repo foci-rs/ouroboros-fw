@@ -36,6 +36,7 @@ impl CommissionBusyReplySink for OuroborosBusyReplySink {
         crate::ankyra::replies::emit_terminal_reply(channel, payload);
     }
 
+    #[cfg(feature = "diagnostics")]
     fn emit_busy_diagnostic(&mut self, request: TmcRequest) {
         crate::tmc_diagnostics::emit_commission_busy_diagnostic(request);
     }

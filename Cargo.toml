@@ -37,7 +37,7 @@ ankyra-macros = { git = "https://github.com/foci-rs/ankyra" }
 ankyra-assemble = { git = "https://github.com/foci-rs/ankyra" }
 
 # FOCI crates
-foci-firmware = { git = "https://github.com/foci-rs/foci-firmware" }
+foci-firmware = { git = "https://github.com/foci-rs/foci-firmware", default-features = false }
 foci-firmware-macros = { git = "https://github.com/foci-rs/foci-firmware" }
 foci-klipper = { git = "https://github.com/foci-rs/foci-klipper" }
 foci-tmc4671 = { git = "https://github.com/foci-rs/foci-tmc4671" }
@@ -52,6 +52,7 @@ heapless = { version = "0.9", features = ["defmt"] }
 
 [features]
 dev = ["foci-firmware/dev"]
+diagnostics = ["foci-firmware/diagnostics"]
 dev-flash = []
 usb-p1-probe = []
 trace = ["foci-firmware/trace", "foci-usb-stm32/trace"]

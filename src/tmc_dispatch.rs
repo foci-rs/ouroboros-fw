@@ -88,18 +88,23 @@ pub(crate) async fn handle_tmc_request(
                 }
             }
         }
+        #[cfg(feature = "diagnostics")]
         TmcRequestKind::CurrentStepTest { .. } => {
             defmt::warn!("handle_tmc_request: CurrentStepTest handled by main loop");
         }
+        #[cfg(feature = "diagnostics")]
         TmcRequestKind::CurrentVectorStepTest { .. } => {
             defmt::warn!("handle_tmc_request: CurrentVectorStepTest handled by main loop");
         }
+        #[cfg(feature = "diagnostics")]
         TmcRequestKind::CurrentTorqueSampleTest { .. } => {
             defmt::warn!("handle_tmc_request: CurrentTorqueSampleTest handled by main loop");
         }
+        #[cfg(feature = "diagnostics")]
         TmcRequestKind::PositionTorqueOffsetSampleTest { .. } => {
             defmt::warn!("handle_tmc_request: PositionTorqueOffsetSampleTest handled by main loop");
         }
+        #[cfg(feature = "diagnostics")]
         TmcRequestKind::VoltageStepTest { .. } => {
             defmt::warn!("handle_tmc_request: VoltageStepTest handled by main loop");
         }
