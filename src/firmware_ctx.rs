@@ -429,6 +429,10 @@ impl<'a> EndstopHost for FirmwareCtx<'a> {
             _ => None,
         }
     }
+
+    fn physical_pin_for_alias(&self, pin: u8) -> Option<u8> {
+        crate::board_config::endstop_connector_pin(pin)
+    }
 }
 
 impl<'a> AnalogInHost for FirmwareCtx<'a> {

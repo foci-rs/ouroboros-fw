@@ -139,6 +139,14 @@ pub(crate) fn analog_pin_channel(pin: u8) -> Option<u8> {
     }
 }
 
+pub(crate) fn endstop_connector_pin(pin: u8) -> Option<u8> {
+    match Pins::try_from(pin) {
+        Ok(Pins::STOP0) => Some(Pins::PD7 as u8),
+        Ok(Pins::STOP1) => Some(Pins::PB3 as u8),
+        _ => None,
+    }
+}
+
 /// STM32H723 internal temperature sensor factory calibration, read from
 /// ST's documented system-memory addresses (RM0468 device electronic
 /// signature section). `TS_CAL1` is captured at 30C, `TS_CAL2` at 130C,
@@ -177,6 +185,14 @@ mod tests {
         assert_eq!(analog_pin_channel(Pins::TH0 as u8), Some(0));
         assert_eq!(analog_pin_channel(Pins::TH1 as u8), Some(1));
         assert_eq!(analog_pin_channel(Pins::MCU_TEMP as u8), Some(2));
+    }
+
+    #[test]
+    fn endstop_connector_pins_resolve_to_pd7_and_pb3() {
+        assert_eq!(endstop_connector_pin(Pins::STOP0 as u8), Some(55));
+        assert_eq!(endstop_connector_pin(Pins::STOP1 as u8), Some(19));
+        assert_eq!(endstop_connector_pin(Pins::STALL0 as u8), None);
+        assert_eq!(endstop_connector_pin(Pins::PD7 as u8), None);
     }
 
     #[test]

@@ -19,5 +19,7 @@
         TH0,
         TH1,
         MCU_TEMP,
+        STOP0,
+        STOP1,
     }
 }
