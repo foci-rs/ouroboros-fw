@@ -319,6 +319,7 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
             velocity_ceiling_reached: u8 = result.position_tune.velocity_ceiling_reached,
             peak_velocity_mrev_s: u16 = result.position_tune.peak_velocity_mrev_s,
             tune_step: u8 = result.position_tune.tune_step,
+            motor_disarmed: u8 = u8::from(result.motor_disarmed),
         );
     }
 
