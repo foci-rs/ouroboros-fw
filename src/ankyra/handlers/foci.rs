@@ -39,6 +39,7 @@ pub fn foci_tune(
     max_duration_ms: u16,
     homing_speed_mrev_s: u32,
     max_accel_mrev_s2: u32,
+    nomination_p_below: u16,
 ) {
     let channel = match ctx.state().stepper_channel(oid) {
         Some(channel) => channel,
@@ -70,6 +71,7 @@ pub fn foci_tune(
         max_duration_ms,
         homing_speed_mrev_s,
         max_accel_mrev_s2,
+        nomination_p_below,
     });
 }
 

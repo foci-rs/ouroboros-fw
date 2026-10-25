@@ -43,6 +43,7 @@ pub(crate) struct FociTuneParams {
     pub(crate) max_duration_ms: u16,
     pub(crate) homing_speed_mrev_s: u32,
     pub(crate) max_accel_mrev_s2: u32,
+    pub(crate) nomination_p_below: u16,
 }
 
 /// Send a request to the tmc_control task.
@@ -80,6 +81,7 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
         max_duration_ms,
         homing_speed_mrev_s,
         max_accel_mrev_s2,
+        nomination_p_below,
         channel,
     } = params;
     let Some(action) = foci_firmware::tmc::AutotuneAction::from_u8(action) else {
@@ -141,6 +143,7 @@ pub(crate) fn foci_tune_inner(params: FociTuneParams) {
             max_duration_ms,
             homing_speed_mrev_s,
             max_accel_mrev_s2,
+            nomination_p_below,
         },
     )) {
         tmc_state.commission_in_flight.store(false, Relaxed);
