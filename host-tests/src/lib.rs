@@ -549,7 +549,7 @@ mod step_dispatch_tests {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 #[path = "../../src/usb_trace_policy.rs"]
 mod usb_trace_policy;
 
@@ -565,7 +565,7 @@ mod usb_trace_policy_tests {
 
     use crate::usb_trace_policy::{
         EmitOutcome, MAX_CONTROL_STATE_FRAMES_PER_TICK, TraceModeRequests, emit_pending,
-        skipped_control_detail_for, skipped_critical_for,
+        skipped_control_detail_for, skipped_critical_for, skipped_status_for,
     };
 
     #[test]
@@ -577,6 +577,11 @@ mod usb_trace_policy_tests {
     #[test]
     fn pre_config_skipped_control_detail_uses_100_hz() {
         assert_eq!(skipped_control_detail_for(2000), 200);
+    }
+
+    #[test]
+    fn pre_config_skipped_status_uses_10_hz() {
+        assert_eq!(skipped_status_for(2000), 20);
     }
 
     #[test]

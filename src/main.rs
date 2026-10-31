@@ -154,10 +154,6 @@ mod app {
         app_state: State,
     }
 
-    /// Persistent Integral candidate slots carried across `tmc_control` task calls.
-    ///
-    /// Retains the Integral authority a `breakaway_seeded` campaign hands off to
-    /// `integral_resume`, so every build runs the full autotune hand-off.
     type IntegralCandidatesTaskLocal = IntegralRetentionSlots<{ TMC_CHANNEL_COUNT as usize }>;
 
     #[local]
@@ -520,8 +516,6 @@ mod app {
             }
 
             crate::usb_trace::service_trace_mode_changes();
-            // Every channel, whatever its mode: a parked or commissioning channel never
-            // reaches the maintenance trace path, so its frames would never go out there.
             per_channel!(|ch, idx| {
                 crate::usb_trace::emit_control_state_frame(
                     ch,
