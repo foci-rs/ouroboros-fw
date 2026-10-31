@@ -1118,53 +1118,51 @@ mod app {
                             }
                         }
                     }
-                    {
-                        let refs = foci_firmware::tmc_control::TmcControlStateRefs::new(
-                            tmc_state(ch),
-                            stepper_state(ch),
+                    let refs = foci_firmware::tmc_control::TmcControlStateRefs::new(
+                        tmc_state(ch),
+                        stepper_state(ch),
+                    );
+                    let trace_tick = drivers[idx].runtime.advance_trace_tick();
+                    let inputs =
+                        foci_firmware::trace::sampling::TraceSampleInputs::from_runtime_trace(
+                            drivers[idx].runtime.trace_state(),
+                            trace_tick,
                         );
-                        let trace_tick = drivers[idx].runtime.advance_trace_tick();
-                        let inputs =
-                            foci_firmware::trace::sampling::TraceSampleInputs::from_runtime_trace(
-                                drivers[idx].runtime.trace_state(),
-                                trace_tick,
-                            );
-                        let step_timing = if ch == 0 {
-                            let snapshot = crate::usb_trace::take_step_timing_snapshot();
-                            if crate::usb_trace::is_configured() {
-                                Some(snapshot)
-                            } else {
-                                None
-                            }
+                    let step_timing = if ch == 0 {
+                        let snapshot = crate::usb_trace::take_step_timing_snapshot();
+                        if crate::usb_trace::is_configured() {
+                            Some(snapshot)
                         } else {
                             None
-                        };
-                        if let ChannelDevice::Device(device) = device_or_invalid(mux, ch) {
-                            let mut tmc = tmc_driver(device);
-                            crate::usb_trace::record_spi_sample_cycles(
-                                crate::usb_trace::sample_tick(
-                                    &mut tmc,
-                                    crate::usb_trace::TraceSampleContext {
-                                        channel: ch,
-                                        refs,
-                                        motor_enabled: drivers[idx].runtime.is_motor_enabled(),
-                                        step_timing,
-                                    },
-                                    inputs,
-                                )
-                                .await,
-                            );
-                            crate::usb_trace::emit_status_frames(
-                                ch,
+                        }
+                    } else {
+                        None
+                    };
+                    if let ChannelDevice::Device(device) = device_or_invalid(mux, ch) {
+                        let mut tmc = tmc_driver(device);
+                        crate::usb_trace::record_spi_sample_cycles(
+                            crate::usb_trace::sample_tick(
                                 &mut tmc,
-                                trace_tick.control_tick,
-                                trace_tick.status_detail_due,
+                                crate::usb_trace::TraceSampleContext {
+                                    channel: ch,
+                                    refs,
+                                    motor_enabled: drivers[idx].runtime.is_motor_enabled(),
+                                    step_timing,
+                                },
+                                inputs,
                             )
-                            .await;
-                            crate::usb_trace::request_spi_duration_event_if_ready();
-                            if trace_tick.metadata_due {
-                                crate::usb_trace::emit_metadata();
-                            }
+                            .await,
+                        );
+                        crate::usb_trace::emit_status_frames(
+                            ch,
+                            &mut tmc,
+                            trace_tick.control_tick,
+                            trace_tick.status_detail_due,
+                        )
+                        .await;
+                        crate::usb_trace::request_spi_duration_event_if_ready();
+                        if trace_tick.metadata_due {
+                            crate::usb_trace::emit_metadata();
                         }
                     }
                 }

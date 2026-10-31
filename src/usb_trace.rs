@@ -2,7 +2,8 @@
 
 use core::sync::atomic::{AtomicI32, AtomicU8, AtomicU32, Ordering};
 
-use foci_firmware::commissioning::inner::closed_loop_activation::CLOSED_LOOP_VELOCITY_SELECTION as CLOSED_LOOP_VELOCITY_SELECTION_REG;
+use foci_firmware::commissioning::inner::closed_loop_activation;
+use foci_firmware::context::QueueFull;
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
 use foci_firmware::trace::sampling::{
@@ -10,8 +11,6 @@ use foci_firmware::trace::sampling::{
 };
 use foci_firmware::trace::stream::{FrameBuf, frame_sequence};
 use foci_firmware::trace::transport::{self, TraceQueueSelection};
-
-use foci_firmware::context::QueueFull;
 
 use crate::state::usb_trace::{
     MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_CONTROL_WAKE,
@@ -175,9 +174,6 @@ pub(crate) fn service_trace_mode_changes() {
         );
     }
 
-    if TRACE_MODE_REQUESTS.is_empty() {
-        return;
-    }
     let Some((mode, oid)) = TRACE_MODE_REQUESTS.pop() else {
         return;
     };
@@ -690,8 +686,9 @@ pub(crate) fn emit_metadata() {
 }
 
 const CLOSED_LOOP_VELOCITY_SELECTION: u8 = {
-    assert!(CLOSED_LOOP_VELOCITY_SELECTION_REG <= u8::MAX as u32);
-    CLOSED_LOOP_VELOCITY_SELECTION_REG as u8
+    let selection = closed_loop_activation::CLOSED_LOOP_VELOCITY_SELECTION;
+    assert!(selection <= u8::MAX as u32);
+    selection as u8
 };
 
 fn control_state_sample(
