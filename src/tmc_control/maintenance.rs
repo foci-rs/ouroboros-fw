@@ -72,7 +72,7 @@ impl MaintenanceSnapshot {
 pub(crate) enum MaintenanceArm {
     /// Required work exists or quiescence cannot be proven.
     Armed,
-    /// Both channels and all global state prove quiescence.
+    /// Both channels and all global state prove quiescence and the trace mode is Dormant.
     Disarmed,
 }
 

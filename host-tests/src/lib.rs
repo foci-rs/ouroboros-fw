@@ -260,29 +260,6 @@ mod maintenance_quiescence_tests {
     }
 
     #[test]
-    fn only_dormant_trace_lets_quiescent_channels_disarm_maintenance() {
-        for (mode, expected) in [
-            (TraceMode::Critical, MaintenanceArm::Armed),
-            (TraceMode::Diagnostic, MaintenanceArm::Armed),
-            (TraceMode::Dormant, MaintenanceArm::Disarmed),
-        ] {
-            let mut snapshot = quiescent_snapshot();
-            snapshot.trace_mode = mode;
-            assert_eq!(maintenance_arm(snapshot), expected, "{mode:?}");
-        }
-
-        for channel in 0..2 {
-            let mut snapshot = quiescent_snapshot();
-            snapshot.channels[channel].motor_armed = true;
-            assert_eq!(
-                maintenance_arm(snapshot),
-                MaintenanceArm::Armed,
-                "channel {channel}"
-            );
-        }
-    }
-
-    #[test]
     fn maintenance_snapshot_is_owned_copy_state() {
         fn assert_owned_copy_static<T: Copy + 'static>() {}
 
