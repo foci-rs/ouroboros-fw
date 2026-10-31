@@ -401,8 +401,8 @@ mod usb_trace_policy_tests {
     };
 
     use crate::usb_trace_policy::{
-        EmitOutcome, TraceModeRequests, emit_pending, skipped_control_detail_for,
-        skipped_critical_for,
+        EmitOutcome, MAX_CONTROL_STATE_FRAMES_PER_TICK, TraceModeRequests, emit_pending,
+        skipped_control_detail_for, skipped_critical_for,
     };
 
     #[test]
@@ -443,25 +443,74 @@ mod usb_trace_policy_tests {
         assert!(q.push(TraceMode::Dormant, 3).is_ok());
     }
 
+    use core::cell::RefCell;
+
+    type Sent = RefCell<heapless::Vec<ControlStateHeader, 8>>;
+
+    fn accept_into(sent: &Sent) -> impl FnMut(ControlStateHeader) -> Result<(), QueueFull> + '_ {
+        |h| {
+            sent.borrow_mut().push(h).unwrap();
+            Ok(())
+        }
+    }
+
+    fn sequences(sent: &Sent) -> heapless::Vec<u32, 8> {
+        sent.borrow().iter().map(|h| h.change_sequence).collect()
+    }
+
     #[test]
-    fn control_state_emission_retries_until_queued_and_sends_the_latest_state() {
+    fn four_filter_requests_yield_four_frames_in_order_with_consecutive_sequences() {
         let r = ControlStateRecord::new();
-        r.record(AppliedRequest::OuterGains);
+        for kind in [
+            AppliedRequest::VelocityFilter,
+            AppliedRequest::TorqueFilter,
+            AppliedRequest::PositionFilter,
+            AppliedRequest::FluxFilter,
+        ] {
+            r.record(kind);
+        }
         r.stamp(10);
-        assert_eq!(emit_pending(&r, |_| Err(QueueFull)), EmitOutcome::Retained);
-        assert!(r.is_dirty());
-        r.record(AppliedRequest::RunCurrent);
-        r.stamp(11);
-        let sent = core::cell::Cell::new(None);
+        let sent = Sent::default();
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Queued);
+        let sent = sent.borrow();
+        let kinds: heapless::Vec<_, 4> = sent.iter().map(|h| h.applied_request).collect();
+        assert_eq!(
+            kinds.as_slice(),
+            [
+                AppliedRequest::VelocityFilter,
+                AppliedRequest::TorqueFilter,
+                AppliedRequest::PositionFilter,
+                AppliedRequest::FluxFilter,
+            ]
+        );
+        let seqs: heapless::Vec<_, 4> = sent.iter().map(|h| h.change_sequence).collect();
+        assert_eq!(seqs.as_slice(), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_sender_that_takes_two_frames_leaves_the_rest_for_the_next_call_without_repeats() {
+        let r = ControlStateRecord::new();
+        for _ in 0..4 {
+            r.record(AppliedRequest::RunCurrent);
+        }
+        r.stamp(10);
+        let sent = Sent::default();
+        let mut room = 2;
         assert_eq!(
             emit_pending(&r, |h| {
-                sent.set(Some(h));
+                if room == 0 {
+                    return Err(QueueFull);
+                }
+                room -= 1;
+                sent.borrow_mut().push(h).unwrap();
                 Ok(())
             }),
-            EmitOutcome::Queued
+            EmitOutcome::Retained
         );
-        assert!(!r.is_dirty());
-        assert_eq!(sent.get().unwrap().change_sequence, 2);
+        assert_eq!(sequences(&sent).as_slice(), [1, 2]);
+        assert!(r.is_dirty());
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Queued);
+        assert_eq!(sequences(&sent).as_slice(), [1, 2, 3, 4]);
         assert_eq!(
             emit_pending(&r, |_| panic!("must not emit twice")),
             EmitOutcome::Clean
@@ -469,12 +518,32 @@ mod usb_trace_policy_tests {
     }
 
     #[test]
-    fn snapshot_and_mutator_frames_go_out_in_order_and_retry_independently() {
+    fn a_refused_entry_is_offered_again_and_accepted_exactly_once() {
         let r = ControlStateRecord::new();
         r.record(AppliedRequest::OuterGains);
         r.stamp(10);
+        assert_eq!(emit_pending(&r, |_| Err(QueueFull)), EmitOutcome::Retained);
+        assert!(r.is_dirty());
+        r.record(AppliedRequest::RunCurrent);
+        r.stamp(11);
+        let sent = Sent::default();
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Queued);
+        assert_eq!(sequences(&sent).as_slice(), [1, 2]);
+        assert!(!r.is_dirty());
+        assert_eq!(
+            emit_pending(&r, |_| panic!("must not emit twice")),
+            EmitOutcome::Clean
+        );
+    }
+
+    #[test]
+    fn snapshot_frame_precedes_mutator_frames_and_retries_independently() {
+        let r = ControlStateRecord::new();
+        r.record(AppliedRequest::OuterGains);
+        r.record(AppliedRequest::RunCurrent);
+        r.stamp(10);
         r.mark_snapshot();
-        let sent: core::cell::RefCell<heapless::Vec<ControlStateHeader, 2>> = Default::default();
+        let sent = Sent::default();
         let mut room = 1;
         assert_eq!(
             emit_pending(&r, |h| {
@@ -490,13 +559,29 @@ mod usb_trace_policy_tests {
         assert_eq!(sent.borrow()[0].applied_request, AppliedRequest::None);
         assert!(!r.is_snapshot_pending());
         assert!(r.is_dirty());
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Queued);
+        let kinds: heapless::Vec<_, 3> = sent.borrow().iter().map(|h| h.applied_request).collect();
         assert_eq!(
-            emit_pending(&r, |h| {
-                sent.borrow_mut().push(h).unwrap();
-                Ok(())
-            }),
-            EmitOutcome::Queued
+            kinds.as_slice(),
+            [
+                AppliedRequest::None,
+                AppliedRequest::OuterGains,
+                AppliedRequest::RunCurrent,
+            ]
         );
-        assert_eq!(sent.borrow()[1].applied_request, AppliedRequest::OuterGains);
+    }
+
+    #[test]
+    fn mutator_frames_per_call_are_capped_and_the_remainder_goes_next_call() {
+        let r = ControlStateRecord::new();
+        for _ in 0..MAX_CONTROL_STATE_FRAMES_PER_TICK + 2 {
+            r.record(AppliedRequest::VoltageLimit);
+        }
+        r.stamp(10);
+        let sent = Sent::default();
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Retained);
+        assert_eq!(sequences(&sent).as_slice(), [1, 2, 3, 4]);
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Queued);
+        assert_eq!(sequences(&sent).as_slice(), [1, 2, 3, 4, 5, 6]);
     }
 }

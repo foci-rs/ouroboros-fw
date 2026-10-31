@@ -111,30 +111,42 @@ pub(crate) enum EmitOutcome {
     Retained,
 }
 
-/// Queue the frames `record` owes: the metadata snapshot first, then the mutator frame.
+/// Mutator frames queued per channel per call; the rest stay owed for the next tick.
+pub(crate) const MAX_CONTROL_STATE_FRAMES_PER_TICK: usize = 4;
+
+/// Queue the frames `record` owes: the metadata snapshot first, then one frame per pending
+/// request entry, oldest first.
 ///
-/// Stops at the first `QueueFull` and clears only what `send` accepted, so each frame retries
-/// independently on the next tick.
+/// Stops at the first `QueueFull`, popping only entries `send` accepted, so each frame retries
+/// independently on the next tick. At most [`MAX_CONTROL_STATE_FRAMES_PER_TICK`] mutator frames
+/// go out per call; entries beyond that yield [`EmitOutcome::Retained`].
 pub(crate) fn emit_pending(
     record: &ControlStateRecord,
     mut send: impl FnMut(ControlStateHeader) -> Result<(), QueueFull>,
 ) -> EmitOutcome {
-    let snapshot_pending = record.is_snapshot_pending();
-    let dirty = record.is_dirty();
-    if !snapshot_pending && !dirty {
-        return EmitOutcome::Clean;
-    }
-    if snapshot_pending {
+    let mut queued = false;
+    if record.is_snapshot_pending() {
         if send(record.snapshot_header()).is_err() {
             return EmitOutcome::Retained;
         }
         record.clear_snapshot_pending();
+        queued = true;
     }
-    if dirty {
-        if send(record.snapshot()).is_err() {
+    for _ in 0..MAX_CONTROL_STATE_FRAMES_PER_TICK {
+        let Some(header) = record.pending_header() else {
+            break;
+        };
+        if send(header).is_err() {
             return EmitOutcome::Retained;
         }
-        record.clear_dirty();
+        record.pop_pending();
+        queued = true;
     }
-    EmitOutcome::Queued
+    if record.is_dirty() {
+        EmitOutcome::Retained
+    } else if queued {
+        EmitOutcome::Queued
+    } else {
+        EmitOutcome::Clean
+    }
 }
