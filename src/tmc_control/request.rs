@@ -144,7 +144,6 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         crate::ankyra::replies::emit_terminal_reply(channel, payload);
     }
 
-    #[cfg(feature = "trace")]
     fn record_velocity_sweep_trace_record(
         &mut self,
         record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,
@@ -174,7 +173,6 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         foci_firmware::tmc_control::lifecycle::arm_motor_electrical(&mut backend, &mut state)
             .await?;
         apply_stepper_post_action(post_action, &mut state, self.channel);
-        #[cfg(feature = "trace")]
         crate::usb_trace::request_event(
             foci_firmware::trace::events::EVENT_LEVEL_INFO,
             foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,
@@ -198,7 +196,6 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         let mut state =
             runtime.dispatch_state(tmc_state(self.channel), stepper_state(self.channel));
         foci_firmware::tmc_control::lifecycle::disarm_motor(&mut backend, &mut state).await;
-        #[cfg(feature = "trace")]
         crate::usb_trace::request_event(
             foci_firmware::trace::events::EVENT_LEVEL_INFO,
             foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,

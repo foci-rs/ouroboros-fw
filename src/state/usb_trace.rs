@@ -1,6 +1,4 @@
-//! USB trace stream state for trace builds.
-
-#![cfg(feature = "trace")]
+//! USB trace stream state.
 
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 

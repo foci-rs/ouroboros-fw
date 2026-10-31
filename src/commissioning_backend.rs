@@ -62,7 +62,6 @@ impl CommissionBackendHooks for OuroborosHooks {
         Mono::delay((us as u64).micros()).await;
     }
 
-    #[cfg(feature = "trace")]
     fn record_commission_trace_event(
         channel: u8,
         event: foci_firmware::trace::events::CommissionTraceEvent,
@@ -70,7 +69,6 @@ impl CommissionBackendHooks for OuroborosHooks {
         crate::usb_trace::request_commission_event(channel, event);
     }
 
-    #[cfg(feature = "trace")]
     fn record_velocity_trace_observation(
         channel: u8,
         observation: foci_firmware::trace::stream::VelocityTraceObservation,
@@ -78,7 +76,6 @@ impl CommissionBackendHooks for OuroborosHooks {
         crate::usb_trace::request_velocity_observation(channel, observation);
     }
 
-    #[cfg(feature = "trace")]
     fn record_velocity_sweep_trace_record(
         channel: u8,
         record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,

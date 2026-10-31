@@ -7,5 +7,4 @@
 pub mod stepper;
 pub mod stepper_diag;
 pub mod tmc;
-#[cfg(feature = "trace")]
 pub mod usb_trace;

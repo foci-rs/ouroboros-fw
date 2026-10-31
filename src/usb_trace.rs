@@ -1,13 +1,11 @@
 //! Ouroboros USB trace stream integration.
 
-#![cfg(feature = "trace")]
-
 use core::sync::atomic::{AtomicI32, AtomicU8, AtomicU32, Ordering};
 
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
 use foci_firmware::trace::sampling::{
-    TraceSampleInputs, TraceSamplePlan, commissioning_trace_sample_plan,
+    TraceMode, TraceSampleInputs, TraceSamplePlan, commissioning_trace_sample_plan,
 };
 use foci_firmware::trace::stream::{FrameBuf, frame_sequence};
 use foci_firmware::trace::transport::{self, TraceQueueSelection};
@@ -20,7 +18,7 @@ use crate::state::usb_trace::{
 static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
 
 /// Enable the lower-rate raw current-path diagnostic frame.
-const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = cfg!(feature = "trace-current-path");
+const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = false;
 
 pub(crate) const EVENT_FIRMWARE_BOOT: u16 = 1;
 pub(crate) const EVENT_USB_CONFIGURED: u16 = 2;
@@ -911,6 +909,7 @@ pub(crate) async fn sample_commission_closed_loop_activation<B, R, D>(
 
     match commissioning_trace_sample_plan(
         trace_configured,
+        TraceMode::Critical,
         past_deadline,
         remaining_budget_us,
         control_tick,

@@ -32,7 +32,6 @@ pub fn tmc_status_irq_body(
     >,
 ) {
     fault_active.store(true, core::sync::atomic::Ordering::Relaxed);
-    #[cfg(feature = "trace")]
     crate::usb_trace::record_status_interrupt();
     let tim5 = embassy_stm32::pac::TIM5;
     tim5.dier().modify(|w| w.set_ccie(0, false));

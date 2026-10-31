@@ -140,10 +140,7 @@ impl StepperQueueBoard for OuroborosStepperBoard {
     }
 
     fn record_queued_segment(&mut self, channel: u8, steps: u32, queue_len: usize) {
-        #[cfg(feature = "trace")]
         crate::usb_trace::record_step_queue_depth(queue_len);
-        #[cfg(not(feature = "trace"))]
-        let _ = queue_len;
         crate::state::stepper_diag::record_queued_segment(channel, steps);
     }
 
@@ -307,7 +304,6 @@ pub struct FirmwareCtx<'a> {
 
 impl<'a> FirmwareCtx<'a> {
     pub fn new(state: &'a mut State) -> Self {
-        #[cfg(feature = "trace")]
         crate::usb_trace::store_last_klipper_command_service_tick(
             crate::usb_trace::trace_now_ticks(),
         );
@@ -605,5 +601,17 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
             stage: u8 = foci_firmware::motion_scale::MOTION_SCALE_REJECTION_STAGE_P2,
             reason: u8 = rejection.code(),
         );
+    }
+
+    fn set_trace_mode(
+        &mut self,
+        _mode: foci_firmware::trace::sampling::TraceMode,
+        _oid: u8,
+    ) -> Result<(), QueueFull> {
+        Err(QueueFull)
+    }
+
+    fn trace_mode(&self) -> u8 {
+        foci_firmware::trace::sampling::TraceMode::Critical as u8
     }
 }

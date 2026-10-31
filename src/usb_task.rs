@@ -90,18 +90,14 @@ impl<'a, L: FnMut(&mut dyn FnMut(&mut State))> UsbPumpBackend for OuroborosUsbBa
     }
 
     fn on_wake(&mut self) {
-        #[cfg(feature = "trace")]
         if foci_usb_stm32::is_configured() && !crate::usb_trace::is_configured() {
             crate::usb_trace::note_usb_configured();
         }
     }
 
     fn on_drain_complete(&mut self) {
-        #[cfg(feature = "trace")]
-        {
-            crate::usb_trace::drain_pending_events();
-            crate::usb_trace::drain_once();
-        }
+        crate::usb_trace::drain_pending_events();
+        crate::usb_trace::drain_once();
         self.emitter.maybe_emit(self.counters);
     }
 }
