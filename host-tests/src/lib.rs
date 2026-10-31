@@ -555,8 +555,14 @@ mod usb_trace_policy;
 mod usb_trace_policy_tests {
     use foci_firmware::trace::sampling::TraceMode;
 
+    use foci_firmware::context::QueueFull;
+    use foci_firmware::trace::control_state::{
+        AppliedRequest, ControlStateHeader, ControlStateRecord,
+    };
+
     use crate::usb_trace_policy::{
-        TraceModeRequests, next_mode_request, skipped_control_detail_for, skipped_critical_for,
+        EmitOutcome, TraceModeRequests, emit_pending, next_mode_request,
+        skipped_control_detail_for, skipped_critical_for,
     };
 
     #[test]
@@ -628,5 +634,62 @@ mod usb_trace_policy_tests {
         assert!(q.push(TraceMode::Dormant, 3).is_err());
         assert_eq!(q.pop(), Some((TraceMode::Critical, 3)));
         assert!(q.push(TraceMode::Dormant, 3).is_ok());
+    }
+
+    #[test]
+    fn control_state_emission_retries_until_queued_and_sends_the_latest_state() {
+        let r = ControlStateRecord::new();
+        r.record(AppliedRequest::OuterGains);
+        r.stamp(10);
+        assert_eq!(emit_pending(&r, |_| Err(QueueFull)), EmitOutcome::Retained);
+        assert!(r.is_dirty());
+        r.record(AppliedRequest::RunCurrent);
+        r.stamp(11);
+        let sent = core::cell::Cell::new(None);
+        assert_eq!(
+            emit_pending(&r, |h| {
+                sent.set(Some(h));
+                Ok(())
+            }),
+            EmitOutcome::Queued
+        );
+        assert!(!r.is_dirty());
+        assert_eq!(sent.get().unwrap().change_sequence, 2);
+        assert_eq!(
+            emit_pending(&r, |_| panic!("must not emit twice")),
+            EmitOutcome::Clean
+        );
+    }
+
+    #[test]
+    fn snapshot_and_mutator_frames_go_out_in_order_and_retry_independently() {
+        let r = ControlStateRecord::new();
+        r.record(AppliedRequest::OuterGains);
+        r.stamp(10);
+        r.mark_snapshot();
+        let sent: core::cell::RefCell<heapless::Vec<ControlStateHeader, 2>> = Default::default();
+        let mut room = 1;
+        assert_eq!(
+            emit_pending(&r, |h| {
+                if room == 0 {
+                    return Err(QueueFull);
+                }
+                room -= 1;
+                sent.borrow_mut().push(h).unwrap();
+                Ok(())
+            }),
+            EmitOutcome::Retained
+        );
+        assert_eq!(sent.borrow()[0].applied_request, AppliedRequest::None);
+        assert!(!r.is_snapshot_pending());
+        assert!(r.is_dirty());
+        assert_eq!(
+            emit_pending(&r, |h| {
+                sent.borrow_mut().push(h).unwrap();
+                Ok(())
+            }),
+            EmitOutcome::Queued
+        );
+        assert_eq!(sent.borrow()[1].applied_request, AppliedRequest::OuterGains);
     }
 }

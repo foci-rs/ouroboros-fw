@@ -17,7 +17,7 @@ use crate::state::usb_trace::{
     TRACE_MODE_REQUESTS, current_tx, event_queue, motion_consumer, motion_producer,
 };
 use crate::usb_trace_policy::{
-    CONTROL_DETAIL_HZ, STATUS_HZ, next_mode_request, skipped_control_detail_for,
+    CONTROL_DETAIL_HZ, STATUS_HZ, emit_pending, next_mode_request, skipped_control_detail_for,
     skipped_critical_for, skipped_status_for,
 };
 
@@ -681,6 +681,107 @@ pub(crate) fn emit_metadata() {
     ));
     frame.payload_mut(payload.len()).copy_from_slice(&payload);
     enqueue_motion(frame);
+    for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
+        crate::tmc_control::board::tmc_state(channel)
+            .control_state
+            .mark_snapshot();
+    }
+}
+
+/// `VELOCITY_SELECTION` value the closed-loop activation writes; the firmware keeps it private.
+const CLOSED_LOOP_VELOCITY_SELECTION: u8 = 0x09;
+
+fn control_state_sample(
+    header: foci_firmware::trace::control_state::ControlStateHeader,
+    state: &foci_firmware::state::tmc::TmcChannelState,
+    inner_gains: Option<foci_firmware::pid::InnerLoopGains>,
+) -> foci_firmware::trace::control_state::ControlStateSample {
+    use core::sync::atomic::Ordering::Relaxed;
+
+    let outer = state.load_outer_gains(Relaxed).ok();
+    let outer_raw = |gain: fn(&foci_firmware::pid::OuterLoopGains) -> u16| {
+        outer.as_ref().map_or(0, |g| i32::from(gain(g)))
+    };
+    let inner_raw = |gain: fn(&foci_firmware::pid::InnerLoopGains) -> u16| {
+        inner_gains.as_ref().map_or(0, |g| i32::from(gain(g)))
+    };
+    foci_firmware::trace::control_state::ControlStateSample {
+        header,
+        encoder_counts_per_rev: state.encoder_counts_per_rev().unwrap_or(0),
+        pwm_hz: crate::board_config::TMC_CONFIG.pwm_freq_hz(),
+        velocity_meter_selection: CLOSED_LOOP_VELOCITY_SELECTION,
+        velocity_filter_hz: state.velocity_filter_hz.load_or_zero(Relaxed),
+        torque_filter_hz: state.torque_filter_hz.load_or_zero(Relaxed),
+        position_filter_hz: state.position_filter_hz.load_or_zero(Relaxed),
+        flux_filter_hz: state.flux_filter_hz.load_or_zero(Relaxed),
+        velocity_p: outer_raw(|g| g.velocity_p.raw()),
+        velocity_i: outer_raw(|g| g.velocity_i.raw()),
+        position_p: outer_raw(|g| g.position_p.raw()),
+        position_i: outer_raw(|g| g.position_i.raw()),
+        torque_p: inner_raw(|g| g.torque_p.raw()),
+        torque_i: inner_raw(|g| g.torque_i.raw()),
+        flux_p: inner_raw(|g| g.flux_p.raw()),
+        flux_i: inner_raw(|g| g.flux_i.raw()),
+        velocity_ff_enable: u8::from(state.velocity_feedforward.load(Relaxed)),
+        velocity_ff_permille: state.velocity_feedforward_gain_permille.load(Relaxed),
+        accel_ff_enable: u8::from(state.accel_feedforward.load(Relaxed)),
+        accel_ff_gain: state.accel_feedforward_accel_gain_permille.load(Relaxed),
+        decel_ff_gain: state.accel_feedforward_decel_gain_permille.load(Relaxed),
+        run_current: state.run_current_ma_cfg.load(Relaxed),
+        voltage_limit: state
+            .voltage_limit_cfg
+            .load(Relaxed)
+            .min(u32::from(u16::MAX)) as u16,
+    }
+}
+
+/// Queue one control-state frame, or refuse without consuming a sequence number or
+/// counting a drop when the motion queue has no room.
+fn try_enqueue_control_state(
+    channel: u8,
+    sample: &foci_firmware::trace::control_state::ControlStateSample,
+) -> Result<(), QueueFull> {
+    use foci_firmware::trace::stream::*;
+
+    // SAFETY: TMC control is the sole motion-frame producer, so room seen by `ready` cannot
+    // be taken before the enqueue below.
+    let producer = unsafe { motion_producer() };
+    if !producer.ready() {
+        return Err(QueueFull);
+    }
+    let mut payload = [0u8; CONTROL_STATE_PAYLOAD_LEN];
+    foci_firmware::trace::control_state::encode_control_state_payload(sample, &mut payload);
+    let mut frame = FrameBuf::new();
+    frame.write_header(header(
+        FRAME_TYPE_CONTROL_STATE,
+        CONTROL_STATE_PAYLOAD_LEN,
+        SOURCE_KIND_FOCI,
+        channel,
+        motion_flags(),
+    ));
+    frame
+        .payload_mut(CONTROL_STATE_PAYLOAD_LEN)
+        .copy_from_slice(&payload);
+    enqueue_motion(frame);
+    Ok(())
+}
+
+/// Control-task context, once per tick per channel after the driver ran.
+///
+/// Stamps a just-applied mutator with the current trace tick, then queues the snapshot and
+/// mutator frames the channel owes; anything the motion queue cannot take stays owed.
+pub(crate) fn emit_control_state_frame(
+    channel: u8,
+    state: &foci_firmware::state::tmc::TmcChannelState,
+    inner_gains: Option<foci_firmware::pid::InnerLoopGains>,
+) {
+    state.control_state.stamp(trace_now_ticks());
+    if !is_configured() {
+        return;
+    }
+    let _ = emit_pending(&state.control_state, |header| {
+        try_enqueue_control_state(channel, &control_state_sample(header, state, inner_gains))
+    });
 }
 
 async fn read_register_trace<B>(

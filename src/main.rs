@@ -520,6 +520,16 @@ mod app {
             }
 
             crate::usb_trace::service_trace_mode_changes();
+            // Every channel, whatever its mode: a parked or commissioning channel never
+            // reaches the maintenance trace path, and its owed snapshot would hold the
+            // next mode request forever.
+            per_channel!(|ch, idx| {
+                crate::usb_trace::emit_control_state_frame(
+                    ch,
+                    tmc_state(ch),
+                    drivers[idx].runtime.stored_gains(),
+                );
+            });
 
             let levels = status_levels(status_pin0);
             tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
@@ -1029,7 +1039,11 @@ mod app {
                             &tmc_control_config,
                             integral_candidate,
                         );
-                        Some(drivers[idx].drive(unit, &mut backend, ctx_unit).await)
+                        let outcome = drivers[idx].drive(unit, &mut backend, ctx_unit).await;
+                        tmc_state(ch)
+                            .control_state
+                            .stamp(crate::usb_trace::trace_now_ticks());
+                        Some(outcome)
                     }
                     ChannelDevice::Invalid => {
                         shutdown!("Invalid TMC channel");

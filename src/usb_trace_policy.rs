@@ -3,6 +3,7 @@
 use core::sync::atomic::{AtomicU8, AtomicU16, Ordering};
 
 use foci_firmware::context::QueueFull;
+use foci_firmware::trace::control_state::{ControlStateHeader, ControlStateRecord};
 use foci_firmware::trace::sampling::TraceMode;
 
 /// Nominal control-detail rate advertised in metadata and used for pre-configuration skips.
@@ -113,4 +114,43 @@ pub(crate) fn next_mode_request(
         return None;
     }
     ring.pop()
+}
+
+/// Result of one control-state emission attempt for a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmitOutcome {
+    /// Nothing was owed.
+    Clean,
+    /// Every owed frame was queued.
+    Queued,
+    /// The queue was full; the unqueued frame stays owed for the next tick.
+    Retained,
+}
+
+/// Queue the frames `record` owes: the metadata snapshot first, then the mutator frame.
+///
+/// Stops at the first `QueueFull` and clears only what `send` accepted, so each frame retries
+/// independently on the next tick.
+pub(crate) fn emit_pending(
+    record: &ControlStateRecord,
+    mut send: impl FnMut(ControlStateHeader) -> Result<(), QueueFull>,
+) -> EmitOutcome {
+    let snapshot_pending = record.is_snapshot_pending();
+    let dirty = record.is_dirty();
+    if !snapshot_pending && !dirty {
+        return EmitOutcome::Clean;
+    }
+    if snapshot_pending {
+        if send(record.snapshot_header()).is_err() {
+            return EmitOutcome::Retained;
+        }
+        record.clear_snapshot_pending();
+    }
+    if dirty {
+        if send(record.snapshot()).is_err() {
+            return EmitOutcome::Retained;
+        }
+        record.clear_dirty();
+    }
+    EmitOutcome::Queued
 }
