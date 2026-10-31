@@ -762,10 +762,12 @@ fn try_enqueue_control_state(
     Ok(())
 }
 
-/// Control-task context, once per tick per channel after the driver ran.
+/// Control-task context, once per channel at the top of each control-loop pass, before the
+/// driver runs.
 ///
-/// Stamps a just-applied mutator with the current trace tick, then queues the snapshot and
-/// mutator frames the channel owes; anything the motion queue cannot take stays owed.
+/// Stamps a mutator applied during the previous pass with the current trace tick, then queues
+/// the snapshot and mutator frames the channel owes; anything the motion queue cannot take
+/// stays owed.
 pub(crate) fn emit_control_state_frame(
     channel: u8,
     state: &foci_firmware::state::tmc::TmcChannelState,
