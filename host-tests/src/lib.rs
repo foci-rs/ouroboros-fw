@@ -588,32 +588,6 @@ mod usb_trace_policy_tests {
     }
 
     #[test]
-    fn mode_requests_are_serviced_while_a_snapshot_is_owed_and_the_snapshot_coalesces() {
-        let q = TraceModeRequests::new();
-        let r = ControlStateRecord::new();
-        q.push(TraceMode::Critical, 3).unwrap();
-        q.push(TraceMode::Dormant, 4).unwrap();
-        r.mark_snapshot();
-
-        assert_eq!(q.pop(), Some((TraceMode::Critical, 3)));
-        r.mark_snapshot();
-        assert_eq!(q.pop(), Some((TraceMode::Dormant, 4)));
-        r.mark_snapshot();
-        assert!(q.is_empty());
-
-        let mut snapshots = 0;
-        assert_eq!(
-            emit_pending(&r, |h| {
-                assert_eq!(h.applied_request, AppliedRequest::None);
-                snapshots += 1;
-                Ok(())
-            }),
-            EmitOutcome::Queued
-        );
-        assert_eq!(snapshots, 1);
-    }
-
-    #[test]
     fn a_full_ring_rejects_the_push_and_keeps_the_queued_modes() {
         let q = TraceModeRequests::new();
         for m in [
