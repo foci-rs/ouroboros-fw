@@ -561,8 +561,8 @@ mod usb_trace_policy_tests {
     };
 
     use crate::usb_trace_policy::{
-        EmitOutcome, TraceModeRequests, emit_pending, next_mode_request,
-        skipped_control_detail_for, skipped_critical_for,
+        EmitOutcome, TraceModeRequests, emit_pending, skipped_control_detail_for,
+        skipped_critical_for,
     };
 
     #[test]
@@ -588,36 +588,29 @@ mod usb_trace_policy_tests {
     }
 
     #[test]
-    fn a_second_mode_request_waits_until_the_previous_snapshots_are_queued() {
+    fn mode_requests_are_serviced_while_a_snapshot_is_owed_and_the_snapshot_coalesces() {
         let q = TraceModeRequests::new();
+        let r = ControlStateRecord::new();
         q.push(TraceMode::Critical, 3).unwrap();
-        q.push(TraceMode::Dormant, 3).unwrap();
-        assert_eq!(
-            next_mode_request(&q, true, false),
-            Some((TraceMode::Critical, 3))
-        );
-        assert_eq!(next_mode_request(&q, true, true), None);
-        assert!(!q.is_empty());
-        assert_eq!(
-            next_mode_request(&q, true, false),
-            Some((TraceMode::Dormant, 3))
-        );
-    }
+        q.push(TraceMode::Dormant, 4).unwrap();
+        r.mark_snapshot();
 
-    #[test]
-    fn unconfigured_trace_services_requests_without_the_snapshot_gate() {
-        let q = TraceModeRequests::new();
-        q.push(TraceMode::Critical, 3).unwrap();
-        q.push(TraceMode::Dormant, 3).unwrap();
-        assert_eq!(
-            next_mode_request(&q, false, true),
-            Some((TraceMode::Critical, 3))
-        );
-        assert_eq!(
-            next_mode_request(&q, false, true),
-            Some((TraceMode::Dormant, 3))
-        );
+        assert_eq!(q.pop(), Some((TraceMode::Critical, 3)));
+        r.mark_snapshot();
+        assert_eq!(q.pop(), Some((TraceMode::Dormant, 4)));
+        r.mark_snapshot();
         assert!(q.is_empty());
+
+        let mut snapshots = 0;
+        assert_eq!(
+            emit_pending(&r, |h| {
+                assert_eq!(h.applied_request, AppliedRequest::None);
+                snapshots += 1;
+                Ok(())
+            }),
+            EmitOutcome::Queued
+        );
+        assert_eq!(snapshots, 1);
     }
 
     #[test]

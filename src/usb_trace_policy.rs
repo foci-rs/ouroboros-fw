@@ -100,22 +100,6 @@ impl TraceModeRequests {
     }
 }
 
-/// Take the next request the control task may service this tick.
-///
-/// While the trace stream is configured, a request waits until no channel still owes the
-/// snapshot frame of the previous metadata emission. While unconfigured nothing can be
-/// queued, so requests are taken without that gate.
-pub(crate) fn next_mode_request(
-    ring: &TraceModeRequests,
-    configured: bool,
-    snapshots_pending: bool,
-) -> Option<(TraceMode, u8)> {
-    if configured && snapshots_pending {
-        return None;
-    }
-    ring.pop()
-}
-
 /// Result of one control-state emission attempt for a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EmitOutcome {

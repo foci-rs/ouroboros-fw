@@ -17,8 +17,8 @@ use crate::state::usb_trace::{
     TRACE_MODE_REQUESTS, current_tx, event_queue, motion_consumer, motion_producer,
 };
 use crate::usb_trace_policy::{
-    CONTROL_DETAIL_HZ, STATUS_HZ, emit_pending, next_mode_request, skipped_control_detail_for,
-    skipped_critical_for, skipped_status_for,
+    CONTROL_DETAIL_HZ, STATUS_HZ, emit_pending, skipped_control_detail_for, skipped_critical_for,
+    skipped_status_for,
 };
 
 static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
@@ -140,19 +140,15 @@ pub(crate) fn set_trace_mode(mode: TraceMode, oid: u8) -> Result<(), QueueFull> 
     TRACE_MODE_REQUESTS.push(mode, oid)
 }
 
-fn any_snapshot_pending() -> bool {
-    (0..crate::board_config::TMC_CHANNEL_COUNT).any(|channel| {
-        crate::tmc_control::board::tmc_state(channel)
-            .control_state
-            .is_snapshot_pending()
-    })
-}
-
 /// Control-task context, at the start of every control tick before the driver runs.
 ///
 /// Emits the configuration-time baseline once `note_usb_configured` asked for it, then
 /// services at most one queued trace-mode request: stores it as the live mode, re-emits
 /// metadata while configured, and replies with the live mode.
+///
+/// A request never waits for owed snapshot frames: with no recorder draining the trace
+/// endpoint they would stay owed indefinitely. The snapshot flag coalesces, so the frame that
+/// finally goes out reports the state after the newest metadata.
 pub(crate) fn service_trace_mode_changes() {
     if TRACE_COUNTERS
         .baseline_pending
@@ -178,10 +174,7 @@ pub(crate) fn service_trace_mode_changes() {
     if TRACE_MODE_REQUESTS.is_empty() {
         return;
     }
-    let configured = is_configured();
-    let Some((mode, oid)) =
-        next_mode_request(&TRACE_MODE_REQUESTS, configured, any_snapshot_pending())
-    else {
+    let Some((mode, oid)) = TRACE_MODE_REQUESTS.pop() else {
         return;
     };
     if !TRACE_COUNTERS.configured.load(Ordering::Acquire) {
@@ -190,7 +183,7 @@ pub(crate) fn service_trace_mode_changes() {
     TRACE_COUNTERS
         .trace_mode
         .store(mode as u8, Ordering::Relaxed);
-    if configured {
+    if is_configured() {
         emit_metadata();
     }
     crate::ankyra::replies::emit_trace_mode_state(oid, trace_mode());
