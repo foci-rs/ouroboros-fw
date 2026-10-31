@@ -555,12 +555,13 @@ mod usb_trace_policy;
 
 #[cfg(test)]
 mod usb_trace_policy_tests {
-    use foci_firmware::trace::sampling::TraceMode;
+    use core::cell::RefCell;
 
     use foci_firmware::context::QueueFull;
     use foci_firmware::trace::control_state::{
         AppliedRequest, ControlStateHeader, ControlStateRecord,
     };
+    use foci_firmware::trace::sampling::TraceMode;
 
     use crate::usb_trace_policy::{
         EmitOutcome, MAX_CONTROL_STATE_FRAMES_PER_TICK, TraceModeRequests, emit_pending,
@@ -604,8 +605,6 @@ mod usb_trace_policy_tests {
         assert_eq!(q.pop(), Some((TraceMode::Critical, 3)));
         assert!(q.push(TraceMode::Dormant, 3).is_ok());
     }
-
-    use core::cell::RefCell;
 
     type Sent = RefCell<heapless::Vec<ControlStateHeader, 8>>;
 
