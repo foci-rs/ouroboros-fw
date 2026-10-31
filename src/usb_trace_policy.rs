@@ -107,7 +107,8 @@ pub(crate) enum EmitOutcome {
     Clean,
     /// Every owed frame was queued.
     Queued,
-    /// The queue was full; the unqueued frame stays owed for the next tick.
+    /// The queue was full or the per-call cap was reached; the unqueued frames stay owed for the
+    /// next tick.
     Retained,
 }
 

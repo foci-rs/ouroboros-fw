@@ -765,7 +765,7 @@ fn try_enqueue_control_state(
 /// Control-task context, once per channel at the top of each control-loop pass, before the
 /// driver runs.
 ///
-/// Stamps a mutator applied during the previous pass with the current trace tick, then queues
+/// Stamps every mutator recorded since the last pass with the current trace tick, then queues
 /// the snapshot and mutator frames the channel owes; anything the motion queue cannot take
 /// stays owed.
 pub(crate) fn emit_control_state_frame(
