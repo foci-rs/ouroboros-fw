@@ -2,6 +2,7 @@
 
 use core::sync::atomic::{AtomicI32, AtomicU8, AtomicU32, Ordering};
 
+use foci_firmware::commissioning::inner::closed_loop_activation::CLOSED_LOOP_VELOCITY_SELECTION as CLOSED_LOOP_VELOCITY_SELECTION_REG;
 use foci_firmware::trace::events::TraceClockExt;
 use foci_firmware::trace::pressure::{TracePressureRuntime, TracePressureStatusInputs};
 use foci_firmware::trace::sampling::{
@@ -681,8 +682,10 @@ pub(crate) fn emit_metadata() {
     }
 }
 
-/// `VELOCITY_SELECTION` value the closed-loop activation writes; the firmware keeps it private.
-const CLOSED_LOOP_VELOCITY_SELECTION: u8 = 0x09;
+const CLOSED_LOOP_VELOCITY_SELECTION: u8 = {
+    assert!(CLOSED_LOOP_VELOCITY_SELECTION_REG <= u8::MAX as u32);
+    CLOSED_LOOP_VELOCITY_SELECTION_REG as u8
+};
 
 fn control_state_sample(
     header: foci_firmware::trace::control_state::ControlStateHeader,
