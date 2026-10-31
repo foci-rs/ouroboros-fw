@@ -525,7 +525,30 @@ mod pulse_train_tests {
 mod step_dispatch_tests {
     use std::vec::Vec;
 
-    use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
+    use crate::step_dispatch::{
+        ChannelRefresh, StepDispatchOutcome, channel_refresh, run_step_dispatch,
+    };
+
+    #[test]
+    fn ready_channel_without_an_active_segment_reloads_despite_a_stale_clock() {
+        assert_eq!(
+            channel_refresh(true, false, Some(0x8000_0000)),
+            ChannelRefresh::Load
+        );
+    }
+
+    #[test]
+    fn channel_refresh_keeps_a_live_schedule_and_drops_an_unready_one() {
+        assert_eq!(
+            channel_refresh(true, true, Some(1_000)),
+            ChannelRefresh::Keep
+        );
+        assert_eq!(channel_refresh(true, true, None), ChannelRefresh::Load);
+        assert_eq!(
+            channel_refresh(false, true, Some(1_000)),
+            ChannelRefresh::Clear
+        );
+    }
 
     #[test]
     fn fatal_channel_stops_dispatch_before_later_channel_callback() {

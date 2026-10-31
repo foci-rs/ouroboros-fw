@@ -53,7 +53,9 @@ mod app {
     use crate::helpers::stepper::*;
     use crate::helpers::trsync::*;
     use crate::state::tmc::*;
-    use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
+    use crate::step_dispatch::{
+        ChannelRefresh, StepDispatchOutcome, channel_refresh, run_step_dispatch,
+    };
     use crate::tmc_control::board::{
         TmcEnablePins, apply_live_maintenance_arm, channel_needs_safe_state,
         commissioning_request_blocked, enable_pin, ouroboros_backend, refresh_velocity_scale,
@@ -1655,32 +1657,22 @@ mod app {
     ) -> StepDispatchOutcome {
         for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
             let channel = idx as u8;
-            if !channel_stepper_ready(channel) {
-                next_event_clocks[idx] = None;
-                continue;
-            }
-            // A stop that happens outside this ISR (trigger stop, P1 stop,
-            // commissioning stimulus stop) resets the channel's stepper engine
-            // but cannot touch this ISR-local schedule, and it disables CC1
-            // when no other channel is active, so no ISR run follows to clear
-            // the entry. When the channel is armed again for its next move it
-            // is ready with no active segment but still carries that stale
-            // clock, and the dispatch below would wait for the stale value to
-            // come round on the 32-bit timer (up to 16.5 s) before loading
-            // the first segment, which is then far past its deadline. A ready
-            // channel without an active segment always needs a load.
-            //
+            let ready = channel_stepper_ready(channel);
             // SAFETY: ISR stepper state is only accessed from this P3 ISR for
             // this channel. P3 tasks cannot preempt each other on Cortex-M.
-            let has_active_segment = unsafe { crate::state::stepper::isr_stepper(channel) }
-                .is_some_and(|stepper| stepper.has_active_segment());
-            if !has_active_segment {
-                next_event_clocks[idx] = None;
-            }
-            if next_event_clocks[idx].is_none()
-                && load_next_step_move(channel, next_event_clocks) == StepDispatchOutcome::Fatal
-            {
-                return StepDispatchOutcome::Fatal;
+            let has_active_segment = ready
+                && unsafe { crate::state::stepper::isr_stepper(channel) }
+                    .is_some_and(|stepper| stepper.has_active_segment());
+            match channel_refresh(ready, has_active_segment, next_event_clocks[idx]) {
+                ChannelRefresh::Clear => next_event_clocks[idx] = None,
+                ChannelRefresh::Load => {
+                    next_event_clocks[idx] = None;
+                    if load_next_step_move(channel, next_event_clocks) == StepDispatchOutcome::Fatal
+                    {
+                        return StepDispatchOutcome::Fatal;
+                    }
+                }
+                ChannelRefresh::Keep => {}
             }
         }
         StepDispatchOutcome::Continue

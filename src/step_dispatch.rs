@@ -22,3 +22,34 @@ pub(crate) fn run_step_dispatch(
         }
     }
 }
+
+/// What the dispatch refresh does with one channel's pending next-event clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChannelRefresh {
+    /// The channel is not ready; drop its pending clock.
+    Clear,
+    /// Drop any pending clock and load the channel's next segment.
+    Load,
+    /// Keep the pending clock.
+    Keep,
+}
+
+/// Decide how the refresh pass treats one channel.
+///
+/// A stop outside the step ISR resets the stepper engine but cannot clear the ISR-local
+/// schedule, so a ready channel without an active segment can still carry a stale clock.
+/// Waiting for that clock to come round on the 32-bit timer delays the first segment past
+/// its deadline, so such a channel always reloads.
+pub(crate) fn channel_refresh(
+    ready: bool,
+    has_active_segment: bool,
+    next_event_clock: Option<u32>,
+) -> ChannelRefresh {
+    if !ready {
+        ChannelRefresh::Clear
+    } else if !has_active_segment || next_event_clock.is_none() {
+        ChannelRefresh::Load
+    } else {
+        ChannelRefresh::Keep
+    }
+}
