@@ -55,8 +55,9 @@ mod app {
     use crate::state::tmc::*;
     use crate::step_dispatch::{StepDispatchOutcome, run_step_dispatch};
     use crate::tmc_control::board::{
-        TmcEnablePins, channel_needs_safe_state, commissioning_request_blocked, enable_pin,
-        ouroboros_backend, refresh_velocity_scale, stepper_state, tmc_driver, tmc_state,
+        TmcEnablePins, apply_live_maintenance_arm, channel_needs_safe_state,
+        commissioning_request_blocked, enable_pin, ouroboros_backend, refresh_velocity_scale,
+        stepper_state, tmc_driver, tmc_state,
     };
     use crate::trigger_domain::{TRIGGER_DOMAIN, TriggerDomain, with_trigger_domain};
     use foci_firmware::commissioning::outer::velocity::integral_reproduction::IntegralRetentionSlots;
@@ -818,7 +819,7 @@ mod app {
             scheduler.set_mode(1, drivers[1].mode(), now_us());
 
             let now = now_us();
-            scheduler.set_maintenance_arm(MaintenanceArm::Armed, now);
+            apply_live_maintenance_arm(&mut scheduler, drivers, now);
             let wait = homing_wake.next_wait(
                 HOMING_START_PENDING.load(Acquire),
                 scheduler.earliest_due_us().is_some_and(|due| due <= now),
@@ -846,7 +847,7 @@ mod app {
                     }
                 }
             };
-            scheduler.set_maintenance_arm(MaintenanceArm::Armed, now_us());
+            apply_live_maintenance_arm(&mut scheduler, drivers, now_us());
 
             let request = if matches!(wait, HomingWait::ProcessRetained) {
                 homing_wake.take_retained_request()
@@ -985,7 +986,7 @@ mod app {
             }
 
             let now = now_us();
-            scheduler.set_maintenance_arm(MaintenanceArm::Armed, now);
+            apply_live_maintenance_arm(&mut scheduler, drivers, now);
             let homing_state = HOMING_STATE.load(Relaxed);
             let Some(unit) = scheduler.pick(now, homing_state) else {
                 continue;
