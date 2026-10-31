@@ -1,4 +1,5 @@
 use foci_firmware::tmc_control::ChannelMode;
+use foci_firmware::trace::sampling::TraceMode;
 
 /// Maintenance-relevant state copied from one TMC channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +46,8 @@ pub(crate) struct MaintenanceSnapshot {
     pub(crate) homing_triggered: u8,
     pub(crate) homing_start_pending: bool,
     pub(crate) channels: [ChannelMaintenanceSnapshot; 2],
-    pub(crate) trace_enabled: bool,
+    /// Live trace mode; Critical and Diagnostic sample on the maintenance tick.
+    pub(crate) trace_mode: TraceMode,
 }
 
 impl MaintenanceSnapshot {
@@ -61,7 +63,7 @@ impl MaintenanceSnapshot {
                 .channels
                 .into_iter()
                 .all(ChannelMaintenanceSnapshot::proves_quiescence)
-            && !self.trace_enabled
+            && matches!(self.trace_mode, TraceMode::Dormant)
     }
 }
 

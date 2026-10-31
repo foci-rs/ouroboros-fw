@@ -179,7 +179,7 @@ pub(crate) fn apply_live_maintenance_arm(
             maintenance_channel_snapshot(0, &drivers[0]),
             maintenance_channel_snapshot(1, &drivers[1]),
         ],
-        trace_enabled: true,
+        trace_mode: crate::usb_trace::trace_mode(),
     }) {
         MaintenanceArm::Armed => SchedulerMaintenanceArm::Armed,
         MaintenanceArm::Disarmed => SchedulerMaintenanceArm::Disarmed,

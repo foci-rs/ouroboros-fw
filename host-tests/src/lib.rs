@@ -113,6 +113,7 @@ mod maintenance_quiescence_tests {
     }
 
     use foci_firmware::tmc_control::ChannelMode;
+    use foci_firmware::trace::sampling::TraceMode;
     use predicate::{
         ChannelMaintenanceSnapshot, MaintenanceArm, MaintenanceSnapshot, maintenance_arm,
     };
@@ -144,7 +145,7 @@ mod maintenance_quiescence_tests {
             homing_triggered: 0xFF,
             homing_start_pending: false,
             channels: [quiescent_channel(), quiescent_channel()],
-            trace_enabled: false,
+            trace_mode: TraceMode::Dormant,
         }
     }
 
@@ -223,7 +224,8 @@ mod maintenance_quiescence_tests {
             ("channel 1 queue", |s| {
                 s.channels[1].step_queue_empty = false
             }),
-            ("trace", |s| s.trace_enabled = true),
+            ("trace critical", |s| s.trace_mode = TraceMode::Critical),
+            ("trace diagnostic", |s| s.trace_mode = TraceMode::Diagnostic),
         ];
 
         assert_eq!(
@@ -255,6 +257,29 @@ mod maintenance_quiescence_tests {
         snapshot.channels[1].step_queue_empty = false;
         snapshot.fault_active = true;
         assert_eq!(maintenance_arm(snapshot), MaintenanceArm::Armed);
+    }
+
+    #[test]
+    fn only_dormant_trace_lets_quiescent_channels_disarm_maintenance() {
+        for (mode, expected) in [
+            (TraceMode::Critical, MaintenanceArm::Armed),
+            (TraceMode::Diagnostic, MaintenanceArm::Armed),
+            (TraceMode::Dormant, MaintenanceArm::Disarmed),
+        ] {
+            let mut snapshot = quiescent_snapshot();
+            snapshot.trace_mode = mode;
+            assert_eq!(maintenance_arm(snapshot), expected, "{mode:?}");
+        }
+
+        for channel in 0..2 {
+            let mut snapshot = quiescent_snapshot();
+            snapshot.channels[channel].motor_armed = true;
+            assert_eq!(
+                maintenance_arm(snapshot),
+                MaintenanceArm::Armed,
+                "channel {channel}"
+            );
+        }
     }
 
     #[test]
