@@ -425,6 +425,16 @@ pub(crate) fn emit_terminal_reply(
     foci_firmware::commission_dispatch::emit_terminal_reply(&mut sink, channel, payload);
 }
 
+/// Emit the live trace mode after the control task applied a `foci_set_trace_mode` request.
+pub(crate) fn emit_trace_mode_state(oid: u8, mode: foci_firmware::trace::sampling::TraceMode) {
+    ::ankyra::klipper_reply_from!(
+        &mut crate::_ankyra_config::Sender,
+        foci_firmware::ankyra::replies::FociTraceModeState,
+        oid: u8 = oid,
+        mode: u8 = mode as u8,
+    );
+}
+
 /// Emit one nonterminal velocity-integral evidence group.
 pub(crate) fn emit_velocity_integral_event(
     oid: u8,

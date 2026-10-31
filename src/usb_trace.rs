@@ -10,25 +10,24 @@ use foci_firmware::trace::sampling::{
 use foci_firmware::trace::stream::{FrameBuf, frame_sequence};
 use foci_firmware::trace::transport::{self, TraceQueueSelection};
 
+use foci_firmware::context::QueueFull;
+
 use crate::state::usb_trace::{
-    MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_COUNTERS, current_tx,
-    event_queue, motion_consumer, motion_producer,
+    MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_COUNTERS,
+    TRACE_MODE_REQUESTS, current_tx, event_queue, motion_consumer, motion_producer,
+};
+use crate::usb_trace_policy::{
+    CONTROL_DETAIL_HZ, STATUS_HZ, next_mode_request, skipped_control_detail_for,
+    skipped_critical_for, skipped_status_for,
 };
 
 static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
-
-/// Enable the lower-rate raw current-path diagnostic frame.
-const CURRENT_PATH_DIAGNOSTIC_ENABLED: bool = false;
 
 pub(crate) const EVENT_FIRMWARE_BOOT: u16 = 1;
 pub(crate) const EVENT_USB_CONFIGURED: u16 = 2;
 pub(crate) const EVENT_MOTOR_ARM: u16 = 3;
 pub(crate) const EVENT_MOTOR_DISARM: u16 = 4;
 pub(crate) const EVENT_STATUS_INTERRUPT: u16 = 9;
-
-const CRITICAL_HZ: u32 = 1000;
-const CONTROL_DETAIL_HZ: u32 = 500;
-const STATUS_HZ: u32 = 10;
 
 static TRACE_SERIAL_LEN: AtomicU8 = AtomicU8::new(0);
 static mut TRACE_SERIAL: [u8; 31] = [0; 31];
@@ -75,35 +74,126 @@ fn load_split_u64(low: &AtomicU32, high: &AtomicU32) -> u64 {
     })
 }
 
-fn note_trace_usb_configured_time() {
-    let configured = trace_now_ticks();
+fn ms_since_boot(now: u64) -> u32 {
     let boot = load_split_u64(
         &TRACE_COUNTERS.boot_tick_low,
         &TRACE_COUNTERS.boot_tick_high,
     );
     let ticks_per_millisecond = u64::from(crate::ankyra::constants::CLOCK_FREQ / 1000);
-    let elapsed_ticks = configured.saturating_sub(boot);
-    let elapsed_ms = (elapsed_ticks / ticks_per_millisecond).min(u64::from(u32::MAX));
+    (now.saturating_sub(boot) / ticks_per_millisecond).min(u64::from(u32::MAX)) as u32
+}
+
+/// Close the pre-configuration segment that ends at `end_ms` for the live mode.
+fn accumulate_pre_config_mode_time(end_ms: u32) {
+    let since = TRACE_COUNTERS
+        .pre_config_mode_since_ms
+        .swap(end_ms, Ordering::Relaxed);
+    if trace_mode().critical_sampling() {
+        TRACE_COUNTERS
+            .pre_config_critical_mode_ms
+            .fetch_add(end_ms.saturating_sub(since), Ordering::Relaxed);
+    }
+}
+
+fn note_trace_usb_configured_time() {
+    let configured = trace_now_ticks();
+    let elapsed_ms = ms_since_boot(configured);
     store_split_u64(
         &TRACE_COUNTERS.configured_tick_low,
         &TRACE_COUNTERS.configured_tick_high,
         configured,
     );
+    if !TRACE_COUNTERS.configured.load(Ordering::Acquire) {
+        accumulate_pre_config_mode_time(elapsed_ms);
+    }
     TRACE_COUNTERS
         .pre_config_elapsed_ms
-        .store(elapsed_ms as u32, Ordering::Relaxed);
+        .store(elapsed_ms, Ordering::Relaxed);
     TRACE_COUNTERS.pre_config_skipped_critical.store(
-        ((elapsed_ms * u64::from(CRITICAL_HZ)) / 1000).min(u64::from(u32::MAX)) as u32,
+        skipped_critical_for(
+            elapsed_ms,
+            TRACE_COUNTERS
+                .pre_config_critical_mode_ms
+                .load(Ordering::Relaxed),
+        ),
         Ordering::Relaxed,
     );
-    TRACE_COUNTERS.pre_config_skipped_control_detail.store(
-        ((elapsed_ms * u64::from(CONTROL_DETAIL_HZ)) / 1000).min(u64::from(u32::MAX)) as u32,
-        Ordering::Relaxed,
-    );
-    TRACE_COUNTERS.pre_config_skipped_status.store(
-        ((elapsed_ms * u64::from(STATUS_HZ)) / 1000).min(u64::from(u32::MAX)) as u32,
-        Ordering::Relaxed,
-    );
+    TRACE_COUNTERS
+        .pre_config_skipped_control_detail
+        .store(skipped_control_detail_for(elapsed_ms), Ordering::Relaxed);
+    TRACE_COUNTERS
+        .pre_config_skipped_status
+        .store(skipped_status_for(elapsed_ms), Ordering::Relaxed);
+}
+
+/// Return the live trace mode. Written only by the control task.
+pub(crate) fn trace_mode() -> TraceMode {
+    TraceMode::from_wire(TRACE_COUNTERS.trace_mode.load(Ordering::Relaxed))
+        .unwrap_or(TraceMode::Dormant)
+}
+
+/// USB-task context: queue a trace-mode request for the control task.
+///
+/// Touches no frame queue and no live trace state; `Err(QueueFull)` when four requests are
+/// already waiting.
+pub(crate) fn set_trace_mode(mode: TraceMode, oid: u8) -> Result<(), QueueFull> {
+    TRACE_MODE_REQUESTS.push(mode, oid)
+}
+
+fn any_snapshot_pending() -> bool {
+    (0..crate::board_config::TMC_CHANNEL_COUNT).any(|channel| {
+        crate::tmc_control::board::tmc_state(channel)
+            .control_state
+            .is_snapshot_pending()
+    })
+}
+
+/// Control-task context, at the start of every control tick before the driver runs.
+///
+/// Emits the configuration-time baseline once `note_usb_configured` asked for it, then
+/// services at most one queued trace-mode request: stores it as the live mode, re-emits
+/// metadata while configured, and replies with the live mode.
+pub(crate) fn service_trace_mode_changes() {
+    if TRACE_COUNTERS
+        .baseline_pending
+        .swap(false, Ordering::AcqRel)
+    {
+        emit_metadata();
+        request_event(
+            foci_firmware::trace::events::EVENT_LEVEL_INFO,
+            foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,
+            EVENT_FIRMWARE_BOOT,
+            [0; 4],
+            0,
+        );
+        request_event(
+            foci_firmware::trace::events::EVENT_LEVEL_INFO,
+            foci_firmware::trace::events::SUBSYSTEM_USB_TRACE,
+            EVENT_USB_CONFIGURED,
+            [0; 4],
+            0,
+        );
+    }
+
+    if TRACE_MODE_REQUESTS.is_empty() {
+        return;
+    }
+    let configured = is_configured();
+    let Some((mode, oid)) =
+        next_mode_request(&TRACE_MODE_REQUESTS, configured, any_snapshot_pending())
+    else {
+        return;
+    };
+    if !TRACE_COUNTERS.configured.load(Ordering::Acquire) {
+        accumulate_pre_config_mode_time(ms_since_boot(trace_now_ticks()));
+    }
+    TRACE_COUNTERS
+        .trace_mode
+        .store(mode as u8, Ordering::Relaxed);
+    if configured {
+        emit_metadata();
+    }
+    crate::ankyra::replies::emit_trace_mode_state(oid, trace_mode());
 }
 
 const TRACE_DETAIL_SKIP_THRESHOLD_CYCLES: u32 = 372_000;
@@ -330,24 +420,15 @@ pub(crate) fn is_configured() -> bool {
 }
 
 /// Mark the trace stream configured after USB configuration.
+///
+/// Runs in the USB task, which must not touch the control task's motion-queue producer, so
+/// the metadata baseline and its events are left to `service_trace_mode_changes`.
 pub(crate) fn note_usb_configured() {
     note_trace_usb_configured_time();
-    TRACE_COUNTERS.configured.store(true, Ordering::Relaxed);
-    emit_metadata();
-    request_event(
-        foci_firmware::trace::events::EVENT_LEVEL_INFO,
-        foci_firmware::trace::events::SUBSYSTEM_TMC_CONTROL,
-        EVENT_FIRMWARE_BOOT,
-        [0; 4],
-        0,
-    );
-    request_event(
-        foci_firmware::trace::events::EVENT_LEVEL_INFO,
-        foci_firmware::trace::events::SUBSYSTEM_USB_TRACE,
-        EVENT_USB_CONFIGURED,
-        [0; 4],
-        0,
-    );
+    TRACE_COUNTERS.configured.store(true, Ordering::Release);
+    TRACE_COUNTERS
+        .baseline_pending
+        .store(true, Ordering::Release);
 }
 
 fn header_at_timestamp(
@@ -554,7 +635,7 @@ pub(crate) fn request_spi_duration_event_if_ready() {
     }
 }
 
-/// Emit stream metadata.
+/// Emit stream metadata. Control-task context only: it uses the motion-queue producer.
 pub(crate) fn emit_metadata() {
     use foci_firmware::trace::stream::*;
 
@@ -568,7 +649,7 @@ pub(crate) fn emit_metadata() {
     let Ok(payload) = transport::build_metadata_payload(transport::TraceMetadataInputs {
         skipped_sample_counter_count: 3,
         clock_freq: crate::ankyra::constants::CLOCK_FREQ,
-        critical_hz: CRITICAL_HZ,
+        critical_hz: trace_mode().critical_hz(),
         control_detail_hz: CONTROL_DETAIL_HZ,
         status_hz: STATUS_HZ,
         pre_configuration_elapsed_ms: TRACE_COUNTERS.pre_config_elapsed_ms.load(Ordering::Relaxed),
@@ -702,6 +783,72 @@ pub(crate) struct TraceSampleContext<'a> {
     pub(crate) step_timing: Option<StepTimingSnapshot>,
 }
 
+async fn emit_control_detail<B>(
+    tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
+    channel: u8,
+    refs: foci_firmware::tmc_control::TmcControlStateRefs<'_>,
+    control_tick: u32,
+) where
+    B: embedded_hal_async::spi::SpiDevice<u8>,
+{
+    use core::sync::atomic::Ordering::Relaxed;
+    use foci_firmware::trace::stream::*;
+    use foci_tmc4671::registers::*;
+
+    if !control_detail_due(
+        control_tick,
+        motion_queue_len(),
+        MOTION_QUEUE_DEPTH,
+        TRACE_PRESSURE.take_control_detail_skip(),
+    ) {
+        return;
+    }
+    let mut detail_flags = 0u8;
+    let detail = ControlDetailSample {
+        interim_pidout_target_torque: read_sub_register_trace(
+            tmc,
+            INTERIM_PIDOUT_TARGET_TORQUE,
+            &mut detail_flags,
+        )
+        .await,
+        interim_pidout_target_flux: read_sub_register_trace(
+            tmc,
+            INTERIM_PIDOUT_TARGET_FLUX,
+            &mut detail_flags,
+        )
+        .await,
+        interim_pidin_target_velocity: read_sub_register_trace(
+            tmc,
+            INTERIM_PIDIN_TARGET_VELOCITY,
+            &mut detail_flags,
+        )
+        .await,
+        interim_pidout_target_velocity: read_sub_register_trace(
+            tmc,
+            INTERIM_PIDOUT_TARGET_VELOCITY,
+            &mut detail_flags,
+        )
+        .await,
+        pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
+        pid_torque_flux_limits: refs.tmc.load_current_limit(Relaxed).register_value(),
+        pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
+    };
+    let mut payload = [0u8; CONTROL_DETAIL_PAYLOAD_LEN];
+    encode_control_detail_payload(&detail, &mut payload);
+    let mut frame = FrameBuf::new();
+    frame.write_header(header(
+        FRAME_TYPE_CONTROL_DETAIL,
+        CONTROL_DETAIL_PAYLOAD_LEN,
+        SOURCE_KIND_FOCI,
+        channel,
+        motion_flags(),
+    ));
+    frame
+        .payload_mut(CONTROL_DETAIL_PAYLOAD_LEN)
+        .copy_from_slice(&payload);
+    enqueue_frame(frame);
+}
+
 /// Sample one channel's TMC state for the trace stream.
 ///
 /// Returns the DWT cycles this sample spent; the caller sums both channels and records the
@@ -725,6 +872,11 @@ where
     let channel = context.channel;
     let refs = context.refs;
     let spi_sample_start = cortex_m::peripheral::DWT::cycle_count();
+    let mode = trace_mode();
+    if !mode.critical_sampling() {
+        emit_control_detail(tmc, channel, refs, inputs.control_tick).await;
+        return cortex_m::peripheral::DWT::cycle_count().wrapping_sub(spi_sample_start);
+    }
     let mut flags = 0u8;
     let step_position = refs.stepper.position.load(Relaxed);
     let position_actual = read_register_trace(tmc, PID_POSITION_ACTUAL, &mut flags).await as i32;
@@ -797,7 +949,7 @@ where
     enqueue_frame(frame);
 
     if current_path_due(
-        CURRENT_PATH_DIAGNOSTIC_ENABLED,
+        mode.current_path(),
         inputs.control_tick,
         motion_queue_len(),
         MOTION_QUEUE_DEPTH,
@@ -831,58 +983,7 @@ where
         enqueue_frame(frame);
     }
 
-    let emit_control_detail = control_detail_due(
-        inputs.control_tick,
-        motion_queue_len(),
-        MOTION_QUEUE_DEPTH,
-        TRACE_PRESSURE.take_control_detail_skip(),
-    );
-    if emit_control_detail {
-        let mut detail_flags = 0u8;
-        let detail = ControlDetailSample {
-            interim_pidout_target_torque: read_sub_register_trace(
-                tmc,
-                INTERIM_PIDOUT_TARGET_TORQUE,
-                &mut detail_flags,
-            )
-            .await,
-            interim_pidout_target_flux: read_sub_register_trace(
-                tmc,
-                INTERIM_PIDOUT_TARGET_FLUX,
-                &mut detail_flags,
-            )
-            .await,
-            interim_pidin_target_velocity: read_sub_register_trace(
-                tmc,
-                INTERIM_PIDIN_TARGET_VELOCITY,
-                &mut detail_flags,
-            )
-            .await,
-            interim_pidout_target_velocity: read_sub_register_trace(
-                tmc,
-                INTERIM_PIDOUT_TARGET_VELOCITY,
-                &mut detail_flags,
-            )
-            .await,
-            pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
-            pid_torque_flux_limits: refs.tmc.load_current_limit(Relaxed).register_value(),
-            pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
-        };
-        let mut payload = [0u8; CONTROL_DETAIL_PAYLOAD_LEN];
-        encode_control_detail_payload(&detail, &mut payload);
-        let mut frame = FrameBuf::new();
-        frame.write_header(header(
-            FRAME_TYPE_CONTROL_DETAIL,
-            CONTROL_DETAIL_PAYLOAD_LEN,
-            SOURCE_KIND_FOCI,
-            channel,
-            motion_flags(),
-        ));
-        frame
-            .payload_mut(CONTROL_DETAIL_PAYLOAD_LEN)
-            .copy_from_slice(&payload);
-        enqueue_frame(frame);
-    }
+    emit_control_detail(tmc, channel, refs, inputs.control_tick).await;
 
     cortex_m::peripheral::DWT::cycle_count().wrapping_sub(spi_sample_start)
 }
@@ -909,7 +1010,7 @@ pub(crate) async fn sample_commission_closed_loop_activation<B, R, D>(
 
     match commissioning_trace_sample_plan(
         trace_configured,
-        TraceMode::Critical,
+        trace_mode(),
         past_deadline,
         remaining_budget_us,
         control_tick,

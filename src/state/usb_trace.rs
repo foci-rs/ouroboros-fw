@@ -1,11 +1,13 @@
 //! USB trace stream state.
 
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 use foci_firmware::trace::{
     stream::FrameBuf,
     transport::{self, StatusSnapshot},
 };
+
+use crate::usb_trace_policy::TraceModeRequests;
 
 /// Motion/counter queue depth in frames.
 ///
@@ -47,12 +49,20 @@ impl QueuedFrame {
 /// Trace queue counters.
 pub(crate) struct TraceCounters {
     pub(crate) configured: AtomicBool,
+    /// Set on USB configuration; the control task emits the metadata baseline and clears it.
+    pub(crate) baseline_pending: AtomicBool,
+    /// Live `TraceMode` wire byte; written only by the priority-1 control task.
+    pub(crate) trace_mode: AtomicU8,
     pub(crate) boot_id: AtomicU32,
     pub(crate) boot_tick_low: AtomicU32,
     pub(crate) boot_tick_high: AtomicU32,
     pub(crate) configured_tick_low: AtomicU32,
     pub(crate) configured_tick_high: AtomicU32,
     pub(crate) pre_config_elapsed_ms: AtomicU32,
+    /// Milliseconds spent in a critical-sampling mode before USB configuration.
+    pub(crate) pre_config_critical_mode_ms: AtomicU32,
+    /// Milliseconds since boot at which the live mode last changed before configuration.
+    pub(crate) pre_config_mode_since_ms: AtomicU32,
     pub(crate) pre_config_skipped_critical: AtomicU32,
     pub(crate) pre_config_skipped_control_detail: AtomicU32,
     pub(crate) pre_config_skipped_status: AtomicU32,
@@ -70,12 +80,16 @@ impl TraceCounters {
     pub(crate) const fn new() -> Self {
         Self {
             configured: AtomicBool::new(false),
+            baseline_pending: AtomicBool::new(false),
+            trace_mode: AtomicU8::new(foci_firmware::trace::sampling::TraceMode::Dormant as u8),
             boot_id: AtomicU32::new(0),
             boot_tick_low: AtomicU32::new(0),
             boot_tick_high: AtomicU32::new(0),
             configured_tick_low: AtomicU32::new(0),
             configured_tick_high: AtomicU32::new(0),
             pre_config_elapsed_ms: AtomicU32::new(0),
+            pre_config_critical_mode_ms: AtomicU32::new(0),
+            pre_config_mode_since_ms: AtomicU32::new(0),
             pre_config_skipped_critical: AtomicU32::new(0),
             pre_config_skipped_control_detail: AtomicU32::new(0),
             pre_config_skipped_status: AtomicU32::new(0),
@@ -99,6 +113,9 @@ const STATUS_SLOT_COUNT: usize =
     transport::status_slot_count(crate::board_config::TMC_CHANNEL_COUNT as usize);
 
 pub(crate) static TRACE_COUNTERS: TraceCounters = TraceCounters::new();
+
+/// Trace-mode requests from the USB task, serviced by the control task.
+pub(crate) static TRACE_MODE_REQUESTS: TraceModeRequests = TraceModeRequests::new();
 
 struct MotionQueueEndpoints {
     producer: heapless::spsc::Producer<'static, QueuedFrame>,

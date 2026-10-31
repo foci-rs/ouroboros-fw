@@ -605,13 +605,13 @@ impl<'a> TmcHost for FirmwareCtx<'a> {
 
     fn set_trace_mode(
         &mut self,
-        _mode: foci_firmware::trace::sampling::TraceMode,
-        _oid: u8,
+        mode: foci_firmware::trace::sampling::TraceMode,
+        oid: u8,
     ) -> Result<(), QueueFull> {
-        Err(QueueFull)
+        crate::usb_trace::set_trace_mode(mode, oid)
     }
 
     fn trace_mode(&self) -> u8 {
-        foci_firmware::trace::sampling::TraceMode::Critical as u8
+        crate::usb_trace::trace_mode() as u8
     }
 }

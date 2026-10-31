@@ -33,6 +33,7 @@ mod transport;
 mod trigger_domain;
 mod usb_task;
 mod usb_trace;
+mod usb_trace_policy;
 
 #[rtic::app(device = crate::pac, peripherals = true, dispatchers = [UART4, UART5, USART3])]
 mod app {
@@ -517,6 +518,8 @@ mod app {
                 }
                 P1_PROBE_ITERS.fetch_add(1, Relaxed);
             }
+
+            crate::usb_trace::service_trace_mode_changes();
 
             let levels = status_levels(status_pin0);
             tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
