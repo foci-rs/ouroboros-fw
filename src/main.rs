@@ -841,7 +841,8 @@ mod app {
                                 .earliest_due_us()
                                 .unwrap_or_else(|| now_us() + 1_000),
                         ));
-                    match select(rx.recv(), control_sleep).await {
+                    let trace_wake = crate::state::usb_trace::TRACE_CONTROL_WAKE.wait();
+                    match select(rx.recv(), select(trace_wake, control_sleep)).await {
                         Either::First(Ok(event)) => Some(event),
                         Either::First(Err(_)) | Either::Second(_) => None,
                     }

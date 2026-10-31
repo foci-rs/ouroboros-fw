@@ -764,7 +764,7 @@ mod usb_trace_policy_tests {
         }
         r.stamp(10);
         let sent = Sent::default();
-        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Retained);
+        assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Capped);
         assert_eq!(sequences(&sent).as_slice(), [1, 2, 3, 4]);
         assert_eq!(emit_pending(&r, accept_into(&sent)), EmitOutcome::Queued);
         assert_eq!(sequences(&sent).as_slice(), [1, 2, 3, 4, 5, 6]);

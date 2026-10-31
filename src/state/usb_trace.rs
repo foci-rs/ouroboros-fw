@@ -2,6 +2,8 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use foci_firmware::trace::{
     stream::FrameBuf,
     transport::{self, StatusSnapshot},
@@ -116,6 +118,10 @@ pub(crate) static TRACE_COUNTERS: TraceCounters = TraceCounters::new();
 
 /// Trace-mode requests from the USB task, serviced by the control task.
 pub(crate) static TRACE_MODE_REQUESTS: TraceModeRequests = TraceModeRequests::new();
+
+/// Wakes the control task for trace work; with maintenance disarmed nothing else would until
+/// its next scheduled unit.
+pub(crate) static TRACE_CONTROL_WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 struct MotionQueueEndpoints {
     producer: heapless::spsc::Producer<'static, QueuedFrame>,

@@ -107,9 +107,11 @@ pub(crate) enum EmitOutcome {
     Clean,
     /// Every owed frame was queued.
     Queued,
-    /// The queue was full or the per-call cap was reached; the unqueued frames stay owed for the
-    /// next tick.
+    /// The queue refused a frame; the unqueued frames stay owed until the queue drains.
     Retained,
+    /// The queue took every frame offered but the per-call cap left entries owed; the caller
+    /// must come around again rather than wait for its next scheduled tick.
+    Capped,
 }
 
 /// Mutator frames queued per channel per call; the rest stay owed for the next tick.
@@ -120,7 +122,7 @@ pub(crate) const MAX_CONTROL_STATE_FRAMES_PER_TICK: usize = 4;
 ///
 /// Stops at the first `QueueFull`, popping only entries `send` accepted, so each frame retries
 /// independently on the next tick. At most [`MAX_CONTROL_STATE_FRAMES_PER_TICK`] mutator frames
-/// go out per call; entries beyond that yield [`EmitOutcome::Retained`].
+/// go out per call; entries beyond that yield [`EmitOutcome::Capped`].
 pub(crate) fn emit_pending(
     record: &ControlStateRecord,
     mut send: impl FnMut(ControlStateHeader) -> Result<(), QueueFull>,
@@ -144,7 +146,7 @@ pub(crate) fn emit_pending(
         queued = true;
     }
     if record.is_dirty() {
-        EmitOutcome::Retained
+        EmitOutcome::Capped
     } else if queued {
         EmitOutcome::Queued
     } else {

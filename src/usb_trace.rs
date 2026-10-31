@@ -14,12 +14,12 @@ use foci_firmware::trace::transport::{self, TraceQueueSelection};
 use foci_firmware::context::QueueFull;
 
 use crate::state::usb_trace::{
-    MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_COUNTERS,
-    TRACE_MODE_REQUESTS, current_tx, event_queue, motion_consumer, motion_producer,
+    MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_CONTROL_WAKE,
+    TRACE_COUNTERS, TRACE_MODE_REQUESTS, current_tx, event_queue, motion_consumer, motion_producer,
 };
 use crate::usb_trace_policy::{
-    CONTROL_DETAIL_HZ, STATUS_HZ, emit_pending, skipped_control_detail_for, skipped_critical_for,
-    skipped_status_for,
+    CONTROL_DETAIL_HZ, EmitOutcome, STATUS_HZ, emit_pending, skipped_control_detail_for,
+    skipped_critical_for, skipped_status_for,
 };
 
 static TRACE_PRESSURE: TracePressureRuntime = TracePressureRuntime::new();
@@ -135,17 +135,20 @@ pub(crate) fn trace_mode() -> TraceMode {
 
 /// USB-task context: queue a trace-mode request for the control task.
 ///
-/// Touches no frame queue and no live trace state; `Err(QueueFull)` when four requests are
-/// already waiting.
+/// Touches no frame queue and no live trace state; wakes the control task, which may be asleep
+/// with maintenance disarmed. `Err(QueueFull)` when four requests are already waiting.
 pub(crate) fn set_trace_mode(mode: TraceMode, oid: u8) -> Result<(), QueueFull> {
-    TRACE_MODE_REQUESTS.push(mode, oid)
+    TRACE_MODE_REQUESTS.push(mode, oid)?;
+    TRACE_CONTROL_WAKE.signal(());
+    Ok(())
 }
 
 /// Control-task context, at the start of every control tick before the driver runs.
 ///
 /// Emits the configuration-time baseline once `note_usb_configured` asked for it, then
 /// services at most one queued trace-mode request: stores it as the live mode, re-emits
-/// metadata while configured, and replies with the live mode.
+/// metadata while configured, and replies with the live mode. Requests still queued after that
+/// wake the control task for another pass.
 ///
 /// A request never waits for owed snapshot frames: with no recorder draining the trace
 /// endpoint they would stay owed indefinitely. The snapshot flag coalesces, so the frame that
@@ -178,6 +181,9 @@ pub(crate) fn service_trace_mode_changes() {
     let Some((mode, oid)) = TRACE_MODE_REQUESTS.pop() else {
         return;
     };
+    if !TRACE_MODE_REQUESTS.is_empty() {
+        TRACE_CONTROL_WAKE.signal(());
+    }
     if !TRACE_COUNTERS.configured.load(Ordering::Acquire) {
         accumulate_pre_config_mode_time(ms_since_boot(trace_now_ticks()));
     }
@@ -423,6 +429,7 @@ pub(crate) fn note_usb_configured() {
     TRACE_COUNTERS
         .baseline_pending
         .store(true, Ordering::Release);
+    TRACE_CONTROL_WAKE.signal(());
 }
 
 fn header_at_timestamp(
@@ -777,9 +784,12 @@ pub(crate) fn emit_control_state_frame(
     if !is_configured() {
         return;
     }
-    let _ = emit_pending(&state.control_state, |header| {
+    let outcome = emit_pending(&state.control_state, |header| {
         try_enqueue_control_state(channel, &control_state_sample(header, state, inner_gains))
     });
+    if outcome == EmitOutcome::Capped {
+        TRACE_CONTROL_WAKE.signal(());
+    }
 }
 
 async fn read_register_trace<B>(
