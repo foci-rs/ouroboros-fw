@@ -89,6 +89,10 @@ impl<'a, L: FnMut(&mut dyn FnMut(&mut State))> UsbPumpBackend for OuroborosUsbBa
         foci_usb_stm32::poll();
     }
 
+    fn driver_wake_pending(&mut self) -> bool {
+        foci_usb_stm32::check_wake()
+    }
+
     fn on_wake(&mut self) {
         #[cfg(feature = "trace")]
         if foci_usb_stm32::is_configured() && !crate::usb_trace::is_configured() {
