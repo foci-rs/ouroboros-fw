@@ -24,11 +24,6 @@ jobs:
           targets: thumbv7em-none-eabi
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: Configure cargo for private foci-rs deps
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.CARGO_PRIVATE_DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          mkdir -p ~/.cargo
-          printf '[net]\ngit-fetch-with-cli = true\n' >> ~/.cargo/config.toml
       - name: cargo fmt
         run: cargo fmt --all --check
       - name: cargo clippy (embedded)
