@@ -10,6 +10,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The orchestrator sets the release profile; this crate builds alone in CI.
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: s
+  CARGO_PROFILE_RELEASE_LTO: "true"
 
 jobs:
   check:
