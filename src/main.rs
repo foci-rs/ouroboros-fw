@@ -182,7 +182,6 @@ mod app {
     ])]
     fn init(ctx: init::Context) -> (Shared, Local) {
         crate::board_init::paint_stack();
-        foci_firmware::diagnostic::recover_last_boot_breakaway_breadcrumb();
         defmt::info!("FOCI Ouroboros starting");
 
         if let Some(record) = crate::panic_capture::recover() {
