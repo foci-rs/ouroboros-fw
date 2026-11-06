@@ -38,7 +38,6 @@ ankyra-assemble = { git = "https://github.com/foci-rs/ankyra" }
 
 # FOCI crates
 foci-firmware = { git = "https://github.com/foci-rs/foci-firmware", default-features = false }
-foci-firmware-macros = { git = "https://github.com/foci-rs/foci-firmware" }
 foci-klipper = { git = "https://github.com/foci-rs/foci-klipper" }
 foci-tmc4671 = { git = "https://github.com/foci-rs/foci-tmc4671" }
 foci-usb-stm32 = { git = "https://github.com/foci-rs/foci-usb-stm32" }

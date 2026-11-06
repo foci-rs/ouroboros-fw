@@ -6,9 +6,50 @@
 struct BoardCommissionReplySink;
 
 impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommissionReplySink {
-    foci_firmware::__commission_reply_manifest!(
-        foci_firmware_macros::commission_reply_forwarding_impls
-    );
+    fn foci_commission_timing(
+        &mut self,
+        report: foci_firmware::tmc_diagnostics::CommissionTimingReport,
+    ) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCommissionTiming,
+            oid: u8 = report.oid,
+            method: u8 = report.method,
+            status: u8 = report.status,
+            requested_period_us: u16 = report.requested_period_us,
+            valid_samples: u16 = report.valid_samples,
+            missed_samples: u16 = report.missed_samples,
+            max_consecutive_misses: u8 = report.max_consecutive_misses,
+            max_lateness_us: u32 = report.max_lateness_us,
+            max_interval_us: u32 = report.max_interval_us,
+            max_poll_wall_us: u32 = report.max_poll_wall_us,
+            max_spi_wall_us: u32 = report.max_spi_wall_us,
+        );
+    }
+
+    fn foci_commission_done(&mut self, report: foci_firmware::ankyra::replies::FociCommissionDone) {
+        ::ankyra::klipper_reply_from!(
+            &mut crate::_ankyra_config::Sender,
+            foci_firmware::ankyra::replies::FociCommissionDone,
+            oid: u8 = report.oid,
+            status: u8 = report.status,
+            r_count_milli: u32 = report.r_count_milli,
+            l_count_micro: u32 = report.l_count_micro,
+            flux_p: u16 = report.flux_p,
+            flux_i: u16 = report.flux_i,
+            torque_p: u16 = report.torque_p,
+            torque_i: u16 = report.torque_i,
+            lambda_us: u32 = report.lambda_us,
+            theta_e_us: u32 = report.theta_e_us,
+            theta_source: u8 = report.theta_source,
+            bandwidth_hz: u16 = report.bandwidth_hz,
+            velocity_p: u16 = report.velocity_p,
+            velocity_i: u16 = report.velocity_i,
+            position_p: u16 = report.position_p,
+            inner_warning_flags: u8 = report.inner_warning_flags,
+            timing_summary: u32 = report.timing_summary,
+        );
+    }
 
     fn foci_commission_detail(
         &mut self,
