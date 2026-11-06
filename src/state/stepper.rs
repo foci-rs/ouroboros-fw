@@ -7,9 +7,6 @@ use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use foci_klipper::pulse_mapper::PulseMapperConfig;
 use foci_klipper::stepper::{HardwareStepper, LogicalStepEvent, MotionScaleConfigError};
 
-/// Ouroboros TIM5 input clock in hertz.
-pub(crate) const STEP_TIMER_HZ: u32 = crate::ankyra::constants::CLOCK_FREQ;
-
 /// Eleven TIM5 ticks provide the 40 ns minimum high/low pulse phase.
 pub(crate) const STEP_HALF_PERIOD_TICKS: u32 = 11;
 
@@ -70,8 +67,8 @@ pub(crate) unsafe fn init_step_queues() {
 /// out-of-range channel or if `init_step_queues` has not yet run.
 ///
 /// # Safety
-/// Callable only from P2, or from P1 inside `with_trigger_domain` (the
-/// commissioning stimulus): either context excludes every other producer.
+/// Callable only from P2, or from P1 inside `with_trigger_domain`: either
+/// context excludes every other producer.
 pub(crate) unsafe fn step_queue_producer(
     channel: u8,
 ) -> Option<&'static mut foci_klipper::step_queue::Producer<'static, foci_klipper::stepper::StepMove>>
@@ -91,8 +88,7 @@ pub(crate) unsafe fn step_queue_producer(
 }
 
 /// Producer-side HardwareStepper state (direction tracking, prepare_move).
-/// Accessed from usb_task (P2) command handlers, and from the P1
-/// commissioning stimulus inside `with_trigger_domain`.
+/// Accessed from usb_task (P2) command handlers.
 pub(crate) static mut P2_STEPPERS: [foci_klipper::stepper::HardwareStepper; STEPPER_CHANNEL_COUNT] =
     [const { foci_klipper::stepper::HardwareStepper::new() }; STEPPER_CHANNEL_COUNT];
 
