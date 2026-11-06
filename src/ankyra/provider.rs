@@ -5,9 +5,9 @@
 //!
 //! This provider carries only items that can't live in the shared
 //! crate:
-//! - `foci_tune` — emits replies through the board-local ankyra sender
-//!   (`crate::_ankyra_config::Sender`) directly; cannot be dispatched
-//!   through a capability trait.
+//! - Stepper execution counter commands — read board-local step queue
+//!   state and reply through the board-local ankyra sender
+//!   (`crate::_ankyra_config::Sender`) directly.
 //! - `Pins` enumeration — the physical pin set depends on the MCU / PCB.
 //! - Board-specific constants: `CLOCK_FREQ`, `MCU`, and the
 //!   `RESERVE_PINS_*` family describing which physical pins are
@@ -20,7 +20,6 @@ ankyra::ankyra_provider! {
         crate::ankyra::handlers::foci::foci_stepper_stats,
         crate::ankyra::handlers::foci::foci_stepper_stop_stats,
         crate::ankyra::handlers::foci::foci_stepper_timing_stats,
-        crate::ankyra::handlers::foci::foci_tune,
     ],
     replies: [],
     outputs: [],

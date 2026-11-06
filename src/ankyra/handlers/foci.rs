@@ -1,8 +1,4 @@
-//! Board-local FOCI handlers: `foci_tune` and the stepper execution counters.
-//!
-//! `foci_tune` stays board-local because its implementation calls
-//! `foci_tune_inner`, which emits replies via the board-local ankyra
-//! transport sender.
+//! Board-local FOCI handlers: the stepper execution counters.
 
 use core::sync::atomic::Ordering::Relaxed;
 
@@ -12,68 +8,8 @@ use foci_firmware::diagnostic::StepperExecutionSnapshot;
 use foci_firmware::shutdown::ShutdownReason;
 
 use crate::firmware_ctx::FirmwareCtx;
-use crate::helpers::tmc::{FociTuneParams, foci_tune_inner};
 use crate::tmc_control::board::{stepper_state, tmc_state};
 use crate::trigger_domain::with_trigger_domain;
-
-/// Start installed tuning (mechanical ID + velocity/position/filters).
-#[allow(clippy::too_many_arguments)]
-#[klipper_command]
-pub fn foci_tune(
-    ctx: &mut FirmwareCtx<'_>,
-    oid: u8,
-    action: u8,
-    profile: u8,
-    mode: u8,
-    inner_lambda: u32,
-    theta_e: u32,
-    current_bw: u32,
-    inner_warning_flags: u8,
-    requested_velocity_mrev_s: u32,
-    machine_velocity_ceiling_mrev_s: u32,
-    requested_velocity_source: u8,
-    max_stroke_travel_mrev: u32,
-    settle_travel_reserve_mrev: u32,
-    negative_position_headroom_mrev: u32,
-    positive_position_headroom_mrev: u32,
-    max_duration_ms: u16,
-    homing_speed_mrev_s: u32,
-    max_accel_mrev_s2: u32,
-    nomination_p_below: u16,
-) {
-    let channel = match ctx.state().stepper_channel(oid) {
-        Some(channel) => channel,
-        None => {
-            if ctx.enter_shutdown() {
-                let clock = ctx.now();
-                ctx.send_shutdown(ShutdownReason::InvalidTmcChannel, clock);
-            }
-            return;
-        }
-    };
-    foci_tune_inner(FociTuneParams {
-        channel,
-        oid,
-        action,
-        profile,
-        mode,
-        inner_lambda,
-        theta_e,
-        current_bw,
-        inner_warning_flags,
-        requested_velocity_mrev_s,
-        machine_velocity_ceiling_mrev_s,
-        requested_velocity_source,
-        max_stroke_travel_mrev,
-        settle_travel_reserve_mrev,
-        negative_position_headroom_mrev,
-        positive_position_headroom_mrev,
-        max_duration_ms,
-        homing_speed_mrev_s,
-        max_accel_mrev_s2,
-        nomination_p_below,
-    });
-}
 
 fn stepper_execution_snapshot(
     ctx: &mut FirmwareCtx<'_>,
