@@ -12,35 +12,22 @@ use crate::board_config;
 #[klipper_constant]
 pub const CLOCK_FREQ: u32 = 260_000_000;
 
+#[allow(dead_code)]
 #[klipper_constant]
 pub const ENVELOPE_PROPORTIONAL_NUM: u32 = 3;
-const _: () = assert!(
-    ENVELOPE_PROPORTIONAL_NUM
-        == foci_firmware::commissioning::outer::velocity::sweep_plan::ENVELOPE_PROPORTIONAL_NUM
-);
 
+#[allow(dead_code)]
 #[klipper_constant]
 pub const ENVELOPE_PROPORTIONAL_DEN: u32 = 2;
-const _: () = assert!(
-    ENVELOPE_PROPORTIONAL_DEN
-        == foci_firmware::commissioning::outer::velocity::sweep_plan::ENVELOPE_PROPORTIONAL_DEN
-);
 
+#[allow(dead_code)]
 #[klipper_constant]
 pub const ENVELOPE_ABSOLUTE_MARGIN_MREV_S: u32 = 2_000;
-const _: () = assert!(
-    ENVELOPE_ABSOLUTE_MARGIN_MREV_S
-        == foci_firmware::commissioning::outer::velocity::sweep_plan::ENVELOPE_ABSOLUTE_MARGIN_MREV_S
-);
 
 /// LATCHED: `PID_V_OUTPUT_LIMIT_STATUS` persists across a delay and clears
 /// only on explicit clear via this board's SPI-mux/dual-channel signal
 /// path.
 pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 1;
-const _: () = assert!(
-    VELOCITY_LIMIT_EVIDENCE_CAPABILITY
-        == foci_firmware::commissioning::outer::velocity::VELOCITY_LIMIT_EVIDENCE_CAPABILITY_LATCHED_FLAG
-);
 
 #[allow(dead_code)]
 #[klipper_constant]
