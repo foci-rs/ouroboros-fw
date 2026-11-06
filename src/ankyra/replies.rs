@@ -38,36 +38,6 @@ impl foci_firmware::commission_dispatch::CommissionReplySink for BoardCommission
         );
     }
 
-    fn foci_commission_result(
-        &mut self,
-        oid: u8,
-        status: u8,
-        result: &foci_firmware::commissioning::types::CommissionResult,
-    ) {
-        let inner = &result.inner;
-        ::ankyra::klipper_reply_from!(
-            &mut crate::_ankyra_config::Sender,
-            foci_firmware::ankyra::replies::FociCommissionResult,
-            oid: u8 = oid,
-            status: u8 = status,
-            r_count_milli: u32 = inner.r_count_milli,
-            l_count_micro: u32 = inner.l_count_micro,
-            flux_p: u16 = inner.flux_p,
-            flux_i: u16 = inner.flux_i,
-            torque_p: u16 = inner.torque_p,
-            torque_i: u16 = inner.torque_i,
-            lambda_us: u32 = inner.lambda_us,
-            theta_e_us: u32 = inner.theta_e_us,
-            theta_source: u8 = inner.theta_source,
-            bandwidth_hz: u16 = inner.bandwidth_hz as u16,
-            fallback_velocity_p: u16 = result.fallback_velocity_p,
-            fallback_velocity_i: u16 = result.fallback_velocity_i,
-            fallback_position_p: u16 = result.fallback_position_p,
-            inner_warning_flags: u8 = inner.inner_warning_flags,
-            timing_summary: u32 = inner.timing_summary,
-        );
-    }
-
     fn foci_resistance_run(&mut self, report: foci_firmware::tmc_diagnostics::ResistanceRunReport) {
         ::ankyra::klipper_reply_from!(
             &mut crate::_ankyra_config::Sender,
