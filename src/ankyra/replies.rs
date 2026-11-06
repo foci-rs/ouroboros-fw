@@ -352,48 +352,6 @@ pub(crate) fn emit_trace_mode_state(oid: u8, mode: foci_firmware::trace::samplin
     );
 }
 
-/// Emit one nonterminal velocity-integral evidence group.
-pub(crate) fn emit_velocity_integral_event(
-    oid: u8,
-    event: foci_firmware::commissioning::types::VelocityIntegralEvent,
-) {
-    let mut sink = BoardCommissionReplySink;
-    foci_firmware::commission_dispatch::replies::emit_velocity_integral_event(
-        &mut sink, oid, event,
-    );
-}
-
-/// Emit one breakaway-campaign evidence group.
-pub(crate) fn emit_breakaway_campaign_event(
-    oid: u8,
-    event: foci_firmware::commissioning::types::BreakawayCampaignEvent,
-) {
-    let mut sink = BoardCommissionReplySink;
-    foci_firmware::commission_dispatch::replies::emit_breakaway_campaign_event(
-        &mut sink, oid, event,
-    );
-}
-
-/// Emit the exact velocity-integral plan an accepted breakaway campaign handed off to.
-///
-/// The host assembler refuses every velocity-integral observation until it has seen a
-/// complete plan, and a breakaway hand-off reaches the integral phase on the
-/// scheduled-tick path, which carries the plan as a `CommissionEvent` rather
-/// than through a dispatch reply.
-pub(crate) fn emit_velocity_integral_plan(
-    oid: u8,
-    run_sequence: u32,
-    plan: foci_firmware::commissioning::outer::velocity::integral_plan::VelocityIntegralPlan,
-) {
-    let mut sink = BoardCommissionReplySink;
-    foci_firmware::commission_dispatch::replies::emit_velocity_integral_plan(
-        &mut sink,
-        oid,
-        run_sequence,
-        plan,
-    );
-}
-
 /// Emit a `FociCommissionPhase` reply for a phase transition.
 pub(crate) fn emit_phase_reply(oid: u8, phase_id: foci_firmware::autotune::CommissionPhase) {
     let mut sink = BoardCommissionReplySink;
