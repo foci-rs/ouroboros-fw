@@ -323,7 +323,10 @@ pub(crate) fn emit_trace_mode_state(oid: u8, mode: foci_firmware::trace::samplin
 }
 
 /// Emit a `FociCommissionPhase` reply for a phase transition.
-pub(crate) fn emit_phase_reply(oid: u8, phase_id: foci_firmware::autotune::CommissionPhase) {
+pub(crate) fn emit_phase_reply(
+    oid: u8,
+    phase_id: foci_firmware::commissioning::run_types::CommissionPhase,
+) {
     let mut sink = BoardCommissionReplySink;
     foci_firmware::commission_dispatch::emit_phase_reply(&mut sink, oid, phase_id);
 }

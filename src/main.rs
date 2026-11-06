@@ -43,6 +43,7 @@ mod app {
     use embassy_stm32::spi::Spi;
     use embassy_stm32::wdg::IndependentWatchdog;
     use embassy_stm32::{bind_interrupts, peripherals};
+    use foci_firmware::commissioning::run_types::CommissionError;
     use foci_klipper::state::State;
     use rtic_monotonics::fugit::ExtU64;
     use rtic_monotonics::stm32::prelude::*;
@@ -534,7 +535,7 @@ mod app {
                                     &mut backend,
                                     tmc_state(ch),
                                     stepper_state(ch),
-                                    foci_firmware::autotune::CommissionError::Shutdown,
+                                    CommissionError::Shutdown,
                                 )
                                 .await;
                         }
