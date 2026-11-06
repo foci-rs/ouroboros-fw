@@ -1188,15 +1188,12 @@ mod app {
                 }
                 UnitOutcome::Commission { event, next } => {
                     if let Some(event) = event {
-                        #[allow(clippy::single_match, clippy::collapsible_match)]
                         match event {
                             foci_firmware::commissioning::schedule::CommissionEvent::PhaseChanged {
                                 oid,
                                 phase_id,
                                 ..
                             } => emit_phase_reply(oid, phase_id),
-                            // Removed once the firmware drops the retired CommissionEvent variants.
-                            _ => {}
                         }
                     }
                     if let Some((engine_kind, phase_id)) = drivers[idx].commission_trace_phase
