@@ -903,7 +903,6 @@ mod app {
                             }
                             TmcRequestKind::Calibrate { .. }
                             | TmcRequestKind::Commission { .. }
-                            | TmcRequestKind::Tune { .. }
                             | TmcRequestKind::SelfTest { .. } => {
                                 commissioning_request_blocked(drivers, channel)
                             }

@@ -189,9 +189,6 @@ pub(crate) async fn handle_tmc_request(
         TmcRequestKind::Commission { .. } => {
             defmt::warn!("handle_tmc_request: Commission handled by main loop");
         }
-        TmcRequestKind::Tune { .. } => {
-            defmt::warn!("handle_tmc_request: Tune handled by main loop");
-        }
         #[cfg(feature = "dev")]
         TmcRequestKind::Init => {
             defmt::warn!("handle_tmc_request: Init handled by main loop");
