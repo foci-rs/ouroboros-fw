@@ -29,9 +29,6 @@ ankyra::ankyra_provider! {
     constants: [
         crate::ankyra::constants::ADC_MAX,
         crate::ankyra::constants::CLOCK_FREQ,
-        crate::ankyra::constants::ENVELOPE_ABSOLUTE_MARGIN_MREV_S,
-        crate::ankyra::constants::ENVELOPE_PROPORTIONAL_DEN,
-        crate::ankyra::constants::ENVELOPE_PROPORTIONAL_NUM,
         crate::ankyra::constants::FOCI_MAX_RUN_CURRENT_MA,
         crate::ankyra::constants::FOCI_VM_ADC_CENTER_COUNTS,
         crate::ankyra::constants::FOCI_VM_ADC_REFERENCE_MILLIVOLTS,

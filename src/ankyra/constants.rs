@@ -14,18 +14,6 @@ pub const CLOCK_FREQ: u32 = 260_000_000;
 
 #[allow(dead_code)]
 #[klipper_constant]
-pub const ENVELOPE_PROPORTIONAL_NUM: u32 = 3;
-
-#[allow(dead_code)]
-#[klipper_constant]
-pub const ENVELOPE_PROPORTIONAL_DEN: u32 = 2;
-
-#[allow(dead_code)]
-#[klipper_constant]
-pub const ENVELOPE_ABSOLUTE_MARGIN_MREV_S: u32 = 2_000;
-
-#[allow(dead_code)]
-#[klipper_constant]
 pub const MCU: &str = "stm32h723xx";
 
 /// Fixed 12-bit ADC resolution shared by every analog-in channel on this
