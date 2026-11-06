@@ -24,11 +24,6 @@ pub const ENVELOPE_PROPORTIONAL_DEN: u32 = 2;
 #[klipper_constant]
 pub const ENVELOPE_ABSOLUTE_MARGIN_MREV_S: u32 = 2_000;
 
-/// LATCHED: `PID_V_OUTPUT_LIMIT_STATUS` persists across a delay and clears
-/// only on explicit clear via this board's SPI-mux/dual-channel signal
-/// path.
-pub const VELOCITY_LIMIT_EVIDENCE_CAPABILITY: u32 = 1;
-
 #[allow(dead_code)]
 #[klipper_constant]
 pub const MCU: &str = "stm32h723xx";

@@ -91,10 +91,6 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         crate::board_config::TMC_CONFIG.pwm_freq_hz()
     }
 
-    fn velocity_limit_evidence_capability(&self) -> u32 {
-        crate::ankyra::constants::VELOCITY_LIMIT_EVIDENCE_CAPABILITY
-    }
-
     fn motion_scale_queue_empty(&self) -> bool {
         crate::state::stepper::STEP_QUEUE_CHANNELS[self.channel as usize].is_empty()
     }
