@@ -8,7 +8,6 @@ use foci_firmware::state::stepper::StepperChannelState;
 use foci_firmware::state::tmc::TmcChannelState;
 use foci_firmware::tmc::TmcRequest;
 use foci_firmware::tmc_control::dispatch::RegisterRequestError;
-use foci_firmware::tmc_control::request::handle_tmc_control_request_without_retention;
 use foci_firmware::tmc_control::request::{
     MotionScaleMapperInstallError, TmcPreRequestDisposition, TmcRequestBoard,
 };
@@ -263,7 +262,7 @@ pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
         enable_pins,
         &mut driver.commission_trace_engine_seq,
     );
-    handle_tmc_control_request_without_retention(
+    foci_firmware::tmc_control::request::handle_tmc_control_request(
         req,
         disposition,
         &mut driver.runtime,
