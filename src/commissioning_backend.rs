@@ -69,20 +69,6 @@ impl CommissionBackendHooks for OuroborosHooks {
         crate::usb_trace::request_commission_event(channel, event);
     }
 
-    fn record_velocity_trace_observation(
-        channel: u8,
-        observation: foci_firmware::trace::stream::VelocityTraceObservation,
-    ) {
-        crate::usb_trace::request_velocity_observation(channel, observation);
-    }
-
-    fn record_velocity_sweep_trace_record(
-        channel: u8,
-        record: foci_firmware::ankyra::velocity_sweep_encoding::VelocitySweepCanonicalRecord,
-    ) {
-        crate::usb_trace::request_velocity_sweep_evidence(channel, record);
-    }
-
     fn commission_step_timer_hz() -> u32 {
         crate::state::stepper::STEP_TIMER_HZ
     }
