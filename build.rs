@@ -103,7 +103,6 @@ fn main() {
         "SECTIONS {\n\
          \x20 .ccmram (NOLOAD) : ALIGN(4) {\n\
          \x20   *(.ccmram.diag.panic)\n\
-         \x20   *(.ccmram.diag.breakaway)\n\
          \x20 } > CCMRAM\n\
          }\n\
          /* --orphan-handling=error hard-errors on any input section the script\n\
