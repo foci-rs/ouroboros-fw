@@ -52,16 +52,18 @@ pub(crate) fn drive_ctx<'a>(
     status_pin_asserted: bool,
     config: &'a TmcControlConfig,
 ) -> DriveCtx<'a> {
-    let mut ctx = DriveCtx::new(now_us, config);
-    ctx.homing_active = HOMING_STATE.load(Relaxed) != 0;
-    ctx.homing_snapshot = homing_snapshot;
-    ctx.homing_clock = HomingClockWindow {
-        now: crate::helpers::lifecycle::read_tim5(),
-        start: HOMING_START_CLOCK.load(Relaxed),
-    };
-    ctx.status_pin_asserted = status_pin_asserted;
-    ctx.status_mask = STATUS_CRITICAL_MASK;
-    ctx
+    DriveCtx {
+        now_us,
+        homing_active: HOMING_STATE.load(Relaxed) != 0,
+        homing_snapshot,
+        homing_clock: HomingClockWindow {
+            now: crate::helpers::lifecycle::read_tim5(),
+            start: HOMING_START_CLOCK.load(Relaxed),
+        },
+        status_pin_asserted,
+        status_mask: STATUS_CRITICAL_MASK,
+        config,
+    }
 }
 
 /// How a parked channel is reported to the host. The first three failures
