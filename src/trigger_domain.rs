@@ -314,12 +314,12 @@ pub(crate) fn reprogram_cc2(state: &mut TriggerDomainState) {
 /// 128 ticks at 260 MHz = ~0.5 us.
 pub(crate) const TRIGGER_TIMER_MIN_LEAD_TICKS: u32 = 128;
 
-/// TriggerDomain static. Initialized in RTIC `init`, accessed via
+/// `TriggerDomain` static. Initialized in RTIC `init`, accessed via
 /// `with_trigger_domain()`.
 pub(crate) static mut TRIGGER_DOMAIN: core::mem::MaybeUninit<TriggerDomain> =
     core::mem::MaybeUninit::uninit();
 
-/// Lock TriggerDomain with interrupt-disabled critical section.
+/// Lock `TriggerDomain` with interrupt-disabled critical section.
 ///
 /// Equivalent to P3 ceiling since P3 is the highest application priority.
 /// Callable from P2 command handlers and P3 ISR.

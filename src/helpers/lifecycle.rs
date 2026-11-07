@@ -24,9 +24,9 @@ pub(crate) fn read_tim5() -> u32 {
 /// Write a Katapult request signature and perform a system reset.
 ///
 /// `KATAPULT_REQUEST`: stay in bootloader (for reflashing via 1200-baud DTR).
-/// `KATAPULT_BYPASS`: skip bootloader, boot application (for FIRMWARE_RESTART).
+/// `KATAPULT_BYPASS`: skip bootloader, boot application (for `FIRMWARE_RESTART`).
 ///
-/// Matches Klipper's `canboot_reset()` in armcm_reset.c. Verifies the
+/// Matches Klipper's `canboot_reset()` in `armcm_reset.c`. Verifies the
 /// bootloader signature before writing, no-ops if no bootloader is present.
 pub(crate) fn katapult_reset(req_signature: u64) -> ! {
     // SAFETY: The bootloader vector table at KATAPULT_BOOT_ADDRESS is

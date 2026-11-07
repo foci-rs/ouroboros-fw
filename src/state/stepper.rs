@@ -87,12 +87,12 @@ pub(crate) unsafe fn step_queue_producer(
     (unsafe { &mut *base.add(idx) }).as_mut()
 }
 
-/// Producer-side HardwareStepper state (direction tracking, prepare_move).
-/// Accessed from usb_task (P2) command handlers.
+/// Producer-side `HardwareStepper` state (direction tracking, `prepare_move`).
+/// Accessed from `usb_task` (P2) command handlers.
 pub(crate) static mut P2_STEPPERS: [foci_klipper::stepper::HardwareStepper; STEPPER_CHANNEL_COUNT] =
     [const { foci_klipper::stepper::HardwareStepper::new() }; STEPPER_CHANNEL_COUNT];
 
-/// P3-local HardwareStepper state (active segment, step execution).
+/// P3-local `HardwareStepper` state (active segment, step execution).
 /// Only accessed from TIM5 CC1 ISR (P3).
 pub(crate) static mut ISR_STEPPERS: [foci_klipper::stepper::HardwareStepper;
     STEPPER_CHANNEL_COUNT] =

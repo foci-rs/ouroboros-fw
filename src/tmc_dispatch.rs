@@ -2,10 +2,10 @@
 //!
 //! Returned from the P2 protocol handler via the tmc-control channel.
 //! `SetEnable`, `Init`, `TestSpin`, `SetPidGains`, `SetPositionGains`,
-//! `Commission`, `Calibrate`, and `Tune` remain in the tmc_control main
+//! `Commission`, `Calibrate`, and `Tune` remain in the `tmc_control` main
 //! loop because they mutate `motor_enabled` / `enable_pin` / engine
-//! state. Everything else — SetCurrent / SetEncoder / SetEncoderDir /
-//! DumpRegisters, and the `#[cfg(feature = "dev")]` Read / Write pair —
+//! state. Everything else — `SetCurrent` / `SetEncoder` / `SetEncoderDir` /
+//! `DumpRegisters`, and the `#[cfg(feature = "dev")]` Read / Write pair —
 //! dispatches here.
 
 use foci_firmware::tmc::{TmcRequest, TmcRequestKind};
@@ -33,9 +33,9 @@ fn report_invalid_channel(channel: u8) {
     );
 }
 
-/// Handle a TMC request that does not require main-loop state (motor_enabled, enable_pin).
+/// Handle a TMC request that does not require main-loop state (`motor_enabled`, `enable_pin`).
 ///
-/// SetEnable, Init, and TestSpin are handled inline by the tmc_control main loop.
+/// `SetEnable`, Init, and `TestSpin` are handled inline by the `tmc_control` main loop.
 /// Returns `Ok(())` on success or the reason the caller should enter shutdown.
 pub(crate) async fn handle_tmc_request(
     req: TmcRequest,

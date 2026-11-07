@@ -58,7 +58,7 @@ pub fn paint_stack() {
 
 /// Read the STM32 96-bit unique device ID and format as a hex string.
 ///
-/// The UID is at 0x1FF1_E800 on STM32H7. Returns a 24-character hex
+/// The UID is at `0x1FF1_E800` on STM32H7. Returns a 24-character hex
 /// string. Reads the 12 raw bytes sequentially (matching
 /// Klipper/Katapult convention) and outputs high nibble first for each
 /// byte.
@@ -281,8 +281,8 @@ pub fn enable_dwt_cyccnt() {
     }
 }
 
-/// Confirm the SPI2 RX/TX DMA completion interrupts (DMA1_STREAM0,
-/// DMA1_STREAM1) sit exactly at `DMA_IRQ_PRIORITY`.
+/// Confirm the SPI2 RX/TX DMA completion interrupts (`DMA1_STREAM0`,
+/// `DMA1_STREAM1`) sit exactly at `DMA_IRQ_PRIORITY`.
 ///
 /// Panics otherwise: a higher level would let SPI DMA completion preempt STEP/DIR
 /// dispatch and `tmc_control`, and a future embassy-stm32 default change or a removed

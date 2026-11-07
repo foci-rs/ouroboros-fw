@@ -2,7 +2,7 @@
 //! data dictionary `config` section. Consumed by the `constants: [...]`
 //! list in `src/ankyra/provider.rs`.
 //!
-//! All constant identifiers are SCREAMING_SNAKE_CASE; ankyra preserves
+//! All constant identifiers are `SCREAMING_SNAKE_CASE`; ankyra preserves
 //! them verbatim as wire names (per `pascal_to_snake` passthrough rule).
 
 use ankyra::klipper_constant;
@@ -17,7 +17,7 @@ pub const CLOCK_FREQ: u32 = 260_000_000;
 pub const MCU: &str = "stm32h723xx";
 
 /// Fixed 12-bit ADC resolution shared by every analog-in channel on this
-/// board. Must be identical across TH0/TH1/MCU_TEMP; do not vary this per
+/// board. Must be identical across `TH0/TH1/MCU_TEMP`; do not vary this per
 /// channel. Klipper reads this via `get_constant_float`, which parses the
 /// wire string regardless of the declared type here, so a plain `u32`
 /// literal is sufficient -- `#[klipper_constant]` does not support a

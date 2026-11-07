@@ -14,7 +14,7 @@ use crate::usb_trace_policy::TraceModeRequests;
 /// Motion/counter queue depth in frames.
 ///
 /// `FrameBuf` is 256 bytes, so depth 32 reserves 8 KiB. This matches the
-/// OpenFFBoard trace transport and fits the STM32H723 SRAM budget.
+/// `OpenFFBoard` trace transport and fits the STM32H723 SRAM budget.
 pub(crate) const MOTION_QUEUE_DEPTH: usize = 32;
 
 /// Event queue depth in frames.

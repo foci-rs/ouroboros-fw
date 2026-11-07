@@ -47,11 +47,11 @@ async fn write(
         .map_err(|_| DevWriteError { addr })
 }
 
-/// Sweep PHI_E_EXT through N full mechanical revolutions.
+/// Sweep `PHI_E_EXT` through N full mechanical revolutions.
 ///
 /// With 50 pole pairs, one mechanical revolution = 50 electrical
-/// cycles. Each electrical cycle sweeps PHI_E_EXT from 0 to 65535.
-/// Uses whatever voltage/mode settings were configured by tmc_init.
+/// cycles. Each electrical cycle sweeps `PHI_E_EXT` from 0 to 65535.
+/// Uses whatever voltage/mode settings were configured by `tmc_init`.
 pub(crate) async fn do_test_spin(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     revolutions: u8,
@@ -77,7 +77,7 @@ pub(crate) async fn do_test_spin(
 /// Configure TMC4671 for open-loop stepper operation with current regulation.
 ///
 /// Performs hardware init, ADC offset calibration, and configures torque
-/// mode with PHI_E_EXT for open-loop angle control.
+/// mode with `PHI_E_EXT` for open-loop angle control.
 ///
 /// # Errors
 ///

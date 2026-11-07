@@ -39,7 +39,7 @@ impl TmcSpiMux {
     }
 }
 
-/// Temporary async SpiDevice for one selected TMC4671.
+/// Temporary async `SpiDevice` for one selected TMC4671.
 pub(crate) struct SelectedTmcDevice<'a> {
     bus: &'a mut TmcSpiBus,
     cs: &'a mut Output<'static>,
