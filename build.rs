@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -74,7 +75,8 @@ fn emit_build_info() {
     ];
     let mut build_versions = format!("rust={rust} features={features} board={board}");
     for (label, repo) in deps {
-        build_versions.push_str(&format!(" {label}={}", describe(repo)));
+        write!(build_versions, " {label}={}", describe(repo))
+            .expect("writing to a String cannot fail");
     }
 
     for repo in std::iter::once(".").chain(deps.iter().map(|(_, repo)| *repo)) {
