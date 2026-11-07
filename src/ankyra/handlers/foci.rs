@@ -15,15 +15,12 @@ fn stepper_execution_snapshot(
     ctx: &mut FirmwareCtx<'_>,
     oid: u8,
 ) -> Option<StepperExecutionSnapshot> {
-    let channel = match ctx.state().stepper_channel(oid) {
-        Some(channel) => channel,
-        None => {
-            if ctx.enter_shutdown() {
-                let clock = ctx.now();
-                ctx.send_shutdown(ShutdownReason::InvalidTmcChannel, clock);
-            }
-            return None;
+    let Some(channel) = ctx.state().stepper_channel(oid) else {
+        if ctx.enter_shutdown() {
+            let clock = ctx.now();
+            ctx.send_shutdown(ShutdownReason::InvalidTmcChannel, clock);
         }
+        return None;
     };
 
     let (timer_active, queue_len) = with_trigger_domain(|td| {
