@@ -976,9 +976,10 @@ mod app {
             let Some(unit) = scheduler.pick(now, homing_state) else {
                 continue;
             };
-            let snapshot = scheduler
-                .maintenance_group()
-                .map_or(homing_state, |g| g.homing_snapshot());
+            let snapshot = scheduler.maintenance_group().map_or(
+                homing_state,
+                foci_firmware::tmc_control::MaintenanceGroup::homing_snapshot,
+            );
             let engine_tick_deadline =
                 Mono::now() + fugit::Duration::<u64, 1, 1_000_000>::millis(1);
             let ch = unit.channel;
