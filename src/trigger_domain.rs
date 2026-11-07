@@ -248,8 +248,8 @@ impl TriggerDispatchBoard for OuroborosDispatchBoard {
             stepper_idx as u8,
             clock,
             0,
-            trsync_oid as u32,
-            reason as u32,
+            u32::from(trsync_oid),
+            u32::from(reason),
         );
     }
 

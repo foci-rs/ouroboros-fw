@@ -52,7 +52,7 @@ impl CommissionBackendHooks for OuroborosHooks {
     }
 
     async fn commission_delay_us(us: u32) {
-        Mono::delay((us as u64).micros()).await;
+        Mono::delay(u64::from(us).micros()).await;
     }
 
     fn record_commission_trace_event(

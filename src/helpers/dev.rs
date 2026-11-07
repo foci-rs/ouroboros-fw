@@ -56,7 +56,7 @@ pub(crate) async fn do_test_spin(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     revolutions: u8,
 ) -> Result<(), DevWriteError> {
-    let total_steps = revolutions as u32 * POLE_PAIRS * PHI_E_STEPS_PER_ELECTRICAL_CYCLE;
+    let total_steps = u32::from(revolutions) * POLE_PAIRS * PHI_E_STEPS_PER_ELECTRICAL_CYCLE;
     defmt::info!(
         "Spinning {} revolutions ({} steps)",
         revolutions,
@@ -93,7 +93,7 @@ pub(crate) async fn tmc_enter_openloop(
     write(tmc, UQ_UD_EXT, 0).await?;
 
     write(tmc, PWM_POLARITIES, 0).await?;
-    write(tmc, PWM_MAXCNT, TMC_CONFIG.pwm_maxcnt as u32).await?;
+    write(tmc, PWM_MAXCNT, u32::from(TMC_CONFIG.pwm_maxcnt)).await?;
     write(tmc, PWM_BBM_H_BBM_L, TMC_CONFIG.bbm_register()).await?;
     write(tmc, PWM_SV_CHOP, PWM_CHOP_OFF).await?;
 
@@ -121,8 +121,8 @@ pub(crate) async fn tmc_enter_openloop(
     const N_SAMPLES: i32 = 128;
     for _ in 0..N_SAMPLES {
         if let Ok(raw) = tmc.read_register(ADC_IWY_IUX).await {
-            sum_i0 += (raw & 0xFFFF) as i16 as i32;
-            sum_i1 += ((raw >> 16) & 0xFFFF) as i16 as i32;
+            sum_i0 += i32::from((raw & 0xFFFF) as i16);
+            sum_i1 += i32::from(((raw >> 16) & 0xFFFF) as i16);
         }
         Mono::delay(1_u64.millis()).await;
     }

@@ -202,9 +202,9 @@ fn emit_stepper_diagnostics_pass() {
             channel: u8 = event.channel,
             position: i32 = event.position,
             clock: u32 = event.clock,
-            timer_active: u8 = event.timer_active as u8,
+            timer_active: u8 = u8::from(event.timer_active),
             queue_len: u16 = event.queue_len,
-            direction: u8 = event.direction as u8,
+            direction: u8 = u8::from(event.direction),
             data0: u32 = event.data0,
             data1: u32 = event.data1,
         );
