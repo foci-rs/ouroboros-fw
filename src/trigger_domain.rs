@@ -280,8 +280,7 @@ pub(crate) fn timer_active(state: &TriggerDomainState, stepper_idx: usize) -> bo
     state
         .stepper_stop
         .get(stepper_idx)
-        .map(|runtime| runtime.timer_active)
-        .unwrap_or(false)
+        .is_some_and(|runtime| runtime.timer_active)
 }
 
 pub(crate) fn disarm_trigger_scheduler(state: &mut TriggerDomainState) {
@@ -385,9 +384,7 @@ fn stop_physical_stepper_inner(
         .copied()
         .filter(|&idx| idx != stepper_idx)
         .any(|idx| {
-            stepper_state(idx as u8)
-                .map(|state| state.timer_active_mirror.load(Relaxed))
-                .unwrap_or(false)
+            stepper_state(idx as u8).is_some_and(|state| state.timer_active_mirror.load(Relaxed))
         });
     // 1. Disable CC1 only when this stop leaves no other channel active.
     if !other_active {
@@ -402,11 +399,8 @@ fn stop_physical_stepper_inner(
         .timer_active_mirror
         .store(false, Relaxed);
     tmc_state.pid_error_sums_clear.store(true, Relaxed);
-    let remaining_events = unsafe {
-        isr_stepper(channel)
-            .map(|stepper| u32::from(stepper.active_step_count()))
-            .unwrap_or(0)
-    };
+    let remaining_events =
+        unsafe { isr_stepper(channel).map_or(0, |stepper| u32::from(stepper.active_step_count())) };
     let queue_len = crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize]
         .len()
         .min(u16::MAX as usize) as u16;

@@ -1226,8 +1226,7 @@ mod app {
                                     || {
                                         engine_tick_deadline
                                             .checked_duration_since(Mono::now())
-                                            .map(|d| d.to_micros())
-                                            .unwrap_or(0)
+                                            .map_or(0, |d| d.to_micros())
                                     },
                                     || Mono::now() > engine_tick_deadline,
                                 )
@@ -1689,13 +1688,11 @@ mod app {
         }
 
         fn motor_armed(&self, channel: u8) -> bool {
-            foci_firmware::state::tmc::tmc_channel(channel)
-                .map(|state| {
-                    state
-                        .motor_armed
-                        .load(core::sync::atomic::Ordering::Relaxed)
-                })
-                .unwrap_or(false)
+            foci_firmware::state::tmc::tmc_channel(channel).is_some_and(|state| {
+                state
+                    .motor_armed
+                    .load(core::sync::atomic::Ordering::Relaxed)
+            })
         }
 
         fn queue_has_moves(&self, channel: u8) -> bool {

@@ -122,13 +122,11 @@ impl StepperQueueBoard for OuroborosStepperBoard {
     }
 
     fn motor_armed(&self, _channel: u8) -> bool {
-        self.tmc_state
-            .map(|state| {
-                state
-                    .motor_armed
-                    .load(core::sync::atomic::Ordering::Relaxed)
-            })
-            .unwrap_or(false)
+        self.tmc_state.is_some_and(|state| {
+            state
+                .motor_armed
+                .load(core::sync::atomic::Ordering::Relaxed)
+        })
     }
 
     fn record_queue_full(&mut self, channel: u8, queue_len: usize) {

@@ -36,8 +36,7 @@ fn stepper_execution_snapshot(
         )
     });
     let position = foci_firmware::state::stepper::stepper_channel(channel)
-        .map(|state| state.position.load(Relaxed))
-        .unwrap_or(0);
+        .map_or(0, |state| state.position.load(Relaxed));
     let snapshot = crate::state::stepper_diag::snapshot(channel, position, timer_active, queue_len);
     if snapshot.is_none() && ctx.enter_shutdown() {
         let clock = ctx.now();
