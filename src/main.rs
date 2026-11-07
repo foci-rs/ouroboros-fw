@@ -733,7 +733,7 @@ mod app {
                             ch,
                             flags
                         ),
-                        Err(_) => defmt::error!(
+                        Err(()) => defmt::error!(
                             "TMC4671 channel {} emergency disable: STATUS read failed",
                             ch
                         ),
