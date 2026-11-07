@@ -1242,7 +1242,7 @@ mod app {
                     match next {
                         CommissionNext::PollNow => scheduler.set_commission_due(ch, Some(now_us())),
                         CommissionNext::WaitUntil(deadline_us) => {
-                            scheduler.set_commission_due(ch, Some(deadline_us))
+                            scheduler.set_commission_due(ch, Some(deadline_us));
                         }
                         CommissionNext::Yield => {
                             scheduler.note_commission_yield(ch);

@@ -45,9 +45,9 @@ fn attach_consumer(channel: u8, consumer: Consumer<'static, StepMove>) {
         // no channel identity of its own, so giving a different channel's
         // consumer here would silently corrupt that channel's queue.
         unsafe {
-            crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].give_consumer(consumer)
+            crate::state::stepper::STEP_QUEUE_CHANNELS[channel as usize].give_consumer(consumer);
         }
-    })
+    });
 }
 
 /// Borrow a channel's `StepQueueChannel` consumer in place, under a short

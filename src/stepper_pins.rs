@@ -6,9 +6,9 @@ pub(crate) fn set_dir(channel: u8, forward: bool) -> Result<(), ()> {
         0 => {
             embassy_stm32::pac::GPIOD.bsrr().write(|w| {
                 if forward {
-                    w.set_bs(3, true)
+                    w.set_bs(3, true);
                 } else {
-                    w.set_br(3, true)
+                    w.set_br(3, true);
                 }
             });
             Ok(())
@@ -16,9 +16,9 @@ pub(crate) fn set_dir(channel: u8, forward: bool) -> Result<(), ()> {
         1 => {
             embassy_stm32::pac::GPIOC.bsrr().write(|w| {
                 if forward {
-                    w.set_bs(11, true)
+                    w.set_bs(11, true);
                 } else {
-                    w.set_br(11, true)
+                    w.set_br(11, true);
                 }
             });
             Ok(())
