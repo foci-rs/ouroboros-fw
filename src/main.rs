@@ -111,9 +111,11 @@ mod app {
                 BoardAction::Stepper(StepperAction::StopNow) => {
                     stepper_stop_from_p1(channel);
                 }
-                BoardAction::Stepper(StepperAction::None)
-                | BoardAction::Stepper(StepperAction::ArmCheck { .. })
-                | BoardAction::Stepper(StepperAction::ApplyPostAction(_))
+                BoardAction::Stepper(
+                    StepperAction::None
+                    | StepperAction::ArmCheck { .. }
+                    | StepperAction::ApplyPostAction(_),
+                )
                 | BoardAction::Shutdown(_)
                 | BoardAction::SignalEmergencyDisable => {}
             }

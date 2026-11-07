@@ -539,7 +539,7 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
                 return Err(());
             };
             match sender.try_send(TmcControlEvent::HomingStart) {
-                Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::NoReceiver(_)) => Ok(()),
+                Ok(()) | Err(TrySendError::Full(_) | TrySendError::NoReceiver(_)) => Ok(()),
             }
         })
     }
