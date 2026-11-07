@@ -208,7 +208,7 @@ struct OuroborosTrsyncBoard<'a> {
     state: &'a State,
 }
 
-impl<'a> TriggerDispatchBoard for OuroborosTrsyncBoard<'a> {
+impl TriggerDispatchBoard for OuroborosTrsyncBoard<'_> {
     fn stop_physical_stepper(
         &mut self,
         state: &TriggerDomainState,
@@ -234,7 +234,7 @@ impl<'a> TriggerDispatchBoard for OuroborosTrsyncBoard<'a> {
     }
 }
 
-impl<'a> TrsyncBoard for OuroborosTrsyncBoard<'a> {
+impl TrsyncBoard for OuroborosTrsyncBoard<'_> {
     fn physical_steppers(&self) -> &'static [usize] {
         PHYSICAL_STEPPER_INDICES
     }
@@ -309,25 +309,25 @@ impl<'a> FirmwareCtx<'a> {
     }
 }
 
-impl<'a> ankyra::ShutdownState for FirmwareCtx<'a> {
+impl ankyra::ShutdownState for FirmwareCtx<'_> {
     fn is_shutdown(&self) -> bool {
         self.state.is_shutdown()
     }
 }
 
-impl<'a> StateAccess for FirmwareCtx<'a> {
+impl StateAccess for FirmwareCtx<'_> {
     fn state(&mut self) -> &mut State {
         self.state
     }
 }
 
-impl<'a> ClockSource for FirmwareCtx<'a> {
+impl ClockSource for FirmwareCtx<'_> {
     fn now(&self) -> u32 {
         read_tim5()
     }
 }
 
-impl<'a> ShutdownRecovery for FirmwareCtx<'a> {
+impl ShutdownRecovery for FirmwareCtx<'_> {
     fn enter_shutdown(&mut self) -> bool {
         enter_shutdown(self.state)
     }
@@ -341,7 +341,7 @@ impl<'a> ShutdownRecovery for FirmwareCtx<'a> {
     }
 }
 
-impl<'a> BoardChannels for FirmwareCtx<'a> {
+impl BoardChannels for FirmwareCtx<'_> {
     fn tmc_channel_count(&self) -> u8 {
         crate::board_config::TMC_CHANNEL_COUNT
     }
@@ -359,7 +359,7 @@ impl<'a> BoardChannels for FirmwareCtx<'a> {
     }
 }
 
-impl<'a> StepperHost for FirmwareCtx<'a> {
+impl StepperHost for FirmwareCtx<'_> {
     fn set_next_step_dir(&mut self, channel: u8, forward: bool) {
         let Some(_tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) else {
             emit_invalid_stepper_channel_and_shutdown(self.state, channel);
@@ -406,7 +406,7 @@ impl<'a> StepperHost for FirmwareCtx<'a> {
     }
 }
 
-impl<'a> EndstopHost for FirmwareCtx<'a> {
+impl EndstopHost for FirmwareCtx<'_> {
     fn configure_input(&mut self, pin: u8, pull_up: bool) {
         gpio_configure_input(pin, pull_up);
     }
@@ -429,13 +429,13 @@ impl<'a> EndstopHost for FirmwareCtx<'a> {
     }
 }
 
-impl<'a> AnalogInHost for FirmwareCtx<'a> {
+impl AnalogInHost for FirmwareCtx<'_> {
     fn resolve_analog_pin(&self, pin: u8) -> Option<u8> {
         crate::board_config::analog_pin_channel(pin)
     }
 }
 
-impl<'a> TrsyncHost for FirmwareCtx<'a> {
+impl TrsyncHost for FirmwareCtx<'_> {
     fn reset_all(&mut self) {
         with_trigger_domain(|td| {
             let mut board = OuroborosTrsyncBoard {
@@ -545,7 +545,7 @@ impl<'a> TrsyncHost for FirmwareCtx<'a> {
     }
 }
 
-impl<'a> TmcHost for FirmwareCtx<'a> {
+impl TmcHost for FirmwareCtx<'_> {
     fn max_run_current_ma(&self) -> u32 {
         crate::board_config::TMC_CONFIG.max_run_current_ma
     }

@@ -289,11 +289,11 @@ impl foci_firmware::tmc_diagnostics::DiagnosticReplySink for BoardDiagnosticRepl
     }
 }
 
-pub(crate) async fn run_diagnostic_request<'spi>(
+pub(crate) async fn run_diagnostic_request(
     diagnostic_req: TmcRequest,
     channel: u8,
     runtime: &mut TmcControlRuntime,
-    tmc: &mut Tmc4671Spi<TmcSpiDevice<'spi>>,
+    tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     enable_pin: &mut Output<'static>,
 ) {
     let homing_active = HOMING_STATE.load(Relaxed) != 0;

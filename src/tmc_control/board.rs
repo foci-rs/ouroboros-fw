@@ -46,12 +46,12 @@ pub(crate) fn status_levels(status0: &Input<'static>) -> [bool; 2] {
     [status0.is_high(), crate::board_init::status1_level()]
 }
 
-pub(crate) fn drive_ctx<'a>(
+pub(crate) fn drive_ctx(
     now_us: u64,
     homing_snapshot: u8,
     status_pin_asserted: bool,
-    config: &'a TmcControlConfig,
-) -> DriveCtx<'a> {
+    config: &TmcControlConfig,
+) -> DriveCtx<'_> {
     DriveCtx {
         now_us,
         homing_active: HOMING_STATE.load(Relaxed) != 0,
@@ -124,7 +124,7 @@ pub(crate) fn device_or_invalid(mux: &mut TmcSpiMux, channel: u8) -> ChannelDevi
     }
 }
 
-pub(crate) fn tmc_driver<'spi>(device: TmcSpiDevice<'spi>) -> Tmc4671Spi<TmcSpiDevice<'spi>> {
+pub(crate) fn tmc_driver(device: TmcSpiDevice<'_>) -> Tmc4671Spi<TmcSpiDevice<'_>> {
     Tmc4671Spi::new(device).with_retry_policy(RetryPolicy::production())
 }
 

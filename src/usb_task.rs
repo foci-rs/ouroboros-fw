@@ -46,7 +46,7 @@ impl<'a, L: FnMut(&mut dyn FnMut(&mut State))> OuroborosUsbBackend<'a, L> {
     }
 }
 
-impl<'a, L: FnMut(&mut dyn FnMut(&mut State))> UsbPumpBackend for OuroborosUsbBackend<'a, L> {
+impl<L: FnMut(&mut dyn FnMut(&mut State))> UsbPumpBackend for OuroborosUsbBackend<'_, L> {
     async fn wait_wake(&mut self) {
         USB_WAKE.wait().await;
     }

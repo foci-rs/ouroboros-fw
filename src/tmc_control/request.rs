@@ -238,10 +238,10 @@ pub(crate) struct TmcControlRequestContext<'a, 'spi> {
     pub(crate) enable_pins: &'a mut TmcEnablePins,
 }
 
-pub(crate) async fn handle_tmc_control_request<'a, 'spi>(
+pub(crate) async fn handle_tmc_control_request(
     req: TmcRequest,
     disposition: TmcPreRequestDisposition,
-    context: TmcControlRequestContext<'a, 'spi>,
+    context: TmcControlRequestContext<'_, '_>,
 ) -> TmcControlRequestOutcome {
     let TmcControlRequestContext {
         channel,
