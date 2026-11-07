@@ -150,8 +150,10 @@ pub fn init_tim5_clock() {
     tim5.egr().write(|w| w.set_ug(true));
     tim5.cr1().modify(|w| w.set_cen(true));
 
-    tim5.dier().write_value(Default::default());
-    tim5.sr().write_value(Default::default());
+    tim5.dier()
+        .write_value(embassy_stm32::pac::timer::regs::DierGp16::default());
+    tim5.sr()
+        .write_value(embassy_stm32::pac::timer::regs::SrGp16::default());
 }
 
 /// Disable the D1 debug clock while the core sleeps.
