@@ -71,7 +71,6 @@ cast_sign_loss = "allow"
 fn_params_excessive_bools = "allow"
 inline_always = "allow"
 struct_excessive_bools = "allow"
-too_many_lines = "allow"
 # Debt: lints that still fire; drop an entry once its findings are fixed.
 cast_possible_wrap = "allow"
 cast_precision_loss = "allow"
