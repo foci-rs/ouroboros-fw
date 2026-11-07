@@ -16,7 +16,7 @@ use crate::state::usb_trace::{
     MOTION_QUEUE_DEPTH, PENDING_EVENTS, PendingEvent, QueuedFrame, TRACE_CONTROL_WAKE,
     TRACE_COUNTERS, TRACE_MODE_REQUESTS, current_tx, event_queue, motion_consumer, motion_producer,
 };
-use crate::usb_trace_policy::{
+use foci_firmware::trace::usb_trace_policy::{
     CONTROL_DETAIL_HZ, EmitOutcome, STATUS_HZ, emit_pending, skipped_control_detail_for,
     skipped_critical_for, skipped_status_for,
 };

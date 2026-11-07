@@ -33,7 +33,6 @@ mod transport;
 mod trigger_domain;
 mod usb_task;
 mod usb_trace;
-mod usb_trace_policy;
 
 #[rtic::app(device = crate::pac, peripherals = true, dispatchers = [UART4, UART5, USART3])]
 mod app {

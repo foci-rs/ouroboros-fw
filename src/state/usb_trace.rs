@@ -9,7 +9,7 @@ use foci_firmware::trace::{
     transport::{self, StatusSnapshot},
 };
 
-use crate::usb_trace_policy::TraceModeRequests;
+use foci_firmware::trace::usb_trace_policy::TraceModeRequests;
 
 /// Motion/counter queue depth in frames.
 ///
