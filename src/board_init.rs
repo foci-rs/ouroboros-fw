@@ -177,14 +177,14 @@ pub fn init_stepdir_gpio() {
     });
 
     let gpio_d = embassy_stm32::pac::GPIOD;
-    configure_output(&gpio_d, 4);
-    configure_output(&gpio_d, 3);
+    configure_output(gpio_d, 4);
+    configure_output(gpio_d, 3);
 
     let gpio_c = embassy_stm32::pac::GPIOC;
-    configure_output(&gpio_c, 12);
-    configure_output(&gpio_c, 11);
+    configure_output(gpio_c, 12);
+    configure_output(gpio_c, 11);
 
-    fn configure_output(gpio: &embassy_stm32::pac::gpio::Gpio, pin: usize) {
+    fn configure_output(gpio: embassy_stm32::pac::gpio::Gpio, pin: usize) {
         gpio.moder()
             .modify(|w| w.set_moder(pin, vals::Moder::OUTPUT));
         gpio.otyper().modify(|w| w.set_ot(pin, vals::Ot::PUSH_PULL));
