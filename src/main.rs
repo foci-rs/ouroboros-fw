@@ -1962,7 +1962,7 @@ mod app {
         crate::heartbeat::emit_trigger_reports(
             |snaps| {
                 with_trigger_domain(|td| {
-                    for ts in td.state_mut().trsync.iter_mut() {
+                    for ts in &mut td.state_mut().trsync {
                         if let Some(snap) = ts.take_report() {
                             let _ = snaps.push(snap);
                         }
