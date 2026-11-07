@@ -8,7 +8,7 @@
 //! startup so the connect-time register dump reports it to the host over the
 //! ordinary command transport.
 //!
-//! `CCMRAM` here is Ouroboros' `memory.x` alias for DTCM (`0x2000_0000)`:
+//! `CCMRAM` here is Ouroboros' `memory.x` alias for DTCM (`0x2000_0000`):
 //! startup code never clears it, so it retains its contents across an
 //! `SCB::sys_reset` or watchdog reset while power is held. The 32-bit magic
 //! guards against reading uninitialised RAM as a record on the first cold
