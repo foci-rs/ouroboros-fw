@@ -758,12 +758,12 @@ mod app {
                         shutdown!("TMC4671: STATUS_FLAGS read failed");
                     }
                     foci_firmware::tmc_control::EmergencyDisableFault::Generic => {
-                        if deadline_channel != NO_STEPPER_CHANNEL {
+                        if deadline_channel == NO_STEPPER_CHANNEL {
+                            shutdown!("TMC4671 fault");
+                        } else {
                             shutdown_reason!(
                                 foci_firmware::shutdown::ShutdownReason::StepperTooFarInPast
                             );
-                        } else {
-                            shutdown!("TMC4671 fault");
                         }
                     }
                 }
