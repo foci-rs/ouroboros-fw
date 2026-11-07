@@ -10,7 +10,13 @@ use foci_firmware::tmc_register_values::{
     STEPPER_MOTOR_TYPE_N_POLE_PAIRS, adc_i0_scale_offset, adc_i1_scale_offset,
 };
 use foci_tmc4671::current_limit::PidTorqueFluxLimit;
-use foci_tmc4671::registers::*;
+use foci_tmc4671::registers::{
+    ADC_I_SELECT, ADC_I0_SCALE_OFFSET, ADC_I1_SCALE_OFFSET, ADC_IWY_IUX, DSADC_MDEC_B_MDEC_A,
+    MODE_RAMP_MODE_MOTION, MOTOR_TYPE_N_POLE_PAIRS, PHI_E_EXT, PHI_E_SELECTION, PID_FLUX_P_FLUX_I,
+    PID_TORQUE_FLUX_ACTUAL, PID_TORQUE_FLUX_LIMITS, PID_TORQUE_FLUX_TARGET, PID_TORQUE_P_TORQUE_I,
+    PIDOUT_UQ_UD_LIMITS, PWM_BBM_H_BBM_L, PWM_MAXCNT, PWM_POLARITIES, PWM_SV_CHOP,
+    PidTorqueFluxTarget, Register, UQ_UD_EXT, VELOCITY_SELECTION, VelocitySelection,
+};
 use foci_tmc4671::spi::Tmc4671Spi;
 use rtic_monotonics::Monotonic;
 use rtic_monotonics::fugit::ExtU64;

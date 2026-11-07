@@ -82,7 +82,10 @@ const DMA_IRQ_PRIORITY: embassy_stm32::interrupt::Priority =
 /// Build the embassy-stm32 clock configuration for 520 MHz SYSCLK from the
 /// 25 MHz HSE crystal.
 pub fn rcc_config() -> embassy_stm32::Config {
-    use embassy_stm32::rcc::*;
+    use embassy_stm32::rcc::{
+        AHBPrescaler, APBPrescaler, HSIPrescaler, Hse, HseMode, Hsi48Config, Pll, PllDiv, PllMul,
+        PllPreDiv, PllSource, Sysclk, mux,
+    };
 
     let mut config = embassy_stm32::Config::default();
     config.rcc.hsi = Some(HSIPrescaler::DIV1);
