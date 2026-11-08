@@ -92,6 +92,7 @@ pub(crate) async fn tmc_enter_openloop(
     tmc: &mut Tmc4671Spi<TmcSpiDevice<'_>>,
     enable_pin: &mut Output<'static>,
 ) -> Result<(), DevWriteError> {
+    const N_SAMPLES: i32 = 128;
     enable_pin.set_low();
     write(tmc, MODE_RAMP_MODE_MOTION, MOTION_STOPPED).await?;
     write(tmc, PIDOUT_UQ_UD_LIMITS, 1024).await?;
@@ -124,7 +125,6 @@ pub(crate) async fn tmc_enter_openloop(
 
     let mut sum_i0: i32 = 0;
     let mut sum_i1: i32 = 0;
-    const N_SAMPLES: i32 = 128;
     for _ in 0..N_SAMPLES {
         if let Ok(raw) = tmc.read_register(ADC_IWY_IUX).await {
             sum_i0 += i32::from((raw & 0xFFFF) as i16);

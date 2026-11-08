@@ -1154,6 +1154,9 @@ pub(crate) async fn emit_status_frames<B>(
 ) where
     B: embedded_hal_async::spi::SpiDevice<u8>,
 {
+    const STATUS_PID_LIMIT_MASK: u32 = 0x0000_FFFF;
+    const STATUS_PWM_LIMIT_MASK: u32 = (1 << 24) | (1 << 25);
+    const STATUS_ADC_CLIP_MASK: u32 = (1 << 26) | (1 << 27);
     use core::sync::atomic::Ordering::Relaxed;
     use foci_firmware::trace::stream::{
         SOURCE_INDEX_NA, SOURCE_KIND_BOARD, SOURCE_KIND_FOCI, SOURCE_KIND_KLIPPER, SOURCE_KIND_USB,
@@ -1171,9 +1174,6 @@ pub(crate) async fn emit_status_frames<B>(
 
     let mut flags = 0u8;
     let status_flags = read_register_trace(tmc, STATUS_FLAGS, &mut flags).await;
-    const STATUS_PID_LIMIT_MASK: u32 = 0x0000_FFFF;
-    const STATUS_PWM_LIMIT_MASK: u32 = (1 << 24) | (1 << 25);
-    const STATUS_ADC_CLIP_MASK: u32 = (1 << 26) | (1 << 27);
     let clipping_flags =
         status_flags & (STATUS_PID_LIMIT_MASK | STATUS_PWM_LIMIT_MASK | STATUS_ADC_CLIP_MASK);
     let counters = TRACE_PRESSURE.status_counters(TracePressureStatusInputs {

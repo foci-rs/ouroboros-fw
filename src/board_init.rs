@@ -169,6 +169,14 @@ pub fn disable_debug_clock_during_sleep() {
 
 /// Configure verified Ouroboros STEP/DIR outputs at very high speed.
 pub fn init_stepdir_gpio() {
+    fn configure_output(gpio: embassy_stm32::pac::gpio::Gpio, pin: usize) {
+        gpio.moder()
+            .modify(|w| w.set_moder(pin, vals::Moder::OUTPUT));
+        gpio.otyper().modify(|w| w.set_ot(pin, vals::Ot::PUSH_PULL));
+        gpio.ospeedr()
+            .modify(|w| w.set_ospeedr(pin, vals::Ospeedr::VERY_HIGH_SPEED));
+        gpio.odr().modify(|w| w.set_odr(pin, vals::Odr::LOW));
+    }
     use embassy_stm32::pac::gpio::vals;
     let rcc = embassy_stm32::pac::RCC;
     rcc.ahb4enr().modify(|w| {
@@ -183,15 +191,6 @@ pub fn init_stepdir_gpio() {
     let gpio_c = embassy_stm32::pac::GPIOC;
     configure_output(gpio_c, 12);
     configure_output(gpio_c, 11);
-
-    fn configure_output(gpio: embassy_stm32::pac::gpio::Gpio, pin: usize) {
-        gpio.moder()
-            .modify(|w| w.set_moder(pin, vals::Moder::OUTPUT));
-        gpio.otyper().modify(|w| w.set_ot(pin, vals::Ot::PUSH_PULL));
-        gpio.ospeedr()
-            .modify(|w| w.set_ospeedr(pin, vals::Ospeedr::VERY_HIGH_SPEED));
-        gpio.odr().modify(|w| w.set_odr(pin, vals::Odr::LOW));
-    }
 }
 
 /// Configure the two TMC4671 STATUS lines and return the channel-0 input.
