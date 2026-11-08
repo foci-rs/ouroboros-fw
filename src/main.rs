@@ -739,16 +739,17 @@ mod app {
                         [i32::from(ch), status_flags.unwrap_or(0) as i32, 0, 0],
                         2,
                     );
-                    match status_flags {
-                        Ok(flags) => defmt::error!(
+                    if let Ok(flags) = status_flags {
+                        defmt::error!(
                             "TMC4671 channel {} emergency disable: STATUS={:#010x}",
                             ch,
                             flags
-                        ),
-                        Err(()) => defmt::error!(
+                        );
+                    } else {
+                        defmt::error!(
                             "TMC4671 channel {} emergency disable: STATUS read failed",
                             ch
-                        ),
+                        );
                     }
                 });
 
@@ -1504,38 +1505,35 @@ mod app {
         let tim5 = embassy_stm32::pac::TIM5;
         let now = tim5.cnt().read();
         let scheduled = stepper.next_step_clock();
-        match stepper.check_deadline(scheduled, now, CLOCK_FREQ) {
-            Ok(compare) => {
-                crate::state::stepper_diag::record_loaded_segment_timing(
-                    channel,
-                    loaded_steps,
-                    now,
-                    scheduled,
-                    compare,
-                );
-                let immediate = compare != scheduled;
-                if immediate {
-                    next_event_clocks[idx] = Some(now);
-                } else {
-                    next_event_clocks[idx] = Some(compare);
-                }
+        if let Ok(compare) = stepper.check_deadline(scheduled, now, CLOCK_FREQ) {
+            crate::state::stepper_diag::record_loaded_segment_timing(
+                channel,
+                loaded_steps,
+                now,
+                scheduled,
+                compare,
+            );
+            let immediate = compare != scheduled;
+            if immediate {
+                next_event_clocks[idx] = Some(now);
+            } else {
+                next_event_clocks[idx] = Some(compare);
             }
-            Err(foci_klipper::stepper::MissedDeadline) => {
-                crate::state::stepper_diag::record_loaded_segment(channel, loaded_steps);
-                crate::state::stepper_diag::record_missed_deadline(channel);
-                record_stepper_event(
-                    StepperEventReason::MissedDeadlineLoad,
-                    channel,
-                    now,
-                    UNKNOWN_QUEUE_LEN,
-                    scheduled,
-                    now,
-                );
-                crate::usb_trace::note_missed_or_deferred_step();
-                STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
-                fail_step_channel_deadline(channel, next_event_clocks);
-                return StepDispatchOutcome::Fatal;
-            }
+        } else {
+            crate::state::stepper_diag::record_loaded_segment(channel, loaded_steps);
+            crate::state::stepper_diag::record_missed_deadline(channel);
+            record_stepper_event(
+                StepperEventReason::MissedDeadlineLoad,
+                channel,
+                now,
+                UNKNOWN_QUEUE_LEN,
+                scheduled,
+                now,
+            );
+            crate::usb_trace::note_missed_or_deferred_step();
+            STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
+            fail_step_channel_deadline(channel, next_event_clocks);
+            return StepDispatchOutcome::Fatal;
         }
         StepDispatchOutcome::Continue
     }
@@ -1596,26 +1594,23 @@ mod app {
 
         match result {
             StepEventResult::ScheduleNext { clock, .. } => {
-                match stepper.check_deadline(clock, now, CLOCK_FREQ) {
-                    Ok(compare) => {
-                        let immediate = compare != clock;
-                        next_event_clocks[idx] = Some(if immediate { now } else { compare });
-                    }
-                    Err(foci_klipper::stepper::MissedDeadline) => {
-                        crate::state::stepper_diag::record_missed_deadline(channel);
-                        record_stepper_event(
-                            StepperEventReason::MissedDeadlineStep,
-                            channel,
-                            now,
-                            UNKNOWN_QUEUE_LEN,
-                            clock,
-                            now,
-                        );
-                        crate::usb_trace::note_missed_or_deferred_step();
-                        STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
-                        fail_step_channel_deadline(channel, next_event_clocks);
-                        return StepDispatchOutcome::Fatal;
-                    }
+                if let Ok(compare) = stepper.check_deadline(clock, now, CLOCK_FREQ) {
+                    let immediate = compare != clock;
+                    next_event_clocks[idx] = Some(if immediate { now } else { compare });
+                } else {
+                    crate::state::stepper_diag::record_missed_deadline(channel);
+                    record_stepper_event(
+                        StepperEventReason::MissedDeadlineStep,
+                        channel,
+                        now,
+                        UNKNOWN_QUEUE_LEN,
+                        clock,
+                        now,
+                    );
+                    crate::usb_trace::note_missed_or_deferred_step();
+                    STEPPER_DEADLINE_MISS_CHANNEL.store(channel, Relaxed);
+                    fail_step_channel_deadline(channel, next_event_clocks);
+                    return StepDispatchOutcome::Fatal;
                 }
             }
             StepEventResult::NeedMove { .. } => {

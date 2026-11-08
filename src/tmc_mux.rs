@@ -65,12 +65,11 @@ impl SpiDevice<u8> for SelectedTmcDevice<'_> {
                     Operation::Transfer(read, write) => self.bus.transfer(read, write).await,
                     Operation::TransferInPlace(buf) => self.bus.transfer_in_place(buf).await,
                     Operation::DelayNs(ns) => {
-                        match <TmcSpiBus as SpiBus<u8>>::flush(self.bus).await {
-                            Err(e) => Err(e),
-                            Ok(()) => {
-                                DelayNs::delay_ns(&mut self.delay, *ns).await;
-                                Ok(())
-                            }
+                        if let Err(e) = <TmcSpiBus as SpiBus<u8>>::flush(self.bus).await {
+                            Err(e)
+                        } else {
+                            DelayNs::delay_ns(&mut self.delay, *ns).await;
+                            Ok(())
                         }
                     }
                 };
@@ -109,12 +108,11 @@ impl BlockingSpiDevice<u8> for SelectedTmcDevice<'_> {
                         BlockingSpiBus::transfer_in_place(self.bus, buf)
                     }
                     BlockingOperation::DelayNs(ns) => {
-                        match <TmcSpiBus as BlockingSpiBus<u8>>::flush(self.bus) {
-                            Err(error) => Err(error),
-                            Ok(()) => {
-                                BlockingDelayNs::delay_ns(&mut self.delay, *ns);
-                                Ok(())
-                            }
+                        if let Err(error) = <TmcSpiBus as BlockingSpiBus<u8>>::flush(self.bus) {
+                            Err(error)
+                        } else {
+                            BlockingDelayNs::delay_ns(&mut self.delay, *ns);
+                            Ok(())
                         }
                     }
                 };

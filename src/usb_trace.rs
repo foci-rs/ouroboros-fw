@@ -804,13 +804,12 @@ async fn read_register_trace<B>(
 where
     B: embedded_hal_async::spi::SpiDevice<u8>,
 {
-    match tmc.read_register(register).await {
-        Ok(value) => value,
-        Err(_) => {
-            record_spi_error();
-            *sample_flags |= foci_firmware::trace::stream::SAMPLE_FLAG_SPI_ERROR;
-            0
-        }
+    if let Ok(value) = tmc.read_register(register).await {
+        value
+    } else {
+        record_spi_error();
+        *sample_flags |= foci_firmware::trace::stream::SAMPLE_FLAG_SPI_ERROR;
+        0
     }
 }
 
@@ -822,13 +821,12 @@ async fn read_sub_register_trace<B>(
 where
     B: embedded_hal_async::spi::SpiDevice<u8>,
 {
-    match tmc.read_sub_register(register).await {
-        Ok(value) => value,
-        Err(_) => {
-            record_spi_error();
-            *sample_flags |= foci_firmware::trace::stream::SAMPLE_FLAG_SPI_ERROR;
-            0
-        }
+    if let Ok(value) = tmc.read_sub_register(register).await {
+        value
+    } else {
+        record_spi_error();
+        *sample_flags |= foci_firmware::trace::stream::SAMPLE_FLAG_SPI_ERROR;
+        0
     }
 }
 
