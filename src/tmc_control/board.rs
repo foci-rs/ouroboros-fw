@@ -154,7 +154,10 @@ pub(crate) fn channel_needs_safe_state(channel: u8, driver: &ChannelDriver) -> b
     driver.runtime.is_motor_enabled()
         || driver.runtime.is_commission_active()
         || tmc_state(channel).motor_armed.load(Relaxed)
-        || tmc_state(channel).commission_in_flight.load(Relaxed)
+        || tmc_state(channel)
+            .commissioning
+            .commission_in_flight
+            .load(Relaxed)
 }
 
 /// Apply a fresh dual-channel maintenance decision to the scheduler.
@@ -196,7 +199,7 @@ fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelM
         driver_obligations_clear: driver.maintenance_obligations_clear(),
         enable_pin_asserted: tmc.enable_pin_asserted.load(Relaxed),
         motor_armed: tmc.motor_armed.load(Relaxed),
-        commission_in_flight: tmc.commission_in_flight.load(Relaxed),
+        commission_in_flight: tmc.commissioning.commission_in_flight.load(Relaxed),
         config_apply_pending: tmc.config_apply_pending.load(Relaxed),
         homing_clamp_active: tmc.homing.homing_clamp_active.load(Relaxed),
         stall_latched: tmc.homing.stall_latched.load(Relaxed),

@@ -139,11 +139,13 @@ mod app {
         let actions0 = drivers[0].runtime.prepare_shutdown_quiesce();
         apply_runtime_stepper_actions(0, actions0);
         tmc_state(0)
+            .commissioning
             .commission_in_flight
             .store(false, core::sync::atomic::Ordering::Relaxed);
         let actions1 = drivers[1].runtime.prepare_shutdown_quiesce();
         apply_runtime_stepper_actions(1, actions1);
         tmc_state(1)
+            .commissioning
             .commission_in_flight
             .store(false, core::sync::atomic::Ordering::Relaxed);
         lower_all_enable_pins(enable_pins);
@@ -564,7 +566,8 @@ mod app {
                 || levels[0]
                 || levels[1];
             per_channel!(|ch, idx| {
-                if !emergency_pending && tmc_state(ch).cancel_requested.load(Relaxed) {
+                if !emergency_pending && tmc_state(ch).commissioning.cancel_requested.load(Relaxed)
+                {
                     match device_or_invalid(mux, ch) {
                         ChannelDevice::Device(device) => {
                             let mut tmc = tmc_driver(device);
@@ -624,7 +627,10 @@ mod app {
                                     stepper_state(ch),
                                 )
                                 .await;
-                                tmc_state(ch).commission_in_flight.store(false, Relaxed);
+                                tmc_state(ch)
+                                    .commissioning
+                                    .commission_in_flight
+                                    .store(false, Relaxed);
                             }
                             ChannelDevice::Invalid => complete = false,
                         }
@@ -693,7 +699,10 @@ mod app {
                         tmc_state(ch),
                         stepper_state(ch),
                     );
-                    tmc_state(ch).commission_in_flight.store(false, Relaxed);
+                    tmc_state(ch)
+                        .commissioning
+                        .commission_in_flight
+                        .store(false, Relaxed);
                 });
                 defmt::info!("TMC request queue flushed after config_reset");
             }
@@ -794,7 +803,7 @@ mod app {
                         TMC_DISABLE_SIGNAL.signaled(),
                         FAULT_ACTIVE.load(Relaxed),
                         crate::tmc_control::containment::lease_expired(read_tim5()),
-                        tmc_state(ch).cancel_requested.load(Relaxed),
+                        tmc_state(ch).commissioning.cancel_requested.load(Relaxed),
                     );
                     if let Some(exit) = exit {
                         if !matches!(
@@ -907,6 +916,7 @@ mod app {
                             }
                             enable_pin(enable_pins, channel).set_low();
                             tmc_state(channel)
+                                .commissioning
                                 .commission_in_flight
                                 .store(false, Relaxed);
                         }
