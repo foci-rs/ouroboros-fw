@@ -712,7 +712,7 @@ fn control_state_sample(
     };
     foci_firmware::trace::control_state::ControlStateSample {
         header,
-        encoder_counts_per_rev: state.encoder_counts_per_rev().unwrap_or(0),
+        encoder_counts_per_rev: state.motion_scale.encoder_counts_per_rev().unwrap_or(0),
         pwm_hz: crate::board_config::TMC_CONFIG.pwm_freq_hz(),
         velocity_meter_selection: CLOSED_LOOP_VELOCITY_SELECTION,
         velocity_filter_hz: state.velocity_filter_hz.load_or_zero(Relaxed),

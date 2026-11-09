@@ -97,7 +97,8 @@ impl StepperQueueBoard for OuroborosStepperBoard {
         Ok(self
             .tmc_state
             .expect("validated Ouroboros channel has TMC state")
-            .motion_scale_configured())
+            .motion_scale
+            .configured())
     }
 
     fn prepare_and_enqueue(

@@ -77,7 +77,7 @@ pub fn foci_stepper_exec_stats(ctx: &mut FirmwareCtx<'_>, oid: u8) {
     let planner_steps_per_rev = stepper_state(snapshot.channel)
         .planner_steps_per_rev(tmc)
         .unwrap_or(0);
-    let encoder_ppr = tmc.encoder_ppr().unwrap_or(0);
+    let encoder_ppr = tmc.motion_scale.encoder_ppr().unwrap_or(0);
 
     ::ankyra::klipper_reply_from!(
         &mut crate::_ankyra_config::Sender,
