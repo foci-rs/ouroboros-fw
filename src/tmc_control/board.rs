@@ -153,7 +153,7 @@ pub(crate) fn enable_pin(enable_pins: &mut TmcEnablePins, channel: u8) -> &mut O
 pub(crate) fn channel_needs_safe_state(channel: u8, driver: &ChannelDriver) -> bool {
     driver.runtime.is_motor_enabled()
         || driver.runtime.is_commission_active()
-        || tmc_state(channel).motor_armed.load(Relaxed)
+        || tmc_state(channel).arming.motor_armed.load(Relaxed)
         || tmc_state(channel)
             .commissioning
             .commission_in_flight
@@ -197,8 +197,8 @@ fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelM
     ChannelMaintenanceSnapshot {
         mode: driver.mode(),
         driver_obligations_clear: driver.maintenance_obligations_clear(),
-        enable_pin_asserted: tmc.enable_pin_asserted.load(Relaxed),
-        motor_armed: tmc.motor_armed.load(Relaxed),
+        enable_pin_asserted: tmc.arming.enable_pin_asserted.load(Relaxed),
+        motor_armed: tmc.arming.motor_armed.load(Relaxed),
         commission_in_flight: tmc.commissioning.commission_in_flight.load(Relaxed),
         config_apply_pending: tmc.host_config.config_apply_pending.load(Relaxed),
         homing_clamp_active: tmc.homing.homing_clamp_active.load(Relaxed),

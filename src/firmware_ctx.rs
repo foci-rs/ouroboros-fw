@@ -125,6 +125,7 @@ impl StepperQueueBoard for OuroborosStepperBoard {
     fn motor_armed(&self, _channel: u8) -> bool {
         self.tmc_state.is_some_and(|state| {
             state
+                .arming
                 .motor_armed
                 .load(core::sync::atomic::Ordering::Relaxed)
         })
@@ -566,6 +567,7 @@ impl TmcHost for FirmwareCtx<'_> {
             return Err(foci_firmware::motion_scale::MotionScaleRejection::InvalidChannel);
         };
         if tmc_state
+            .arming
             .motor_armed
             .load(core::sync::atomic::Ordering::Relaxed)
         {

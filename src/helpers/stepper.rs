@@ -145,6 +145,7 @@ pub(crate) fn stepper_stop_from_p1(channel: u8) {
         return;
     };
     tmc_state
+        .arming
         .motor_armed
         .store(false, core::sync::atomic::Ordering::Relaxed);
     stop_physical_stepper_unmasked(channel as usize, StepperEventReason::P1Stop);

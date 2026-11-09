@@ -94,7 +94,10 @@ impl<'spi> TmcRequestBoard<TmcSpiDevice<'spi>> for OuroborosRequestBoard<'_> {
         mapper: foci_klipper::pulse_mapper::PulseMapperConfig,
     ) -> Result<(), MotionScaleMapperInstallError> {
         with_trigger_domain(|td| {
-            let motor_armed = tmc_state(self.channel).motor_armed.load(Ordering::Relaxed);
+            let motor_armed = tmc_state(self.channel)
+                .arming
+                .motor_armed
+                .load(Ordering::Relaxed);
             let queue_empty =
                 crate::state::stepper::STEP_QUEUE_CHANNELS[self.channel as usize].is_empty();
             let timer_active =

@@ -533,8 +533,14 @@ mod app {
             });
 
             let levels = status_levels(status_pin0);
-            tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
-            tmc_state(1).status_pin_asserted.store(levels[1], Relaxed);
+            tmc_state(0)
+                .arming
+                .status_pin_asserted
+                .store(levels[0], Relaxed);
+            tmc_state(1)
+                .arming
+                .status_pin_asserted
+                .store(levels[1], Relaxed);
 
             per_channel!(|ch, idx| {
                 if drivers[idx].runtime.restore_cancel_pending() {
@@ -763,8 +769,14 @@ mod app {
                 });
 
                 let levels = status_levels(status_pin0);
-                tmc_state(0).status_pin_asserted.store(levels[0], Relaxed);
-                tmc_state(1).status_pin_asserted.store(levels[1], Relaxed);
+                tmc_state(0)
+                    .arming
+                    .status_pin_asserted
+                    .store(levels[0], Relaxed);
+                tmc_state(1)
+                    .arming
+                    .status_pin_asserted
+                    .store(levels[1], Relaxed);
                 let fault_still_reported = levels[0] || levels[1] || TMC_DISABLE_SIGNAL.signaled();
                 if fault_still_reported {
                     defmt::error!("TMC4671 fault still reported after containment; latch kept");
@@ -1342,6 +1354,7 @@ mod app {
     ) {
         if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
             tmc_state
+                .arming
                 .motor_armed
                 .store(false, core::sync::atomic::Ordering::Relaxed);
         }
@@ -1368,7 +1381,7 @@ mod app {
         for idx in 0..crate::state::stepper::STEPPER_CHANNEL_COUNT {
             let channel = idx as u8;
             if let Some(tmc_state) = foci_firmware::state::tmc::tmc_channel(channel) {
-                tmc_state.motor_armed.store(false, Relaxed);
+                tmc_state.arming.motor_armed.store(false, Relaxed);
             }
             clear_step_channel(channel, next_event_clocks);
             // SAFETY: ISR stepper state is only accessed from the P3 TIM5 ISR.
@@ -1390,7 +1403,8 @@ mod app {
         let Some(stepper_state) = foci_firmware::state::stepper::stepper_channel(channel) else {
             return false;
         };
-        tmc_state.motor_armed.load(Relaxed) && stepper_state.timer_active_mirror.load(Relaxed)
+        tmc_state.arming.motor_armed.load(Relaxed)
+            && stepper_state.timer_active_mirror.load(Relaxed)
     }
 
     #[inline(always)]
@@ -1711,6 +1725,7 @@ mod app {
         fn motor_armed(&self, channel: u8) -> bool {
             foci_firmware::state::tmc::tmc_channel(channel).is_some_and(|state| {
                 state
+                    .arming
                     .motor_armed
                     .load(core::sync::atomic::Ordering::Relaxed)
             })
