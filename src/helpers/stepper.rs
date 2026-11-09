@@ -66,7 +66,7 @@ pub(crate) fn clear_tim5_compare_flag(compare_index: usize) {
 
 #[inline]
 fn timer_is_before(a: u32, b: u32) -> bool {
-    (a as i32).wrapping_sub(b as i32) < 0
+    a.cast_signed().wrapping_sub(b.cast_signed()) < 0
 }
 
 #[inline]

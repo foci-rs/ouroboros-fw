@@ -751,7 +751,7 @@ mod app {
                         foci_firmware::trace::events::EVENT_LEVEL_ERROR,
                         foci_firmware::trace::events::SUBSYSTEM_SAFETY_SHUTDOWN,
                         crate::usb_trace::EVENT_STATUS_INTERRUPT,
-                        [i32::from(ch), status_flags.unwrap_or(0) as i32, 0, 0],
+                        [i32::from(ch), status_flags.unwrap_or(0).cast_signed(), 0, 0],
                         2,
                     );
                     if let Ok(flags) = status_flags {
@@ -1312,7 +1312,7 @@ mod app {
     }
     #[inline]
     fn step_clock_is_due(clock: u32, now: u32) -> bool {
-        (clock as i32).wrapping_sub(now as i32) <= 0
+        clock.cast_signed().wrapping_sub(now.cast_signed()) <= 0
     }
 
     fn program_next_step_compare(
