@@ -156,7 +156,11 @@ pub(crate) async fn tmc_enter_openloop(
 
     let current_limit = PidTorqueFluxLimit::new(OPENLOOP_CURRENT_LIMIT)
         .expect("dev current limit must fit the TMC4671 register domain");
-    write(tmc, PID_TORQUE_FLUX_LIMITS, current_limit.register_value()).await?;
+    tmc.write_torque_flux_limit(current_limit)
+        .await
+        .map_err(|_| DevWriteError {
+            addr: PID_TORQUE_FLUX_LIMITS.addr(),
+        })?;
 
     write(tmc, PHI_E_SELECTION, PHI_E_SELECTION_EXTERNAL).await?;
     write(tmc, PHI_E_EXT, 0).await?;
