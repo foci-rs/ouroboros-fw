@@ -1096,8 +1096,11 @@ mod app {
                         foci_firmware::tmc_control::HomingMaintenanceResult::FailClosed => {
                             group_all_ready = false;
                             group_retry = true;
-                            tmc_state(ch).homing_clamp_active.store(false, Relaxed);
-                            tmc_state(ch).stall_latched.store(false, Relaxed);
+                            tmc_state(ch)
+                                .homing
+                                .homing_clamp_active
+                                .store(false, Relaxed);
+                            tmc_state(ch).homing.stall_latched.store(false, Relaxed);
                             drivers[idx].runtime.clear_homing_runtime();
                             TMC_DISABLE_SIGNAL.signal(());
                             if HomingWakePolicy::<TmcRequest>::should_clear_latch(
@@ -1771,7 +1774,9 @@ mod app {
                                     _ => None,
                                 };
                                 match stall_channel {
-                                    Some(channel) => tmc_state(channel).stall_latched.load(Relaxed),
+                                    Some(channel) => {
+                                        tmc_state(channel).homing.stall_latched.load(Relaxed)
+                                    }
                                     None if pin_id != 0xFF => gpio_read_pin(pin_id),
                                     None => false,
                                 }
