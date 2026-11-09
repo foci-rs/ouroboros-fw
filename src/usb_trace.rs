@@ -896,7 +896,7 @@ async fn emit_control_detail<B>(
         )
         .await,
         pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
-        pid_torque_flux_limits: refs.tmc.load_current_limit(Relaxed).register_value(),
+        pid_torque_flux_limits: refs.tmc.limits.load_current_limit(Relaxed).register_value(),
         pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
     };
     let mut payload = [0u8; CONTROL_DETAIL_PAYLOAD_LEN];
