@@ -140,7 +140,7 @@ pub fn analog_sampling_tick(
         let synthesized = foci_firmware::mcu_temp::synthesize_mcu_temp_reading(
             mcu_temp_calibration,
             raw_internal,
-            crate::ankyra::constants::ADC_MAX as f32,
+            foci_firmware::lossy_float!(crate::ankyra::constants::ADC_MAX, f32),
             MCU_TEMP_SAMPLE_COUNT,
         );
         shutdown_requested |= emit_analog_sample(channel, synthesized, now);
