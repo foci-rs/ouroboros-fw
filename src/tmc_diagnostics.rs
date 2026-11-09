@@ -298,7 +298,10 @@ pub(crate) async fn run_diagnostic_request(
 ) {
     let homing_active = HOMING_STATE.load(Relaxed) != 0;
     let stepper_active = stepper_state(channel).timer_active_mirror.load(Relaxed);
-    let saved_voltage_limit = tmc_state(channel).voltage_limit_cfg.load(Relaxed);
+    let saved_voltage_limit = tmc_state(channel)
+        .host_config
+        .voltage_limit_cfg
+        .load(Relaxed);
     let mut delay = MonoDiagnosticDelay;
     let mut power_stage = OuroborosDiagnosticPowerStage {
         channel,

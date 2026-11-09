@@ -741,8 +741,9 @@ fn control_state_sample(
             .feedforward
             .accel_feedforward_decel_gain_permille
             .load(Relaxed),
-        run_current: state.run_current_ma_cfg.load(Relaxed),
+        run_current: state.host_config.run_current_ma_cfg.load(Relaxed),
         voltage_limit: state
+            .host_config
             .voltage_limit_cfg
             .load(Relaxed)
             .min(u32::from(u16::MAX)) as u16,
@@ -904,9 +905,9 @@ async fn emit_control_detail<B>(
             &mut detail_flags,
         )
         .await,
-        pidout_uq_ud_limits: refs.tmc.voltage_limit_cfg.load(Relaxed),
+        pidout_uq_ud_limits: refs.tmc.host_config.voltage_limit_cfg.load(Relaxed),
         pid_torque_flux_limits: refs.tmc.limits.load_current_limit(Relaxed).register_value(),
-        pid_velocity_limit: refs.tmc.velocity_limit_cfg.load(Relaxed),
+        pid_velocity_limit: refs.tmc.host_config.velocity_limit_cfg.load(Relaxed),
     };
     let mut payload = [0u8; CONTROL_DETAIL_PAYLOAD_LEN];
     encode_control_detail_payload(&detail, &mut payload);
