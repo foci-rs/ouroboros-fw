@@ -365,7 +365,7 @@ enum QueueAccess {
 fn stop_physical_stepper_inner(
     stepper_idx: usize,
     reason: StepperEventReason,
-    access: QueueAccess,
+    access: &QueueAccess,
 ) {
     use core::sync::atomic::Ordering::Relaxed;
     if !PHYSICAL_STEPPER_INDICES.contains(&stepper_idx) {
@@ -501,7 +501,7 @@ fn stop_physical_stepper_inner(
 /// enforced by this being this function's single call site, verified by
 /// workspace reference search as part of code review).
 pub(crate) fn stop_physical_stepper_unmasked(stepper_idx: usize, reason: StepperEventReason) {
-    stop_physical_stepper_inner(stepper_idx, reason, QueueAccess::Unmasked);
+    stop_physical_stepper_inner(stepper_idx, reason, &QueueAccess::Unmasked);
 }
 
 /// Stop a physical stepper from inside an active `with_trigger_domain`
@@ -516,5 +516,5 @@ pub(crate) fn stop_physical_stepper_unmasked(stepper_idx: usize, reason: Stepper
 /// call sites, verified by workspace reference search as part of code
 /// review).
 pub(crate) fn stop_physical_stepper_masked(stepper_idx: usize, reason: StepperEventReason) {
-    stop_physical_stepper_inner(stepper_idx, reason, QueueAccess::LockedInPlace);
+    stop_physical_stepper_inner(stepper_idx, reason, &QueueAccess::LockedInPlace);
 }

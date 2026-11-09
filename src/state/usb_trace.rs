@@ -43,8 +43,11 @@ pub(crate) struct QueuedFrame {
 
 impl QueuedFrame {
     /// Create a queued frame with no bytes sent yet.
-    pub(crate) const fn new(frame: FrameBuf) -> Self {
-        Self { frame, offset: 0 }
+    pub(crate) const fn new(frame: &FrameBuf) -> Self {
+        Self {
+            frame: *frame,
+            offset: 0,
+        }
     }
 }
 

@@ -74,5 +74,3 @@ struct_excessive_bools = "allow"
 # Debt: lints that still fire; drop an entry once its findings are fixed.
 cast_possible_wrap = "allow"
 cast_precision_loss = "allow"
-large_types_passed_by_value = "allow"
-needless_pass_by_value = "allow"

@@ -84,7 +84,7 @@ where
     let mut disposition = TmcPreRequestDisposition::ContinueRequest;
 
     for action in actions {
-        if let Some(next) = apply_action(channel, action, &mut enter_shutdown) {
+        if let Some(next) = apply_action(channel, &action, &mut enter_shutdown) {
             disposition = next;
         }
     }
@@ -94,13 +94,13 @@ where
 
 fn apply_action<F>(
     channel: u8,
-    action: BoardAction,
+    action: &BoardAction,
     enter_shutdown: &mut F,
 ) -> Option<TmcPreRequestDisposition>
 where
     F: FnMut(ShutdownReason),
 {
-    match action {
+    match *action {
         BoardAction::Shutdown(reason) => {
             enter_shutdown(reason);
             Some(TmcPreRequestDisposition::RequestHandled)

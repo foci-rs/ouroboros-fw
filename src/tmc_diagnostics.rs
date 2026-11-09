@@ -60,10 +60,10 @@ pub(crate) fn emit_commission_busy_diagnostic(request: TmcRequest) {
         &crate::board_config::TMC_CONFIG,
     ) {
         DiagnosticOutcome::Handled(report) => {
-            foci_firmware::tmc_diagnostics::emit_diagnostic_report(
+            foci_firmware::tmc_diagnostics::emit_diagnostic_report_ref(
                 &mut BoardDiagnosticReplySink,
                 channel,
-                report,
+                &report,
             );
         }
         DiagnosticOutcome::NotDiagnostic(_) => {
@@ -333,7 +333,7 @@ pub(crate) async fn run_diagnostic_request(
     match outcome {
         DiagnosticOutcome::Handled(report) => {
             let mut sink = BoardDiagnosticReplySink;
-            foci_firmware::tmc_diagnostics::emit_diagnostic_report(&mut sink, channel, report);
+            foci_firmware::tmc_diagnostics::emit_diagnostic_report_ref(&mut sink, channel, &report);
         }
         DiagnosticOutcome::NotDiagnostic(_req) => {
             defmt::error!("diagnostic dispatcher returned non-diagnostic request");

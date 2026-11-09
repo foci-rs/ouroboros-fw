@@ -476,11 +476,11 @@ fn motion_flags() -> u8 {
     }
 }
 
-fn enqueue_frame(frame: FrameBuf) {
+fn enqueue_frame(frame: &FrameBuf) {
     enqueue_motion(frame);
 }
 
-fn enqueue_motion(frame: FrameBuf) {
+fn enqueue_motion(frame: &FrameBuf) {
     // SAFETY: TMC control is the sole motion-frame producer. The USB task owns
     // the separately split consumer endpoint.
     unsafe {
@@ -499,7 +499,7 @@ fn enqueue_motion(frame: FrameBuf) {
     }
 }
 
-fn enqueue_event(frame: FrameBuf) {
+fn enqueue_event(frame: &FrameBuf) {
     // SAFETY: Pending events are converted, enqueued, and consumed only by the
     // priority-2 USB task.
     unsafe {
@@ -597,7 +597,7 @@ fn enqueue_event_frame(event: PendingEvent) {
         ),
         sample,
     );
-    enqueue_event(frame);
+    enqueue_event(&frame);
 }
 
 fn motion_queue_len() -> usize {
@@ -648,7 +648,7 @@ pub(crate) fn emit_metadata() {
     let Ok(sources) = transport::canonical_sources(crate::board_config::TMC_CHANNEL_COUNT) else {
         return;
     };
-    let Ok(payload) = transport::build_metadata_payload(transport::TraceMetadataInputs {
+    let Ok(payload) = transport::build_metadata_payload_ref(&transport::TraceMetadataInputs {
         skipped_sample_counter_count: 3,
         clock_freq: crate::ankyra::constants::CLOCK_FREQ,
         critical_hz: trace_mode().critical_hz(),
@@ -682,7 +682,7 @@ pub(crate) fn emit_metadata() {
         trace_now_ticks(),
     ));
     frame.payload_mut(payload.len()).copy_from_slice(&payload);
-    enqueue_motion(frame);
+    enqueue_motion(&frame);
     for channel in 0..crate::board_config::TMC_CHANNEL_COUNT {
         crate::tmc_control::board::tmc_state(channel)
             .control_state
@@ -779,7 +779,7 @@ fn try_enqueue_control_state(
     frame
         .payload_mut(CONTROL_STATE_PAYLOAD_LEN)
         .copy_from_slice(&payload);
-    enqueue_motion(frame);
+    enqueue_motion(&frame);
     Ok(())
 }
 
@@ -922,7 +922,7 @@ async fn emit_control_detail<B>(
     frame
         .payload_mut(CONTROL_DETAIL_PAYLOAD_LEN)
         .copy_from_slice(&payload);
-    enqueue_frame(frame);
+    enqueue_frame(&frame);
 }
 
 /// Sample one channel's TMC state for the trace stream.
@@ -1031,7 +1031,7 @@ where
     frame
         .payload_mut(CRITICAL_PAYLOAD_LEN)
         .copy_from_slice(&payload);
-    enqueue_frame(frame);
+    enqueue_frame(&frame);
 
     if current_path_due(
         mode.current_path(),
@@ -1065,7 +1065,7 @@ where
         frame
             .payload_mut(CURRENT_PATH_PAYLOAD_LEN)
             .copy_from_slice(&payload);
-        enqueue_frame(frame);
+        enqueue_frame(&frame);
     }
 
     emit_control_detail(tmc, channel, refs, inputs.control_tick).await;
@@ -1141,7 +1141,7 @@ fn emit_one_status(
         ),
         sample,
     );
-    enqueue_frame(frame);
+    enqueue_frame(&frame);
     unsafe {
         let ptr = core::ptr::addr_of_mut!(crate::state::usb_trace::LAST_STATUS)
             .cast::<transport::StatusSnapshot>();

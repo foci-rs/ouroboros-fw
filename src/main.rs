@@ -1028,8 +1028,8 @@ mod app {
                 } else {
                     HomingPreparationProgress::Deferred
                 };
-                foci_firmware::tmc_control::TmcControlRuntime::advance_homing_state_after_channels(
-                    foci_firmware::tmc_control::TmcControlHomingRefs::new(
+                foci_firmware::tmc_control::TmcControlRuntime::advance_homing_state_after_channels_ref(
+                    &foci_firmware::tmc_control::TmcControlHomingRefs::new(
                         &HOMING_STATE,
                         &HOMING_TRIGGERED,
                         &HOMING_REENTER_PENDING,
