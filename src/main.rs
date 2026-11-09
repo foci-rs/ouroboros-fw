@@ -1512,7 +1512,7 @@ mod app {
             .interval
             .store(stepper.current_interval(), Relaxed);
         if dir_changed {
-            tmc_state.feedforward_reset.store(true, Relaxed);
+            tmc_state.feedforward.feedforward_reset.store(true, Relaxed);
         }
 
         let tim5 = embassy_stm32::pac::TIM5;

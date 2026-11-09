@@ -192,7 +192,7 @@ fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelM
     let step_timer_active = stepper.timer_active_mirror.load(Relaxed);
     let step_queue_empty = STEP_QUEUE_CHANNELS[channel as usize].is_empty();
     compiler_fence(Acquire);
-    let feedforward_reset = tmc.feedforward_reset.load(Relaxed);
+    let feedforward_reset = tmc.feedforward.feedforward_reset.load(Relaxed);
     let pid_error_sums_clear = tmc.pid_error_sums_clear.load(Relaxed);
     ChannelMaintenanceSnapshot {
         mode: driver.mode(),

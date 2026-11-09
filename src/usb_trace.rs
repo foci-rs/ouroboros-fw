@@ -727,11 +727,20 @@ fn control_state_sample(
         torque_i: inner_raw(|g| g.torque_i.raw()),
         flux_p: inner_raw(|g| g.flux_p.raw()),
         flux_i: inner_raw(|g| g.flux_i.raw()),
-        velocity_ff_enable: u8::from(state.velocity_feedforward.load(Relaxed)),
-        velocity_ff_permille: state.velocity_feedforward_gain_permille.load(Relaxed),
-        accel_ff_enable: u8::from(state.accel_feedforward.load(Relaxed)),
-        accel_ff_gain: state.accel_feedforward_accel_gain_permille.load(Relaxed),
-        decel_ff_gain: state.accel_feedforward_decel_gain_permille.load(Relaxed),
+        velocity_ff_enable: u8::from(state.feedforward.velocity_feedforward.load(Relaxed)),
+        velocity_ff_permille: state
+            .feedforward
+            .velocity_feedforward_gain_permille
+            .load(Relaxed),
+        accel_ff_enable: u8::from(state.feedforward.accel_feedforward.load(Relaxed)),
+        accel_ff_gain: state
+            .feedforward
+            .accel_feedforward_accel_gain_permille
+            .load(Relaxed),
+        decel_ff_gain: state
+            .feedforward
+            .accel_feedforward_decel_gain_permille
+            .load(Relaxed),
         run_current: state.run_current_ma_cfg.load(Relaxed),
         voltage_limit: state
             .voltage_limit_cfg
