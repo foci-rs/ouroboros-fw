@@ -703,7 +703,7 @@ fn control_state_sample(
 ) -> foci_firmware::trace::control_state::ControlStateSample {
     use core::sync::atomic::Ordering::Relaxed;
 
-    let outer = state.load_outer_gains(Relaxed).ok();
+    let outer = state.host_config.load_outer_gains(Relaxed).ok();
     let outer_raw = |gain: fn(&foci_firmware::pid::OuterLoopGains) -> u16| {
         outer.as_ref().map_or(0, |g| i32::from(gain(g)))
     };
