@@ -200,7 +200,7 @@ fn maintenance_channel_snapshot(channel: u8, driver: &ChannelDriver) -> ChannelM
         enable_pin_asserted: tmc.arming.enable_pin_asserted.load(Relaxed),
         motor_armed: tmc.arming.motor_armed.load(Relaxed),
         commission_in_flight: tmc.commissioning.commission_in_flight.load(Relaxed),
-        config_apply_pending: tmc.host_config.config_apply_pending.load(Relaxed),
+        config_apply_pending: tmc.host_config.pending_bits(),
         homing_clamp_active: tmc.homing.homing_clamp_active.load(Relaxed),
         stall_latched: tmc.homing.stall_latched.load(Relaxed),
         step_timer_active,
