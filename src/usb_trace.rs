@@ -808,7 +808,7 @@ pub(crate) fn emit_control_state_frame(
 
 async fn read_register_trace<B>(
     tmc: &mut foci_tmc4671::spi::Tmc4671Spi<B>,
-    register: foci_tmc4671::registers::Register,
+    register: impl foci_tmc4671::registers::ReadableRegister,
     sample_flags: &mut u8,
 ) -> u32
 where
