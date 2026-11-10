@@ -65,7 +65,7 @@ pub(crate) fn commission_wait_request_disposition(
 }
 
 /// Emit a shared busy-only response without granting hardware capabilities.
-pub(crate) fn handle_commission_wait_reject(req: TmcRequest) -> TmcControlRequestOutcome {
+pub(crate) fn handle_commission_wait_reject(req: &TmcRequest) -> TmcControlRequestOutcome {
     foci_firmware::tmc_control::request::handle_commission_wait_reject(
         req,
         &mut OuroborosBusyReplySink,

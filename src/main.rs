@@ -990,7 +990,7 @@ mod app {
                     }
                     CommissionWaitRequestDisposition::RejectBusy => {
                         let outcome =
-                            crate::tmc_control::effects::handle_commission_wait_reject(req);
+                            crate::tmc_control::effects::handle_commission_wait_reject(&req);
                         if let Some(reason) = outcome.shutdown {
                             ctx.shared.app_state.lock(|state| {
                                 if crate::firmware_ctx::enter_shutdown(state) {
